@@ -34,11 +34,11 @@ An open-source software framework designed for the research and implementation o
 
 <p style="font-size: 1.05em; color: #7f8c8d; margin: 20px 0;">
 <b>Are you a developer?</b> Suggest improvements to the project!<br>
-<b>Telegram:</b> <a href="https://t.me/ne_sravnim" style="text-decoration: none; color: #0088cc;">@ne_sravnim</a> &nbsp;|&nbsp;
+<b>Telegram:</b> <a href="https://t.me/ne_sravnim" style="text-decoration: none; color: #0088cc;">@ne_sravnim</a> &nbsp;|&nbsp;Write thanks for the project!
 </p>
 
 <p style="font-size: 1.05em; color: #7f8c8d; margin: 15px 0;">
-💙 <b>Want to support this research?</b> Feel free to reach out via Telegram!
+🖤 <b>Want to support this research?</b> Feel free to reach out via Telegram!
 </p>
 
 <p style="font-size: 1.1em;">
@@ -55,6 +55,29 @@ An open-source software framework designed for the research and implementation o
     <b>中文本地化</b>
   </a>
 </p>
+<br>
+<img width="1896" height="779" alt="image" src="https://github.com/user-attachments/assets/4abf2106-e613-4dec-b024-d47fa43eea2a" />
+<p><code> The whole system. In one core. Precision in each layer. 
+ Visualization of players and the world, guidance, two radars and hardware input – in a single modular KevqDMA system.
+ Is free. Open source code </code></p>
+
+<img width="1896" height="821" alt="image" src="https://github.com/user-attachments/assets/1af65462-fdb1-4a94-9621-fa36ab61a921" />
+<img width="1890" height="895" alt="image" src="https://github.com/user-attachments/assets/f87ef012-1415-4f54-981a-be4a9be730f0" />
+<p><code> High performance, OOP structure and precision
+ Each module is responsible for its own task. Assemble the appropriate configuration: 
+ from the minimum visual layer to the radar on a separate screen.</code></p>
+
+<img width="1895" height="902" alt="image" src="https://github.com/user-attachments/assets/3cb596a5-0b32-4bc3-9aad-304cc4cdc613" />
+<p><code> See how it works on the <a href="https://cs2-dma.github.io/CS2-DMA/?lang=en" target="_blank"> WebSite </code></p>
+
+<img width="1893" height="897" alt="image" src="https://github.com/user-attachments/assets/330a6503-dc98-4ea3-8567-da03c4e938b5" />
+<p><code> </code></p>
+
+<img width="1571" height="690" alt="image" src="https://github.com/user-attachments/assets/8d828043-b92b-46cb-af29-02cba1481eb6" />
+<p><code> </code></p>
+
+<img width="1890" height="744" alt="image" src="https://github.com/user-attachments/assets/fca52aae-bec1-47b6-b42d-5d5fd0ed2e01" />
+<p><code> </code></p>
 
 <h2>WebRadar</h2>
 <img width="1920" height="1080" alt="WebRadar" src="https://github.com/user-attachments/assets/13d3c864-22f5-4745-99db-338cb28c5ecc" style="border-radius: 8px;" />
@@ -150,22 +173,5 @@ The card is configured with <b>No-Show M2 SSD Disk (Stealth Firmware)</b>, which
 
 <code> The setup also uses several runtime DLL components; updates and documentation can be reviewed through the official project pages: <a href="https://ftdichip.com/drivers/d3xx-drivers/" target="_blank">FTD3XX.dll</a>, <a href="https://github.com/ufrisk/MemProcFS" target="_blank">vmm.dll </a>, and <a href="https://github.com/ufrisk/LeechCore" target="_blank">leechcore.dll</a></code>
 </p>
-
 <br>
-
-
 </div>
-
-
-<img width="1882" height="862" alt="image" src="https://github.com/user-attachments/assets/7ed90903-db36-46d1-aba8-e13fd371970b" />
-
-<img width="1879" height="859" alt="image" src="https://github.com/user-attachments/assets/40b7c034-e93e-4389-b652-81f989ab74c8" />
-
-<img width="1880" height="862" alt="image" src="https://github.com/user-attachments/assets/d47f928f-4e95-4226-9ca5-11e62ce526b7" />
-
-<img width="1868" height="845" alt="image" src="https://github.com/user-attachments/assets/e831efbe-9b00-4931-ad55-5440a9bf3d86" />
-
-<img width="1876" height="836" alt="image" src="https://github.com/user-attachments/assets/a32f3faf-5890-4c85-aae2-01239950d130" />
-
-<img width="1876" height="847" alt="image" src="https://github.com/user-attachments/assets/14eb2ef0-124f-4d30-bb10-a823b0ead2cb" />
-
