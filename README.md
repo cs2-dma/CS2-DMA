@@ -8,7 +8,8 @@ An open-source software framework designed for the research and implementation o
 <p style="color: #ff6b6b; font-weight: 600; font-size: 0.95em; margin: 10px 0;">
 { ! } This project is for educational and research purposes only <br>
 { ! } This is an external method and requires a 
-<a href="https://github.com/ufrisk/pcileech-fpga" target="_blank">DMA Card</a> to work.
+<a href="https://github.com/ufrisk/pcileech-fpga" target="_blank">DMA Card</a> to work. <br>
+{ ! } WebSite: https://cs2-dma.github.io/CS2-DMA
 </p>
 
 <p>
@@ -62,7 +63,7 @@ An open-source software framework designed for the research and implementation o
  in a single modular KevqDMA system. Is free. Open source code. </code></p>
 
 <img width="1896" height="821" alt="image" src="https://github.com/user-attachments/assets/1af65462-fdb1-4a94-9621-fa36ab61a921" />
-<img width="1890" height="895" alt="image" src="https://github.com/user-attachments/assets/f87ef012-1415-4f54-981a-be4a9be730f0" />
+<img width="1884" height="594" alt="image" src="https://github.com/user-attachments/assets/21664d36-293f-4a2c-b273-50826250e672" />
 <p><code> High performance, OOP structure and precision 
  Each module is responsible for its own task. Assemble the appropriate configuration: 
  from the minimum visual layer to the radar on a separate screen. </code></p>
@@ -82,7 +83,6 @@ An open-source software framework designed for the research and implementation o
 
 <img width="1890" height="744" alt="image" src="https://github.com/user-attachments/assets/fca52aae-bec1-47b6-b42d-5d5fd0ed2e01" />
 <p><code> Quick start 
- Initialize KevqDMA 
  Prepare the hardware and launch on the secondary PC. </code></p>
 
 <h2>WebRadar</h2>
