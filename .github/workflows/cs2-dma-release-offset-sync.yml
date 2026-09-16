@@ -1,0 +1,610 @@
+name: CS2-DMA Release Offset Sync
+
+on:
+  workflow_dispatch:
+    inputs:
+      force:
+        description: "Force update x64/Release/output"
+        required: false
+        type: boolean
+        default: false
+
+  schedule:
+    - cron: "17,47 * * * *"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: cs2-dma-release-offset-sync
+  cancel-in-progress: true
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    env:
+      UPSTREAM_OWNER: a2x
+      UPSTREAM_REPO: cs2-dumper
+
+      TARGET_DIR: x64/Release/output
+      LOCAL_INFO: x64/Release/output/info.json
+
+      DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+
+    steps:
+      - name: Checkout CS2-DMA repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          fetch-depth: 1
+          persist-credentials: true
+
+      - name: Resolve newest cs2-dumper output
+        id: resolve
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          FORCE: ${{ github.event_name == 'workflow_dispatch' && inputs.force || false }}
+        run: |
+          set -euo pipefail
+
+          python3 <<'PY'
+          import json
+          import os
+          import urllib.error
+          import urllib.parse
+          import urllib.request
+
+          from datetime import datetime, timezone, timedelta
+          from pathlib import Path
+
+
+          upstream_owner = os.environ["UPSTREAM_OWNER"]
+          upstream_repo = os.environ["UPSTREAM_REPO"]
+
+          target_dir = Path(os.environ["TARGET_DIR"])
+          local_info = Path(os.environ["LOCAL_INFO"])
+          github_output = Path(os.environ["GITHUB_OUTPUT"])
+
+          token = os.environ.get("GH_TOKEN", "")
+          force = os.environ.get("FORCE", "false").lower() == "true"
+
+          main_repo = f"{upstream_owner}/{upstream_repo}"
+
+          # Only PRs from users GitHub considers trusted for the upstream
+          # repository are allowed to become an automatic source.
+          TRUSTED_ASSOCIATIONS = {
+              "OWNER",
+              "MEMBER",
+              "COLLABORATOR",
+          }
+
+          # Protect against a PR using something like year 2099 to permanently
+          # win timestamp comparison.
+          MAX_FUTURE_SKEW = timedelta(hours=6)
+
+
+          def api_get_json(url):
+              headers = {
+                  "Accept": "application/vnd.github+json",
+                  "X-GitHub-Api-Version": "2022-11-28",
+                  "User-Agent": "CS2-DMA-Release-Offset-Sync",
+              }
+
+              if token:
+                  headers["Authorization"] = f"Bearer {token}"
+
+              request = urllib.request.Request(
+                  url,
+                  headers=headers,
+              )
+
+              with urllib.request.urlopen(request, timeout=20) as response:
+                  return json.loads(response.read().decode("utf-8"))
+
+
+          def raw_url(repo_full_name, ref, path):
+              repo_full_name = repo_full_name.strip("/")
+              encoded_ref = urllib.parse.quote(ref, safe="")
+              encoded_path = urllib.parse.quote(path, safe="/")
+
+              return (
+                  f"https://raw.githubusercontent.com/"
+                  f"{repo_full_name}/{encoded_ref}/{encoded_path}"
+              )
+
+
+          def fetch_raw(repo_full_name, ref, path, max_bytes=2 * 1024 * 1024):
+              url = raw_url(repo_full_name, ref, path)
+
+              request = urllib.request.Request(
+                  url,
+                  headers={
+                      "User-Agent": "CS2-DMA-Release-Offset-Sync",
+                  },
+              )
+
+              try:
+                  with urllib.request.urlopen(request, timeout=20) as response:
+                      data = response.read(max_bytes + 1)
+
+                      if len(data) > max_bytes:
+                          raise RuntimeError(
+                              f"{path} from {repo_full_name}@{ref} "
+                              f"exceeds {max_bytes} bytes"
+                          )
+
+                      return data
+
+              except urllib.error.HTTPError as error:
+                  if error.code == 404:
+                      return None
+
+                  raise
+
+
+          def fetch_info(repo_full_name, ref):
+              data = fetch_raw(
+                  repo_full_name,
+                  ref,
+                  "output/info.json",
+                  max_bytes=1024 * 1024,
+              )
+
+              if not data:
+                  return None
+
+              try:
+                  parsed = json.loads(data.decode("utf-8"))
+
+                  if not isinstance(parsed, dict):
+                      return None
+
+                  return parsed
+
+              except (UnicodeDecodeError, json.JSONDecodeError):
+                  return None
+
+
+          def parse_timestamp(value):
+              if not isinstance(value, str) or not value.strip():
+                  return None
+
+              try:
+                  normalized = value.strip().replace("Z", "+00:00")
+                  dt = datetime.fromisoformat(normalized)
+
+                  if dt.tzinfo is None:
+                      dt = dt.replace(tzinfo=timezone.utc)
+
+                  return dt.astimezone(timezone.utc)
+
+              except (TypeError, ValueError):
+                  return None
+
+
+          def is_newer(left, right):
+              left_dt = parse_timestamp(left)
+              right_dt = parse_timestamp(right)
+
+              if left_dt is None:
+                  return False
+
+              if right_dt is None:
+                  return True
+
+              return left_dt > right_dt
+
+
+          def format_update_time(timestamp):
+              dt = parse_timestamp(timestamp)
+
+              if dt is None:
+                  dt = datetime.now(timezone.utc)
+
+              return dt.strftime("%d.%m.%Y %H:%M")
+
+
+          def write_output(name, value):
+              value = "" if value is None else str(value)
+
+              with github_output.open("a", encoding="utf-8") as file:
+                  file.write(f"{name}={value}\n")
+
+
+          # ------------------------------------------------------------
+          # Local version
+          # ------------------------------------------------------------
+
+          local_ts = ""
+
+          if local_info.exists():
+              try:
+                  local_data = json.loads(
+                      local_info.read_text(encoding="utf-8")
+                  )
+
+                  if isinstance(local_data, dict):
+                      local_ts = local_data.get("timestamp", "")
+
+              except (
+                  OSError,
+                  UnicodeDecodeError,
+                  json.JSONDecodeError,
+              ):
+                  local_ts = ""
+
+          print(f"Local timestamp: {local_ts or 'none'}")
+
+
+          # ------------------------------------------------------------
+          # Official upstream main
+          # ------------------------------------------------------------
+
+          main_info = fetch_info(main_repo, "main")
+
+          if not main_info:
+              raise RuntimeError(
+                  f"Cannot read output/info.json from {main_repo} main"
+              )
+
+          main_ts = main_info.get("timestamp", "")
+          main_dt = parse_timestamp(main_ts)
+
+          if main_dt is None:
+              raise RuntimeError(
+                  f"Invalid timestamp in {main_repo} main: {main_ts!r}"
+              )
+
+          best_repo = main_repo
+          best_ref = "main"
+          best_label = "main"
+          best_ts = main_ts
+
+          print(f"main timestamp: {best_ts}")
+
+
+          # ------------------------------------------------------------
+          # Open upstream pull requests
+          # ------------------------------------------------------------
+
+          pulls_url = (
+              f"https://api.github.com/repos/{main_repo}/pulls"
+              f"?state=open&per_page=100"
+          )
+
+          page = 1
+          now = datetime.now(timezone.utc)
+
+          while True:
+              pulls = api_get_json(
+                  f"{pulls_url}&page={page}"
+              )
+
+              if not pulls:
+                  break
+
+              for pr in pulls:
+                  pr_number = pr.get("number")
+                  association = pr.get("author_association", "NONE")
+                  draft = bool(pr.get("draft", False))
+
+                  head = pr.get("head") or {}
+                  head_repo = head.get("repo") or {}
+
+                  head_repo_full_name = head_repo.get("full_name")
+                  head_sha = head.get("sha")
+
+                  if (
+                      not pr_number
+                      or not head_repo_full_name
+                      or not head_sha
+                  ):
+                      continue
+
+                  pr_label = f"PR #{pr_number}"
+
+                  if draft:
+                      print(f"{pr_label}: skipped (draft)")
+                      continue
+
+                  if association not in TRUSTED_ASSOCIATIONS:
+                      print(
+                          f"{pr_label}: skipped "
+                          f"(untrusted association: {association})"
+                      )
+                      continue
+
+                  pr_info = fetch_info(
+                      head_repo_full_name,
+                      head_sha,
+                  )
+
+                  if not pr_info:
+                      print(
+                          f"{pr_label}: "
+                          f"no valid output/info.json found"
+                      )
+                      continue
+
+                  pr_ts = pr_info.get("timestamp", "")
+                  pr_dt = parse_timestamp(pr_ts)
+
+                  if pr_dt is None:
+                      print(
+                          f"{pr_label}: invalid timestamp "
+                          f"{pr_ts!r}"
+                      )
+                      continue
+
+                  if pr_dt > now + MAX_FUTURE_SKEW:
+                      print(
+                          f"{pr_label}: skipped "
+                          f"(timestamp too far in future: {pr_ts})"
+                      )
+                      continue
+
+                  print(
+                      f"{pr_label} timestamp: {pr_ts} "
+                      f"[{association}]"
+                  )
+
+                  if is_newer(pr_ts, best_ts):
+                      best_repo = head_repo_full_name
+                      best_ref = head_sha
+                      best_label = pr_label
+                      best_ts = pr_ts
+
+              if len(pulls) < 100:
+                  break
+
+              page += 1
+
+
+          # ------------------------------------------------------------
+          # Decide whether update is required
+          # ------------------------------------------------------------
+
+          should_sync = False
+
+          if force:
+              should_sync = True
+
+          elif not target_dir.exists():
+              should_sync = True
+
+          elif not local_info.exists():
+              should_sync = True
+
+          elif parse_timestamp(local_ts) is None:
+              should_sync = True
+
+          elif is_newer(best_ts, local_ts):
+              should_sync = True
+
+          update_time = format_update_time(best_ts)
+
+          print("")
+          print(f"Best source:     {best_label}")
+          print(f"Best repository: {best_repo}")
+          print(f"Best ref:        {best_ref}")
+          print(f"Best timestamp:  {best_ts}")
+          print(f"Should sync:     {str(should_sync).lower()}")
+
+          write_output(
+              "should_sync",
+              str(should_sync).lower(),
+          )
+          write_output("best_repo", best_repo)
+          write_output("best_ref", best_ref)
+          write_output("best_label", best_label)
+          write_output("best_ts", best_ts)
+          write_output("update_time", update_time)
+
+          PY
+
+      - name: Download selected offset files
+        if: steps.resolve.outputs.should_sync == 'true'
+        shell: bash
+        env:
+          BEST_REPO: ${{ steps.resolve.outputs.best_repo }}
+          BEST_REF: ${{ steps.resolve.outputs.best_ref }}
+          BEST_TS: ${{ steps.resolve.outputs.best_ts }}
+        run: |
+          set -euo pipefail
+
+          python3 <<'PY'
+          import json
+          import os
+          import tempfile
+          import urllib.parse
+          import urllib.request
+
+          from pathlib import Path
+
+
+          target_dir = Path(os.environ["TARGET_DIR"])
+
+          best_repo = os.environ["BEST_REPO"].strip("/")
+          best_ref = os.environ["BEST_REF"]
+          expected_timestamp = os.environ["BEST_TS"]
+
+          files = {
+              "client_dll.hpp": 10 * 1024 * 1024,
+              "offsets.hpp": 10 * 1024 * 1024,
+              "info.json": 1024 * 1024,
+          }
+
+
+          def raw_url(repo_full_name, ref, path):
+              encoded_ref = urllib.parse.quote(ref, safe="")
+              encoded_path = urllib.parse.quote(path, safe="/")
+
+              return (
+                  f"https://raw.githubusercontent.com/"
+                  f"{repo_full_name}/{encoded_ref}/{encoded_path}"
+              )
+
+
+          def download(path, max_bytes):
+              url = raw_url(
+                  best_repo,
+                  best_ref,
+                  f"output/{path}",
+              )
+
+              request = urllib.request.Request(
+                  url,
+                  headers={
+                      "User-Agent": "CS2-DMA-Release-Offset-Sync",
+                  },
+              )
+
+              with urllib.request.urlopen(
+                  request,
+                  timeout=20,
+              ) as response:
+                  data = response.read(max_bytes + 1)
+
+              if not data:
+                  raise RuntimeError(
+                      f"Downloaded file is empty: {path}"
+                  )
+
+              if len(data) > max_bytes:
+                  raise RuntimeError(
+                      f"Downloaded file is too large: {path}"
+                  )
+
+              if b"\x00" in data:
+                  raise RuntimeError(
+                      f"Unexpected binary data in: {path}"
+                  )
+
+              return data
+
+
+          downloaded = {}
+
+          for name, max_bytes in files.items():
+              downloaded[name] = download(
+                  name,
+                  max_bytes,
+              )
+
+
+          # Validate info.json before touching the working tree.
+          try:
+              info = json.loads(
+                  downloaded["info.json"].decode("utf-8")
+              )
+
+          except (
+              UnicodeDecodeError,
+              json.JSONDecodeError,
+          ) as error:
+              raise RuntimeError(
+                  "Downloaded info.json is invalid"
+              ) from error
+
+          if not isinstance(info, dict):
+              raise RuntimeError(
+                  "Downloaded info.json must contain an object"
+              )
+
+          actual_timestamp = info.get("timestamp", "")
+
+          if actual_timestamp != expected_timestamp:
+              raise RuntimeError(
+                  "Downloaded info.json timestamp changed "
+                  f"during sync: expected {expected_timestamp!r}, "
+                  f"got {actual_timestamp!r}"
+              )
+
+
+          # Basic sanity check for the generated headers.
+          for header_name in (
+              "client_dll.hpp",
+              "offsets.hpp",
+          ):
+              try:
+                  text = downloaded[header_name].decode("utf-8")
+
+              except UnicodeDecodeError as error:
+                  raise RuntimeError(
+                      f"{header_name} is not valid UTF-8"
+                  ) from error
+
+              if len(text.strip()) < 50:
+                  raise RuntimeError(
+                      f"{header_name} looks unexpectedly small"
+                  )
+
+
+          # Only replace the three managed files.
+          # Do NOT remove the entire output directory.
+          target_dir.mkdir(
+              parents=True,
+              exist_ok=True,
+          )
+
+          with tempfile.TemporaryDirectory() as tmp:
+              tmp_dir = Path(tmp)
+
+              for name, data in downloaded.items():
+                  temporary_file = tmp_dir / name
+                  temporary_file.write_bytes(data)
+
+              for name in files:
+                  source = tmp_dir / name
+                  destination = target_dir / name
+
+                  source.replace(destination)
+
+                  print(
+                      f"Updated {name} -> {destination}"
+                  )
+
+          PY
+
+      - name: Commit and push release offset update
+        if: steps.resolve.outputs.should_sync == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add -f \
+            "$TARGET_DIR/client_dll.hpp" \
+            "$TARGET_DIR/offsets.hpp" \
+            "$TARGET_DIR/info.json"
+
+          if git diff --cached --quiet; then
+            echo "No changes to commit."
+            exit 0
+          fi
+
+          git commit \
+            -m "Release Offset Update ${{ steps.resolve.outputs.update_time }}" \
+            -m "Source: ${{ steps.resolve.outputs.best_label }}" \
+            -m "Repository: ${{ steps.resolve.outputs.best_repo }}" \
+            -m "Ref: ${{ steps.resolve.outputs.best_ref }}" \
+            -m "Timestamp: ${{ steps.resolve.outputs.best_ts }}"
+
+          # Protect against another commit landing on the default branch
+          # while this workflow was running.
+          git fetch origin "$DEFAULT_BRANCH"
+
+          git rebase "origin/$DEFAULT_BRANCH"
+
+          git push origin "HEAD:$DEFAULT_BRANCH"
+
+      - name: No update
+        if: steps.resolve.outputs.should_sync != 'true'
+        shell: bash
+        run: |
+          echo "No newer cs2-dumper output found."
