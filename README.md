@@ -58,26 +58,32 @@ An open-source software framework designed for the research and implementation o
 <br>
 <img width="1896" height="779" alt="image" src="https://github.com/user-attachments/assets/4abf2106-e613-4dec-b024-d47fa43eea2a" />
 <p><code> The whole system. In one core. Precision in each layer. 
- Visualization of players and the world, guidance, two radars and hardware input – in a single modular KevqDMA system.
- Is free. Open source code </code></p>
+ Visualization of players and the world, guidance, two radars and hardware input – 
+ in a single modular KevqDMA system. Is free. Open source code. </code></p>
 
 <img width="1896" height="821" alt="image" src="https://github.com/user-attachments/assets/1af65462-fdb1-4a94-9621-fa36ab61a921" />
 <img width="1890" height="895" alt="image" src="https://github.com/user-attachments/assets/f87ef012-1415-4f54-981a-be4a9be730f0" />
-<p><code> High performance, OOP structure and precision
+<p><code> High performance, OOP structure and precision 
  Each module is responsible for its own task. Assemble the appropriate configuration: 
- from the minimum visual layer to the radar on a separate screen.</code></p>
+ from the minimum visual layer to the radar on a separate screen. </code></p>
 
 <img width="1895" height="902" alt="image" src="https://github.com/user-attachments/assets/3cb596a5-0b32-4bc3-9aad-304cc4cdc613" />
 <p><code> See how it works on the <a href="https://cs2-dma.github.io/CS2-DMA/?lang=en" target="_blank"> WebSite </code></p>
 
 <img width="1893" height="897" alt="image" src="https://github.com/user-attachments/assets/330a6503-dc98-4ea3-8567-da03c4e938b5" />
-<p><code> </code></p>
+<p><code> Dual-worker pipeline – Camera at 300 Hz 
+ Separate KevqDMA data and camera-matrix workers. 
+ State exchange through SnapshotSlot [8] with atomic index publication. </code></p>
 
 <img width="1571" height="690" alt="image" src="https://github.com/user-attachments/assets/8d828043-b92b-46cb-af29-02cba1481eb6" />
-<p><code> </code></p>
+<p><code> One connected view of the system 
+ Reads, snapshot publication, camera, rendering, networking and recovery in one matrix. 
+ Select a node to explore its role. </code></p>
 
 <img width="1890" height="744" alt="image" src="https://github.com/user-attachments/assets/fca52aae-bec1-47b6-b42d-5d5fd0ed2e01" />
-<p><code> </code></p>
+<p><code> Quick start 
+ Initialize KevqDMA 
+ Prepare the hardware and launch on the secondary PC. </code></p>
 
 <h2>WebRadar</h2>
 <img width="1920" height="1080" alt="WebRadar" src="https://github.com/user-attachments/assets/13d3c864-22f5-4745-99db-338cb28c5ecc" style="border-radius: 8px;" />
