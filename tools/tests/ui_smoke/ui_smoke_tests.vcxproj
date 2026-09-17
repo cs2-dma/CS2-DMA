@@ -1,0 +1,77 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup Label="ProjectConfigurations">
+    <ProjectConfiguration Include="Release|x64">
+      <Configuration>Release</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+  </ItemGroup>
+  <PropertyGroup Label="Globals">
+    <VCProjectVersion>18.0</VCProjectVersion>
+    <Keyword>Win32Proj</Keyword>
+    <ProjectGuid>{D46F4EAF-14DD-4F0E-A70C-44A75E3C229A}</ProjectGuid>
+    <RootNamespace>UiSmokeTests</RootNamespace>
+    <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <UseDebugLibraries>false</UseDebugLibraries>
+    <PlatformToolset>v145</PlatformToolset>
+    <WholeProgramOptimization>true</WholeProgramOptimization>
+    <CharacterSet>Unicode</CharacterSet>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+  <ImportGroup Label="ExtensionSettings" />
+  <ImportGroup Label="Shared" />
+  <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <PropertyGroup Label="UserMacros" />
+  <PropertyGroup>
+    <OutDir>$(LOCALAPPDATA)\KevqDMA\Build\tests\$(Configuration)\</OutDir>
+    <IntDir>$(LOCALAPPDATA)\KevqDMA\Build\obj\tests\ui_smoke\$(Configuration)\</IntDir>
+    <TargetName>ui_smoke_tests</TargetName>
+  </PropertyGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <ClCompile>
+      <WarningLevel>Level4</WarningLevel>
+      <TreatWarningAsError>true</TreatWarningAsError>
+      <SDLCheck>true</SDLCheck>
+      <LanguageStandard>stdcpp20</LanguageStandard>
+      <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
+      <AdditionalIncludeDirectories>$(ProjectDir)..\..\..\include;$(ProjectDir)..\..\..\src;$(ProjectDir)..\..\..\src\vendor;$(ProjectDir)..\..\..\src\vendor\imgui;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <PreprocessorDefinitions>NDEBUG;WIN32_LEAN_AND_MEAN;NOMINMAX;_CONSOLE;KEVQ_UI_SMOKE_TESTS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
+      <Optimization>MaxSpeed</Optimization>
+    </ClCompile>
+    <Link>
+      <SubSystem>Console</SubSystem>
+    </Link>
+  </ItemDefinitionGroup>
+  <ItemGroup>
+    <ClCompile Include="ui_smoke_tests.cpp" />
+    <ClCompile Include="..\..\..\src\app\Config\project_paths.cpp" />
+    <ClCompile Include="..\..\..\src\app\Localization\localization.cpp" />
+    <ClCompile Include="..\..\..\src\app\Platform\console_text.cpp" />
+    <ClCompile Include="..\..\..\src\app\UI\MenuShell\ui_icons.cpp" />
+    <ClCompile Include="..\..\..\src\app\UI\MenuShell\menu_utils.cpp" />
+    <ClCompile Include="..\..\..\src\Features\ESP\UI\esp_sections.cpp" />
+    <ClCompile Include="..\..\..\src\Features\ESP\UI\esp_preview.cpp" />
+    <ClCompile Include="..\..\..\src\Features\ESP\weapon_catalog.cpp" />
+    <ClCompile Include="..\..\..\src\Features\Radar\UI\radar_sections.cpp" />
+    <ClCompile Include="..\..\..\src\Features\Target\UI\target_tab.cpp" />
+    <ClCompile Include="..\..\..\src\Features\World\grenade_helper.cpp" />
+    <ClCompile Include="..\..\..\src\Features\World\UI\world_tab.cpp" />
+    <ClCompile Include="..\..\..\src\vendor\qrcodegen\qrcodegen.cpp" />
+    <ClCompile Include="..\..\..\src\vendor\imgui\imgui.cpp" />
+    <ClCompile Include="..\..\..\src\vendor\imgui\imgui_draw.cpp" />
+    <ClCompile Include="..\..\..\src\vendor\imgui\imgui_tables.cpp" />
+    <ClCompile Include="..\..\..\src\vendor\imgui\imgui_widgets.cpp" />
+  </ItemGroup>
+  <ItemGroup>
+    <ResourceCompile Include="ui_smoke_resources.rc" />
+  </ItemGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+  <ImportGroup Label="ExtensionTargets" />
+</Project>

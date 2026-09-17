@@ -1,0 +1,4 @@
+# The lock file hashes the official bytes, including header line endings.
+libs/*.h -text
+libs/*.lib binary
+runtime/win-x64/*.dll binary

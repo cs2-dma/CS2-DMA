@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "platform": "win-x64",
+  "memprocfsVersion": "5.18.10.249",
+  "leechcoreVersion": "2.23.3.103",
+  "sourceCommit": "1172b5b2eb27865082a858787d72abad9e95e4b4",
+  "archiveUrl": "https://github.com/ufrisk/MemProcFS/releases/download/v5.18/MemProcFS_files_and_binaries_v5.18.10-win_x64-20260908.zip",
+  "archiveSha256": "158a795fc3d33c789e1f448e3d9db8a37b7c68bfe20291815209c27d9d31e77c",
+  "headerSource": "https://github.com/ufrisk/MemProcFS/tree/1172b5b2eb27865082a858787d72abad9e95e4b4/includes",
+  "headerNote": "Headers are pinned repository files; the release archive still bundles leechcore.h 2.9.1.",
+  "files": [
+    { "path": "libs/vmmdll.h", "sha256": "0a44905d0b868da5dfb80fb25e7356db42c0abff437d02b41ca04ff40035d54f" },
+    { "path": "libs/leechcore.h", "sha256": "d3dd1553cd3dc57e620722e6d4456e9aaa819a97066119c921db43aac1c3f6e3" },
+    { "path": "libs/vmm.lib", "sha256": "674efd238a307b6dbc73c5301deff2f3b034bbcc3ebf9e5c9544ab334dd83be1" },
+    { "path": "libs/leechcore.lib", "sha256": "de1259b698736a83c13f9731f7b823278e0b35df648f5a17552ae6490fb9b562" },
+    { "path": "runtime/win-x64/vmm.dll", "sha256": "0395118f326ff32202d5214bc14d413f4ea9c858d08154846a5157176b0fbc9a", "runtimeName": "vmm.dll", "fileVersion": "5.18.10.249" },
+    { "path": "runtime/win-x64/leechcore.dll", "sha256": "2a05a3ce187cd3ac69b788a5a6e56774acc80c168ac3041ff3bce028e8dd5116", "runtimeName": "leechcore.dll", "fileVersion": "2.23.3.103" },
+    { "path": "runtime/win-x64/FTD3XX.dll", "sha256": "3c0fc158fd4aa604c526d58ed8274ae830d53e69e01210cc5b5fa54ec5a9b7c0", "runtimeName": "FTD3XX.dll", "fileVersion": "1.3.0.10" },
+    { "path": "runtime/win-x64/FTD3XXWU.dll", "sha256": "c507cb40f188740c4a7ba3aae4f848a305192b9b7c9e8e9264b1d66335824bfa", "runtimeName": "FTD3XXWU.dll", "fileVersion": "1.4.0.1" }
+  ]
+}

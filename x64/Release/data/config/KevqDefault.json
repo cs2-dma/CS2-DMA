@@ -1,0 +1,461 @@
+{
+    "ESP": {
+        "Armor": true,
+        "ArmorColor": [
+            0.3499999940395355,
+            0.6499999761581421,
+            1.0,
+            1.0
+        ],
+        "ArmorColorMode": 0,
+        "ArmorLowColor": [
+            0.18000000715255737,
+            0.30000001192092896,
+            0.5799999833106995,
+            1.0
+        ],
+        "ArmorText": true,
+        "BombColor": [
+            1.0,
+            0.6499999761581421,
+            0.20000000298023224,
+            1.0
+        ],
+        "BombInfo": true,
+        "BombText": false,
+        "BombTextSize": 0.0,
+        "BombTime": true,
+        "BombTimerShowWithMenu": true,
+        "BombTimerX": 308.0,
+        "BombTimerY": 141.0,
+        "Box": true,
+        "BoxColor": [
+            1.0,
+            1.0,
+            1.0,
+            1.0
+        ],
+        "BoxCornerPercent": 12,
+        "BoxStyle": 0,
+        "BoxThickness": 2.3399999141693115,
+        "Distance": false,
+        "DistanceColor": [
+            0.800000011920929,
+            0.9200000166893005,
+            1.0,
+            1.0
+        ],
+        "DistanceSize": 0.0,
+        "Enabled": true,
+        "FlagBlind": true,
+        "FlagBlindColor": [
+            0.800000011920929,
+            0.9200000166893005,
+            1.0,
+            1.0
+        ],
+        "FlagBlindSize": 0.0,
+        "FlagColor": [
+            0.800000011920929,
+            0.9200000166893005,
+            1.0,
+            1.0
+        ],
+        "FlagDefusing": true,
+        "FlagDefusingColor": [
+            0.800000011920929,
+            0.9200000166893005,
+            1.0,
+            1.0
+        ],
+        "FlagDefusingSize": 0.0,
+        "FlagKit": true,
+        "FlagKitColor": [
+            0.800000011920929,
+            0.9200000166893005,
+            1.0,
+            1.0
+        ],
+        "FlagKitSize": 0.0,
+        "FlagMoney": false,
+        "FlagMoneyColor": [
+            0.800000011920929,
+            0.9200000166893005,
+            1.0,
+            1.0
+        ],
+        "FlagMoneySize": 0.0,
+        "FlagScoped": true,
+        "FlagScopedColor": [
+            0.800000011920929,
+            0.9200000166893005,
+            1.0,
+            1.0
+        ],
+        "FlagScopedSize": 0.0,
+        "Flags": true,
+        "Health": true,
+        "HealthColor": [
+            1.0,
+            1.0,
+            1.0,
+            1.0
+        ],
+        "HealthColorMode": 0,
+        "HealthLowColor": [
+            1.0,
+            0.11999999731779099,
+            0.07999999821186066,
+            1.0
+        ],
+        "HealthText": true,
+        "HiddenColor": [
+            1.0,
+            1.0,
+            1.0,
+            1.0
+        ],
+        "Item": false,
+        "ItemColor": [
+            0.3499999940395355,
+            0.6499999761581421,
+            1.0,
+            1.0
+        ],
+        "ItemHiddenIds": [
+            41,
+            42,
+            59,
+            500,
+            501,
+            502,
+            503,
+            504,
+            505,
+            506,
+            507,
+            508,
+            509,
+            510,
+            511,
+            512,
+            513,
+            514,
+            515,
+            516,
+            517,
+            518,
+            519,
+            520,
+            521,
+            522,
+            523,
+            524,
+            525,
+            526
+        ],
+        "ItemHighlight": true,
+        "ItemIcon": true,
+        "ItemText": true,
+        "Name": false,
+        "NameColor": [
+            1.0,
+            1.0,
+            1.0,
+            1.0
+        ],
+        "NameFontSize": 16.0,
+        "OffscreenArrows": false,
+        "OffscreenColor": [
+            1.0,
+            0.30000001192092896,
+            0.20000000298023224,
+            1.0
+        ],
+        "OffscreenSize": 14.0,
+        "ShowTeammates": false,
+        "Skeleton": true,
+        "SkeletonColor": [
+            0.5132075548171997,
+            0.5132075548171997,
+            0.5132075548171997,
+            1.0
+        ],
+        "SkeletonDots": false,
+        "SkeletonThickness": 1.909999966621399,
+        "SnapFromTop": false,
+        "SnaplineColor": [
+            1.0,
+            1.0,
+            0.0,
+            0.800000011920929
+        ],
+        "Snaplines": false,
+        "VisibilityColoring": false,
+        "VisibleColor": [
+            1.0,
+            0.0,
+            0.0,
+            1.0
+        ],
+        "Weapon": true,
+        "WeaponAmmo": false,
+        "WeaponAmmoColor": [
+            1.0,
+            1.0,
+            1.0,
+            1.0
+        ],
+        "WeaponAmmoSize": 0.0,
+        "WeaponIcon": true,
+        "WeaponIconColor": [
+            1.0,
+            1.0,
+            1.0,
+            1.0
+        ],
+        "WeaponIconNoKnife": false,
+        "WeaponIconSize": 10.0,
+        "WeaponText": false,
+        "WeaponTextColor": [
+            1.0,
+            1.0,
+            1.0,
+            1.0
+        ],
+        "WeaponTextSize": 0.0,
+        "World": true,
+        "WorldColor": [
+            0.06415092945098877,
+            0.05398361384868622,
+            0.05398361384868622,
+            1.0
+        ],
+        "WorldDecoyTimer": true,
+        "WorldExplosiveTimer": true,
+        "WorldInfernoTimer": true,
+        "WorldProjectiles": false,
+        "WorldSmokeTimer": true
+    },
+    "Radar": {
+        "AngleColor": [
+            1.0,
+            1.0,
+            1.0,
+            0.949999988079071
+        ],
+        "BgColor": [
+            0.0,
+            0.0,
+            0.0,
+            0.75
+        ],
+        "BombColor": [
+            1.0,
+            0.7471697926521301,
+            0.0,
+            1.0
+        ],
+        "BorderColor": [
+            0.0,
+            0.0,
+            0.0,
+            0.3499999940395355
+        ],
+        "DotColor": [
+            1.0,
+            0.1320754885673523,
+            0.1320754885673523,
+            1.0
+        ],
+        "DotSize": 4.0,
+        "Enabled": true,
+        "Mode": 1,
+        "ShowAngles": true,
+        "ShowBomb": true,
+        "ShowCrosshair": false,
+        "ShowLocalDot": false,
+        "Size": 290.0,
+        "SpectatorList": true,
+        "SpectatorListShowWithMenu": true,
+        "SpectatorListX": 302.0,
+        "SpectatorListY": 19.0,
+        "StaticFlipX": false,
+        "WorldOffsetX": 0.0,
+        "WorldOffsetY": 0.0,
+        "WorldRotationDeg": 0.0,
+        "WorldScale": 1.0
+    },
+    "Screen": {
+        "FPSLimit": 0,
+        "VSync": true
+    },
+    "Target": {
+        "AimActivationMode": 1,
+        "AimBone": 0,
+        "AimHumanization": true,
+        "AimKey": 2,
+        "AimPredictive": true,
+        "AimRecoilControl": true,
+        "AimSmoothing": 5.699999809265137,
+        "AimVisibleOnly": false,
+        "AimbotEnabled": false,
+        "Enabled": false,
+        "FovColor": [
+            0.12830185890197754,
+            0.12830185890197754,
+            0.12830185890197754,
+            0.8999999761581421
+        ],
+        "FovEnabled": true,
+        "FovPerWeapon": false,
+        "FovRadius": 124.0,
+        "TriggerActivationMode": 1,
+        "TriggerAimAssist": true,
+        "TriggerAimBone": 0,
+        "TriggerAimHumanization": true,
+        "TriggerAimPredictive": true,
+        "TriggerAimRecoilControl": false,
+        "TriggerAimSmoothing": 4.0,
+        "TriggerAutoShot": true,
+        "TriggerDelayMs": 7,
+        "TriggerKey": 6,
+        "TriggerVisibleOnly": false,
+        "TriggerbotEnabled": false,
+        "WeaponProfiles": [
+            {
+                "AimAutowall": false,
+                "AimMinimumDamage": 20.0,
+                "AimSmoothing": 5.0,
+                "FovRadius": 22.0,
+                "TriggerAutowall": false,
+                "TriggerHitchance": 82.0,
+                "TriggerHitchanceEnabled": true,
+                "TriggerMinimumDamage": 20.0,
+                "TriggerSeedWindowEnabled": true,
+                "TriggerSmoothing": 4.0
+            },
+            {
+                "AimAutowall": false,
+                "AimMinimumDamage": 30.0,
+                "AimSmoothing": 2.9000000953674316,
+                "FovRadius": 24.0,
+                "TriggerAutowall": true,
+                "TriggerHitchance": 80.0,
+                "TriggerHitchanceEnabled": false,
+                "TriggerMinimumDamage": 30.0,
+                "TriggerSeedWindowEnabled": true,
+                "TriggerSmoothing": 4.0
+            },
+            {
+                "AimAutowall": true,
+                "AimMinimumDamage": 70.0,
+                "AimSmoothing": 6.0,
+                "FovRadius": 120.0,
+                "TriggerAutowall": true,
+                "TriggerHitchance": 92.0,
+                "TriggerHitchanceEnabled": true,
+                "TriggerMinimumDamage": 70.0,
+                "TriggerSeedWindowEnabled": true,
+                "TriggerSmoothing": 5.0
+            },
+            {
+                "AimAutowall": true,
+                "AimMinimumDamage": 20.0,
+                "AimSmoothing": 4.0,
+                "FovRadius": 180.0,
+                "TriggerAutowall": true,
+                "TriggerHitchance": 72.0,
+                "TriggerHitchanceEnabled": true,
+                "TriggerMinimumDamage": 20.0,
+                "TriggerSeedWindowEnabled": true,
+                "TriggerSmoothing": 3.5
+            },
+            {
+                "AimAutowall": true,
+                "AimMinimumDamage": 35.0,
+                "AimSmoothing": 5.0,
+                "FovRadius": 150.0,
+                "TriggerAutowall": true,
+                "TriggerHitchance": 76.0,
+                "TriggerHitchanceEnabled": true,
+                "TriggerMinimumDamage": 35.0,
+                "TriggerSeedWindowEnabled": true,
+                "TriggerSmoothing": 4.0
+            },
+            {
+                "AimAutowall": true,
+                "AimMinimumDamage": 25.0,
+                "AimSmoothing": 5.5,
+                "FovRadius": 170.0,
+                "TriggerAutowall": true,
+                "TriggerHitchance": 70.0,
+                "TriggerHitchanceEnabled": true,
+                "TriggerMinimumDamage": 25.0,
+                "TriggerSeedWindowEnabled": true,
+                "TriggerSmoothing": 4.5
+            }
+        ]
+    },
+    "UI": {
+        "EspPreviewOpen": false,
+        "InputDeviceKind": 1,
+        "InputDeviceNetHost": "",
+        "InputDeviceNetKey": "",
+        "InputDeviceNetPort": 0,
+        "MenuToggleKey": 80,
+        "OverlayMonitorIndex": 0,
+        "OverlayToggleKey": 113,
+        "RadarCalibrationOpen": false,
+        "WebRadarDebugOpen": true,
+        "WebRadarQrOpen": true
+    },
+    "WEBRadar": {
+        "BindLan": true,
+        "Enabled": true,
+        "IntervalMs": 17,
+        "MapOverride": "",
+        "OriginAllowlist": [],
+        "Port": 22006
+    },
+    "World": {
+        "ActiveColor": [
+            0.20000000298023224,
+            1.0,
+            0.44999998807907104,
+            0.949999988079071
+        ],
+        "AddKey": 115,
+        "AimColor": [
+            1.0,
+            1.0,
+            1.0,
+            0.6499999761581421
+        ],
+        "CircleColor": [
+            0.30000001192092896,
+            0.550000011920929,
+            1.0,
+            0.75
+        ],
+        "CircleRadius": 10.0,
+        "CircleThickness": 2.0,
+        "DeleteKey": 46,
+        "FilterFlash": true,
+        "FilterHE": true,
+        "FilterMolotov": true,
+        "FilterSmoke": true,
+        "GrenadeHelperEnabled": true,
+        "GrenadeHelperVisible": true,
+        "MaxDistance": 2500.0,
+        "TextColor": [
+            1.0,
+            1.0,
+            1.0,
+            0.949999988079071
+        ],
+        "TextSize": 12.0,
+        "ToggleKey": 114
+    },
+    "configVersion": 1
+}

@@ -1,0 +1,60 @@
+This file license_info_all.txt contains information about the licenses which
+applies to the individual binary components of the open source projects for:
+PCILeech, MemProcFS and LeechCore.
+
+Individual distributions may only contain a subset of the listed files.
+
+FILE                                   LICENSE
+===========================================================
+dbghelp.dll                            Microsoft redistributable
+FTD3XX.dll                             ftdichip.com driver redistributable
+FTD3XXWU.dll                           ftdichip.com driver redistributable
+leechagent.exe                         GPL-3.0 license
+leechcore.dll                          GPL-3.0 license
+leechcore.dylib                        GPL-3.0 license
+leechcore.so                           GPL-3.0 license
+leechcore_device_hvsavedstate.dll      GPL-3.0 license
+leechcore_device_microvmi.so           GPL-3.0 license
+leechcore_device_qemu.so               GPL-3.0 license
+leechcore_device_rawtcp.so             GPL-3.0 license
+leechcore_driver.so                    Closed-source driver for ZDMA
+leechcore_ft601_driver_linux.so        GPL-3.0 license
+leechcore_ft601_driver_macos.dylib     GPL-3.0 license
+libleechgrpc.dll                       Apache License - Version 2.0
+libleechgrpc.so                        Apache License - Version 2.0
+libMSCompression.dylib                 GPL-3.0 license
+libMSCompression.so                    GPL-3.0 license
+libftd3xx.dylib                        ftdichip.com driver redistributable
+libpdbcrust.dll                        Apache-2.0 license or MIT license
+libpdbcrust.dylib                      Apache-2.0 license or MIT license
+libpdbcrust.so                         Apache-2.0 license or MIT license
+libpdbcrust2.so                        Apache-2.0 license or MIT license
+m_vmemd.dll                            AGPL-3.0 license
+m_vmemd.dylib                          AGPL-3.0 license
+m_vmemd.so                             AGPL-3.0 license
+memprocfs                              AGPL-3.0 license
+memprocfs.exe                          AGPL-3.0 license
+pcileech                               AGPL-3.0 license
+pcileech.exe                           AGPL-3.0 license
+symsrv.dll                             Microsoft redistributable
+vcruntime140.dll                       Microsoft redistributable
+vmm.dll                                AGPL-3.0 license
+vmm.dylib                              AGPL-3.0 license
+vmm.so                                 AGPL-3.0 license
+vmmpyc.pyd                             AGPL-3.0 license
+vmmpyc.so                              AGPL-3.0 license
+vmmyara.dll                            BSD-3-Clause license
+vmmyara.dylib                          BSD-3-Clause license
+vmmyara.so                             BSD-3-Clause license
+vmmyara2.so                            BSD-3-Clause license
+winpmem_x64.sys                        Apache-2.0 license
+
+-----------------------------------------------------------
+
+MemProcFS and related files such as vmm.dll / vmm.so / vmm.dylib are licensed
+as AGPL-3.0 but contains contributions which individually have other licenses.
+More information about each license may be found in the source code component.
+Community contributions:               Zero-Clause BSD / 0BSD
+LZ4:                                   BSD 2-Clause License
+Miniz:                                 Public Domain
+SQLite:                                Public Domain

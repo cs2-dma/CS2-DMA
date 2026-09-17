@@ -1,0 +1,4 @@
+BOOTSTRAP_ICONS_TTF RCDATA "../../../src/assets/fonts/bootstrap-icons.ttf"
+LOCALIZATION_EN_JSON RCDATA "../../../src/assets/locales/en.json"
+LOCALIZATION_ZH_CN_JSON RCDATA "../../../src/assets/locales/zh-CN.json"
+GRENADE_HELPER_DEFAULTS_JSON RCDATA "../../../src/assets/world/grenade_helper.json"

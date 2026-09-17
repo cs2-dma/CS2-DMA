@@ -1,0 +1,3792 @@
+{
+  "maps": [
+    {
+      "map": "de_mirage",
+      "spots": [
+        {
+          "x": 815.969849,
+          "y": -1416.198242,
+          "z": -108.96765099999999,
+          "aim_points": [
+            {
+              "label": "Jungle And Connector From T Roof A",
+              "type": "smoke",
+              "pitch": -28.110802,
+              "yaw": -173.482635,
+              "throw_type": "Left click"
+            }
+          ]
+        },
+        {
+          "x": 1148.765991,
+          "y": -1183.968262,
+          "z": -207.171799,
+          "aim_points": [
+            {
+              "label": "Stairs From A Ramp",
+              "type": "smoke",
+              "pitch": -41.636101,
+              "yaw": -165.239334,
+              "throw_type": "Left click"
+            }
+          ]
+        },
+        {
+          "x": 1087.041382,
+          "y": -1017.001282,
+          "z": -260.232117,
+          "aim_points": [
+            {
+              "label": "Top Of Ticket Booth From A Ramp",
+              "type": "smoke",
+              "pitch": -29.216162,
+              "yaw": -143.676407,
+              "throw_type": "Jump throw"
+            }
+          ]
+        },
+        {
+          "x": 836.155396,
+          "y": -1036.029785,
+          "z": -258.101837,
+          "aim_points": [
+            {
+              "label": "A Ramp From A Ramp",
+              "type": "flash",
+              "pitch": -39.119064,
+              "yaw": -148.335022,
+              "throw_type": "Left click"
+            }
+          ]
+        },
+        {
+          "x": -31.915405,
+          "y": -1418.03125,
+          "z": -168.374969,
+          "aim_points": [
+            {
+              "label": "Dark From Tetris",
+              "type": "molotov",
+              "pitch": -6.62813,
+              "yaw": -104.814873,
+              "throw_type": "Crouch + Left click"
+            }
+          ]
+        },
+        {
+          "x": -160.03125,
+          "y": 887.96875,
+          "z": -135.64798000000002,
+          "aim_points": [
+            {
+              "label": "Market Window From Back Alley",
+              "type": "smoke",
+              "pitch": -50.280293,
+              "yaw": -146.48848,
+              "throw_type": "Jump throw"
+            }
+          ]
+        },
+        {
+          "x": -539.522766,
+          "y": 520.03125,
+          "z": -80.629082,
+          "aim_points": [
+            {
+              "label": "Bench From Back Alley",
+              "type": "smoke",
+              "pitch": -41.379429,
+              "yaw": -178.653076,
+              "throw_type": "Left click"
+            }
+          ]
+        },
+        {
+          "x": -606.322998,
+          "y": 615.96875,
+          "z": -79.999626,
+          "aim_points": [
+            {
+              "label": "Right Arch From Back Alley",
+              "type": "smoke",
+              "pitch": -72.600983,
+              "yaw": -171.365707,
+              "throw_type": "Left click"
+            }
+          ]
+        },
+        {
+          "x": -161.027649,
+          "y": 575.501038,
+          "z": -71.400757,
+          "aim_points": [
+            {
+              "label": "B Site From Back Alley",
+              "type": "flash",
+              "pitch": -16.745499,
+              "yaw": -179.421509,
+              "throw_type": "Run + Jump throw"
+            }
+          ]
+        },
+        {
+          "x": -1042.112915,
+          "y": 641.823303,
+          "z": -79.939156,
+          "aim_points": [
+            {
+              "label": "Van From B Apts",
+              "type": "molotov",
+              "pitch": -6.914647,
+              "yaw": 172.80748,
+              "throw_type": "Run + Left click"
+            }
+          ]
+        },
+        {
+          "x": 1422.96875,
+          "y": 34.830574,
+          "z": -167.96875,
+          "aim_points": [
+            {
+              "label": "Mid Window From T Spawn A",
+              "type": "smoke",
+              "pitch": -24.193808,
+              "yaw": -166.485611,
+              "throw_type": "Crouch walk + Jump throw"
+            }
+          ]
+        },
+        {
+          "x": 1135.966431,
+          "y": 647.976379,
+          "z": -261.375793,
+          "aim_points": [
+            {
+              "label": "Bottom Connector From Apts Ramp",
+              "type": "smoke",
+              "pitch": -31.140182,
+              "yaw": -140.850235,
+              "throw_type": "Jump throw"
+            }
+          ]
+        },
+        {
+          "x": 1422.970337,
+          "y": 70.96875,
+          "z": -119.69970699999999,
+          "aim_points": [
+            {
+              "label": "Top Mid From T Spawn",
+              "type": "smoke",
+              "pitch": -33.431511,
+              "yaw": -160.986145,
+              "throw_type": "Left click"
+            }
+          ]
+        },
+        {
+          "x": 494.65387,
+          "y": 596.450989,
+          "z": -131.871048,
+          "aim_points": [
+            {
+              "label": "Mid From Outside T Apts",
+              "type": "flash",
+              "pitch": -2.700527,
+              "yaw": -133.454697,
+              "throw_type": "Jump throw"
+            }
+          ]
+        },
+        {
+          "x": 502.96875,
+          "y": -629.50415,
+          "z": -160.517273,
+          "aim_points": [
+            {
+              "label": "Window From Top Mid Boxes",
+              "type": "molotov",
+              "pitch": -13.770969,
+              "yaw": 179.751511,
+              "throw_type": "Run + Left click"
+            }
+          ]
+        },
+        {
+          "x": -897.986023,
+          "y": -2331.135498,
+          "z": -168.993301,
+          "aim_points": [
+            {
+              "label": "A Ramp From Triple Box",
+              "type": "molotov",
+              "pitch": -16.469255,
+              "yaw": 43.683067,
+              "throw_type": "Run + Left click"
+            }
+          ]
+        },
+        {
+          "x": -2031.972656,
+          "y": -1764.757935,
+          "z": -290.72934,
+          "aim_points": [
+            {
+              "label": "Palace From Ct Spawn",
+              "type": "smoke",
+              "pitch": -28.193851,
+              "yaw": -10.92507,
+              "throw_type": "Jump throw"
+            }
+          ]
+        },
+        {
+          "x": -2037.233643,
+          "y": 439.579254,
+          "z": -159.96875,
+          "aim_points": [
+            {
+              "label": "B Apts From B Site",
+              "type": "molotov",
+              "pitch": -11.591716,
+              "yaw": 28.368635,
+              "throw_type": "Left click"
+            }
+          ]
+        },
+        {
+          "x": -2268.780029,
+          "y": 587.176758,
+          "z": -157.046051,
+          "aim_points": [
+            {
+              "label": "Back Apts From B Site",
+              "type": "smoke",
+              "pitch": -10.288829,
+              "yaw": -0.824492,
+              "throw_type": "Run + Jump throw"
+            }
+          ]
+        },
+        {
+          "x": -877.531738,
+          "y": -2367.062744,
+          "z": -169.148315,
+          "aim_points": [
+            {
+              "label": "Top Mid From Triple",
+              "type": "flash",
+              "pitch": -13.401329,
+              "yaw": 60.326988,
+              "throw_type": "Run + Jump throw"
+            }
+          ]
+        },
+        {
+          "x": -1066.051514,
+          "y": 296.522217,
+          "z": -164.439392,
+          "aim_points": [
+            {
+              "label": "Catwalk From B Short",
+              "type": "smoke",
+              "pitch": -7.488355,
+              "yaw": -56.923733,
+              "throw_type": "Left click"
+            }
+          ]
+        },
+        {
+          "x": -1247.96875,
+          "y": -924.03125,
+          "z": -167.96875,
+          "aim_points": [
+            {
+              "label": "Mid Window From Jungle",
+              "type": "flash",
+              "pitch": -35.794769,
+              "yaw": 58.191368,
+              "throw_type": "Left click"
+            },
+            {
+              "label": "Top Mid Boxes From Window Blind",
+              "type": "molotov",
+              "pitch": -17.391127,
+              "yaw": 0.426708,
+              "throw_type": "Run + Left click"
+            }
+          ]
+        },
+        {
+          "x": 1389.436279,
+          "y": 70.943436,
+          "z": -167.96875,
+          "aim_points": [
+            {
+              "label": "Window From T Spawn C",
+              "type": "smoke",
+              "pitch": -28.899673,
+              "yaw": -162.632782,
+              "throw_type": "Run + Jump throw"
+            }
+          ]
+        },
+        {
+          "x": 1296,
+          "y": 32,
+          "z": -167.96875,
+          "aim_points": [
+            {
+              "label": "Window From T Spawn 1",
+              "type": "smoke",
+              "pitch": -28.912655,
+              "yaw": -165.958206,
+              "throw_type": "Run + Jump throw"
+            }
+          ]
+        },
+        {
+          "x": 1296,
+          "y": -352,
+          "z": -167.96875,
+          "aim_points": [
+            {
+              "label": "Window From T Spawn 2",
+              "type": "smoke",
+              "pitch": -42.455078,
+              "yaw": -173.246902,
+              "throw_type": "Run + Jump throw"
+            }
+          ]
+        },
+        {
+          "x": 1216,
+          "y": -16,
+          "z": -165.936905,
+          "aim_points": [
+            {
+              "label": "Window From T Spawn 3",
+              "type": "smoke",
+              "pitch": -44.583965,
+              "yaw": -165.672256,
+              "throw_type": "Run + Jump throw"
+            }
+          ]
+        },
+        {
+          "x": 1216,
+          "y": -115,
+          "z": -166.953156,
+          "aim_points": [
+            {
+              "label": "Window From T Spawn 4",
+              "type": "smoke",
+              "pitch": -44.461876,
+              "yaw": -167.666443,
+              "throw_type": "Run + Jump throw"
+            }
+          ]
+        },
+        {
+          "x": 1216,
+          "y": -211,
+          "z": -164.61621100000002,
+          "aim_points": [
+            {
+              "label": "Window From T Spawn 5",
+              "type": "smoke",
+              "pitch": -46.031891,
+              "yaw": -170.316223,
+              "throw_type": "Run + Jump throw"
+            }
+          ]
+        },
+        {
+          "x": 1216.000122,
+          "y": -307.000244,
+          "z": -164.81445300000001,
+          "aim_points": [
+            {
+              "label": "Window From T Spawn 6",
+              "type": "smoke",
+              "pitch": -46.432678,
+              "yaw": -170.927353,
+              "throw_type": "Run + Jump throw"
+            }
+          ]
+        },
+        {
+          "x": 1135.997314,
+          "y": 32.00264,
+          "z": -164.788452,
+          "aim_points": [
+            {
+              "label": "Window From T Spawn 7",
+              "type": "smoke",
+              "pitch": -45.47982,
+              "yaw": -164.376617,
+              "throw_type": "Run + Jump throw"
+            }
+          ]
+        },
+        {
+          "x": 1136.049194,
+          "y": -63.972839,
+          "z": -164.699768,
+          "aim_points": [
+            {
+              "label": "Window From T Spawn 8",
+              "type": "smoke",
+              "pitch": -42.432495,
+              "yaw": -166.298752,
+              "throw_type": "Run + Jump throw"
+            }
+          ]
+        },
+        {
+          "x": 1136.052612,
+          "y": -160.017456,
+          "z": -164.667618,
+          "aim_points": [
+            {
+              "label": "Window From T Spawn 9",
+              "type": "smoke",
+              "pitch": -42.8787,
+              "yaw": -168.192429,
+              "throw_type": "Run + Jump throw"
+            }
+          ]
+        },
+        {
+          "x": 1135.99585,
+          "y": -256,
+          "z": -164.836365,
+          "aim_points": [
+            {
+              "label": "Window From T Spawn 10",
+              "type": "smoke",
+              "pitch": -27.582813,
+              "yaw": -171.1586,
+              "throw_type": "Run + Jump throw"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "map": "de_dust2",
+      "spots": [
+        {
+          "x": -507.98114,
+          "y": -662.065613,
+          "z": 120.60083,
+          "aim_points": [
+            {
+              "label": "Xbox From T Spawn",
+              "type": "smoke",
+              "pitch": -4.64431,
+              "yaw": 84.623192,
+              "throw_type": "Jump throw"
+            }
+          ]
+        },
+        {
+          "x": 860.03125,
+          "y": 790.03064,
+          "z": 1.4007189999999952,
+          "aim_points": [
+            {
+              "label": "A Cross From Long Doors",
+              "type": "smoke",
+              "pitch": -25.430794,
+              "yaw": 43.542336,
+              "throw_type": "Run + Left click"
+            }
+          ]
+        },
+        {
+          "x": 847.597229,
+          "y": 790.03125,
+          "z": 47.035895999999994,
+          "aim_points": [
+            {
+              "label": "Car From Long Doors",
+              "type": "molotov",
+              "pitch": 5.790187,
+              "yaw": 54.692131,
+              "throw_type": "Jump throw"
+            }
+          ]
+        },
+        {
+          "x": 363.96875,
+          "y": -383.960327,
+          "z": 2.7265699999999953,
+          "aim_points": [
+            {
+              "label": "A Long From Outside Long",
+              "type": "flash",
+              "pitch": -7.039104,
+              "yaw": 49.579628,
+              "throw_type": "Jump throw"
+            }
+          ]
+        },
+        {
+          "x": 489.967926,
+          "y": 1446.027344,
+          "z": 0.4158860000000004,
+          "aim_points": [
+            {
+              "label": "Short From Short",
+              "type": "smoke",
+              "pitch": -6.497169,
+              "yaw": 88.287483,
+              "throw_type": "Left click"
+            }
+          ]
+        },
+        {
+          "x": -1332.023926,
+          "y": 491.954468,
+          "z": 7.871245999999999,
+          "aim_points": [
+            {
+              "label": "B Doors From Outside B Tunnels",
+              "type": "smoke",
+              "pitch": -54.965591,
+              "yaw": 88.335632,
+              "throw_type": "Jump throw"
+            },
+            {
+              "label": "B Window From Outside B Tunnels",
+              "type": "smoke",
+              "pitch": -49.04356,
+              "yaw": 88.884003,
+              "throw_type": "Jump throw"
+            }
+          ]
+        },
+        {
+          "x": -1755.888306,
+          "y": 1064.03125,
+          "z": 32.814696999999995,
+          "aim_points": [
+            {
+              "label": "B Site From Upper Tunnels B",
+              "type": "flash",
+              "pitch": -19.773165,
+              "yaw": 117.607086,
+              "throw_type": "Run + Left click"
+            }
+          ]
+        },
+        {
+          "x": -1936.96875,
+          "y": 1042.03125,
+          "z": 33.7565,
+          "aim_points": [
+            {
+              "label": "Back Plat From Upper Tunnels",
+              "type": "molotov",
+              "pitch": -15.877525,
+              "yaw": 94.01252,
+              "throw_type": "Run + Left click"
+            }
+          ]
+        },
+        {
+          "x": -275.03125,
+          "y": 1345.415039,
+          "z": -122.539078,
+          "aim_points": [
+            {
+              "label": "Ct Spawn From Xbox",
+              "type": "smoke",
+              "pitch": -37.483829,
+              "yaw": 131.7854,
+              "throw_type": "Left click"
+            },
+            {
+              "label": "Ct Spawn Boost From Xbox",
+              "type": "smoke",
+              "pitch": -11.130279,
+              "yaw": 129.576599,
+              "throw_type": "Jump throw"
+            },
+            {
+              "label": "Mid Doors From Xbox",
+              "type": "flash",
+              "pitch": -36.40871,
+              "yaw": 61.362038,
+              "throw_type": "Left click"
+            }
+          ]
+        },
+        {
+          "x": -763.968689,
+          "y": 1334.03125,
+          "z": -111.89640800000001,
+          "aim_points": [
+            {
+              "label": "Mid Doors From Lower Tunnels",
+              "type": "molotov",
+              "pitch": -2.670017,
+              "yaw": 26.029188,
+              "throw_type": "Run + Left click"
+            }
+          ]
+        },
+        {
+          "x": -520.888062,
+          "y": 1382.02832,
+          "z": -112.27003500000001,
+          "aim_points": [
+            {
+              "label": "Short From Lower Tunnel",
+              "type": "molotov",
+              "pitch": -6.076642,
+              "yaw": -2.054506,
+              "throw_type": "Jump throw"
+            },
+            {
+              "label": "Short From Lower Tunnels",
+              "type": "flash",
+              "pitch": -39.252659,
+              "yaw": -6.445365,
+              "throw_type": "Jump throw"
+            }
+          ]
+        },
+        {
+          "x": 1004.96875,
+          "y": 2379.96875,
+          "z": 20.688477000000006,
+          "aim_points": [
+            {
+              "label": "Long Doors From Elevator",
+              "type": "smoke",
+              "pitch": -25.186306,
+              "yaw": -102.171837,
+              "throw_type": "Jump throw"
+            }
+          ]
+        },
+        {
+          "x": 1062.572021,
+          "y": 2038.028687,
+          "z": 1.7606810000000053,
+          "aim_points": [
+            {
+              "label": "A Long From Ct Cross",
+              "type": "flash",
+              "pitch": -42.486073,
+              "yaw": -177.904205,
+              "throw_type": "Run + Left click"
+            }
+          ]
+        },
+        {
+          "x": 1249.811523,
+          "y": 2038.03125,
+          "z": 1.3861160000000012,
+          "aim_points": [
+            {
+              "label": "Long Doors From Ct Cross",
+              "type": "flash",
+              "pitch": -42.117085,
+              "yaw": -81.232803,
+              "throw_type": "Left click"
+            }
+          ]
+        },
+        {
+          "x": 1462.173096,
+          "y": 1427.713135,
+          "z": -9.655375999999997,
+          "aim_points": [
+            {
+              "label": "Dumpster From Long Corner",
+              "type": "molotov",
+              "pitch": -10.250678,
+              "yaw": -133.803772,
+              "throw_type": "Run + Left click"
+            }
+          ]
+        },
+        {
+          "x": -337.031372,
+          "y": 2423.96875,
+          "z": -91.873589,
+          "aim_points": [
+            {
+              "label": "B Tunnels From Ct Mid",
+              "type": "smoke",
+              "pitch": -4.921763,
+              "yaw": -162.729691,
+              "throw_type": "Walk + Jump throw"
+            },
+            {
+              "label": "Bottom Mid From Ct Mid",
+              "type": "smoke",
+              "pitch": -21.134802,
+              "yaw": -101.763184,
+              "throw_type": "Left click"
+            }
+          ]
+        },
+        {
+          "x": -1662.777588,
+          "y": 2737.276855,
+          "z": 10.789260999999996,
+          "aim_points": [
+            {
+              "label": "B Main From B Site",
+              "type": "frag",
+              "pitch": -12.276122,
+              "yaw": -108.70636,
+              "throw_type": "Run + Left click"
+            }
+          ]
+        },
+        {
+          "x": -1273.96875,
+          "y": 2575.96875,
+          "z": 64.82055700000001,
+          "aim_points": [
+            {
+              "label": "Under B Window From Scaffolding",
+              "type": "molotov",
+              "pitch": 0.807917,
+              "yaw": 10.789516,
+              "throw_type": "Jump throw"
+            }
+          ]
+        },
+        {
+          "x": -569.968811,
+          "y": 2079.815674,
+          "z": -119.366653,
+          "aim_points": [
+            {
+              "label": "B Site From Ct Mid",
+              "type": "flash",
+              "pitch": -35.947418,
+              "yaw": 170.926895,
+              "throw_type": "Left click"
+            }
+          ]
+        },
+        {
+          "x": 289.397552,
+          "y": 2377.30957,
+          "z": -120.760902,
+          "aim_points": [
+            {
+              "label": "Ct Mid From Ct Spawn",
+              "type": "smoke",
+              "pitch": -5.441806,
+              "yaw": -141.804764,
+              "throw_type": "Left click"
+            }
+          ]
+        },
+        {
+          "x": -690.735168,
+          "y": 2270.332764,
+          "z": -118.013802,
+          "aim_points": [
+            {
+              "label": "Bottom Mid From Ct Mid",
+              "type": "flash",
+              "pitch": -23.92696,
+              "yaw": -60.870724,
+              "throw_type": "Walk + Left click"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "map": "de_overpass",
+      "spots": [
+        {
+          "x": -2351.9729,
+          "y": -735.400391,
+          "z": 439.401276,
+          "aim_points": [
+            {
+              "label": "Dumpster From Divider Bench",
+              "type": "smoke",
+              "pitch": -42.782616,
+              "yaw": 77.091034,
+              "throw_type": "Left click"
+            }
+          ]
+        },
+        {
+          "x": -2351.96875,
+          "y": -815.968628,
+          "z": 393.195465,
+          "aim_points": [
+            {
+              "label": "Truck From Divider Bench",
+              "type": "smoke",
+              "pitch": -37.586029,
+              "yaw": 81.262039,
+              "throw_type": "Left click"
+            }
+          ]
+        },
+        {
+          "x": -2337.96875,
+          "y": -735.406067,
+          "z": 416.03125,
+          "aim_points": [
+            {
+              "label": "Mid A Site From Divider Bench",
+              "type": "smoke",
+              "pitch": -48.183434,
+              "yaw": 83.593506,
+              "throw_type": "Left click"
+            }
+          ]
+        },
+        {
+          "x": -2294.344482,
+          "y": -583.469666,
+          "z": 391.492157,
+          "aim_points": [
+            {
+              "label": "A Site From Divider",
+              "type": "flash",
+              "pitch": -3.9897,
+              "yaw": 86.918976,
+              "throw_type": "Jump throw"
+            }
+          ]
+        },
+        {
+          "x": -1559.96875,
+          "y": -729.529846,
+          "z": 45.68253300000001,
+          "aim_points": [
+            {
+              "label": "Heaven From Water",
+              "type": "smoke",
+              "pitch": -31.170198,
+              "yaw": 98.430206,
+              "throw_type": "Left click"
+            },
+            {
+              "label": "Barrels From Water B",
+              "type": "molotov",
+              "pitch": 2.537219,
+              "yaw": 62.713066,
+              "throw_type": "Jump throw"
+            },
+            {
+              "label": "Pit From Water",
+              "type": "smoke",
+              "pitch": -31.915899,
+              "yaw": 67.744957,
+              "throw_type": "Left click"
+            }
+          ]
+        },
+        {
+          "x": -613.986755,
+          "y": -1087.738892,
+          "z": 40.720305999999994,
+          "aim_points": [
+            {
+              "label": "Barrels From Short Tunnel",
+              "type": "smoke",
+              "pitch": -29.757906,
+              "yaw": 99.37748,
+              "throw_type": "Left click"
+            }
+          ]
+        },
+        {
+          "x": -468.292053,
+          "y": -1443.595703,
+          "z": 140.03125,
+          "aim_points": [
+            {
+              "label": "Monster From Outside Monster B",
+              "type": "flash",
+              "pitch": 10.607519,
+              "yaw": 89.179138,
+              "throw_type": "Jump throw"
+            }
+          ]
+        },
+        {
+          "x": -2378.964355,
+          "y": -2223.565918,
+          "z": 476.04455599999994,
+          "aim_points": [
+            {
+              "label": "Bathroom From Fountain",
+              "type": "smoke",
+              "pitch": -19.109499,
+              "yaw": 101.511406,
+              "throw_type": "Left click"
+            }
+          ]
+        },
+        {
+          "x": -2471.004395,
+          "y": -765.182251,
+          "z": 436.037567,
+          "aim_points": [
+            {
+              "label": "Fountain From Bathroom",
+              "type": "smoke",
+              "pitch": -0.828387,
+              "yaw": -124.797096,
+              "throw_type": "Run + Left click"
+            }
+          ]
+        },
+        {
+          "x": -2379.779297,
+          "y": 140.791473,
+          "z": 439.035461,
+          "aim_points": [
+            {
+              "label": "T Ramp From A Main",
+              "type": "smoke",
+              "pitch": -6.976867,
+              "yaw": -79.662834,
+              "throw_type": "Jump throw"
+            }
+          ]
+        },
+        {
+          "x": -2279.46875,
+          "y": -607.633301,
+          "z": 390.35025,
+          "aim_points": [
+            {
+              "label": "T Stairs From Divider",
+              "type": "flash",
+              "pitch": -2.148278,
+              "yaw": -76.318474,
+              "throw_type": "Jump throw"
+            }
+          ]
+        },
+        {
+          "x": -2871.96875,
+          "y": -1335.786377,
+          "z": 485.063843,
+          "aim_points": [
+            {
+              "label": "T Stairs From Mid",
+              "type": "frag",
+              "pitch": -8.225796,
+              "yaw": -45.605167,
+              "throw_type": "Run + Left click"
+            }
+          ]
+        },
+        {
+          "x": -2125.156738,
+          "y": 997.276733,
+          "z": 484.026123,
+          "aim_points": [
+            {
+              "label": "Monster From Ct Spawn",
+              "type": "smoke",
+              "pitch": -16.572277,
+              "yaw": -49.181396,
+              "throw_type": "Jump throw"
+            }
+          ]
+        },
+        {
+          "x": -2018.966797,
+          "y": 154.031265,
+          "z": 132.03125,
+          "aim_points": [
+            {
+              "label": "Water From B Entry",
+              "type": "molotov",
+              "pitch": -13.381881,
+              "yaw": -53.270859,
+              "throw_type": "Left click"
+            }
+          ]
+        },
+        {
+          "x": -2112.824951,
+          "y": 212.264557,
+          "z": 132.03125,
+          "aim_points": [
+            {
+              "label": "B Site From Lower",
+              "type": "molotov",
+              "pitch": -16.082619,
+              "yaw": -7.770576,
+              "throw_type": "Crouch + Left click"
+            }
+          ]
+        },
+        {
+          "x": -2031.96875,
+          "y": -1136.96875,
+          "z": 132.03125,
+          "aim_points": [
+            {
+              "label": "Bottom Connector From Bottom Connector",
+              "type": "flash",
+              "pitch": -27.01712,
+              "yaw": 19.40745,
+              "throw_type": "Right click"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "map": "de_ancient",
+      "spots": [
+        {
+          "x": -1934.369507,
+          "y": -862.027649,
+          "z": -14.153168,
+          "aim_points": [
+            {
+              "label": "Ct From Outside A",
+              "type": "smoke",
+              "pitch": -43.344669,
+              "yaw": 67.021294,
+              "throw_type": "Jump throw"
+            },
+            {
+              "label": "Donut Tunnel From Outside A",
+              "type": "smoke",
+              "pitch": -32.102016,
+              "yaw": 74.690254,
+              "throw_type": "Jump throw"
+            },
+            {
+              "label": "Temple From Outside A B",
+              "type": "smoke",
+              "pitch": -49.462364,
+              "yaw": 81.396057,
+              "throw_type": "Jump throw"
+            }
+          ]
+        },
+        {
+          "x": -1963.893555,
+          "y": 340.027344,
+          "z": 88.03125,
+          "aim_points": [
+            {
+              "label": "A Default From A Main",
+              "type": "molotov",
+              "pitch": -17.625898,
+              "yaw": 41.281429,
+              "throw_type": "Walk + Left click"
+            }
+          ]
+        },
+        {
+          "x": -2167.655762,
+          "y": -442.969238,
+          "z": 74.85986299999999,
+          "aim_points": [
+            {
+              "label": "A Site From A Main",
+              "type": "flash",
+              "pitch": -9.330126,
+              "yaw": 76.477852,
+              "throw_type": "Crouch + Left click"
+            }
+          ]
+        },
+        {
+          "x": 1255.96875,
+          "y": -1479.96875,
+          "z": 18.213988999999998,
+          "aim_points": [
+            {
+              "label": "Back Alley From Ruins Corner",
+              "type": "smoke",
+              "pitch": -5.380337,
+              "yaw": 93.45694,
+              "throw_type": "Jump throw"
+            },
+            {
+              "label": "B Alley From Ruins",
+              "type": "smoke",
+              "pitch": -11.477521,
+              "yaw": 109.402702,
+              "throw_type": "Jump throw"
+            }
+          ]
+        },
+        {
+          "x": 1131.157593,
+          "y": -1352.729858,
+          "z": 60.03125,
+          "aim_points": [
+            {
+              "label": "B Site From Ruins Box",
+              "type": "flash",
+              "pitch": 3.620392,
+              "yaw": 91.127319,
+              "throw_type": "Jump throw"
+            }
+          ]
+        },
+        {
+          "x": 1159.96875,
+          "y": -919.187805,
+          "z": 6.161574999999999,
+          "aim_points": [
+            {
+              "label": "Wood From B Door",
+              "type": "molotov",
+              "pitch": -30.12689,
+              "yaw": 137.418716,
+              "throw_type": "Left click"
+            },
+            {
+              "label": "Pillar From B Doors",
+              "type": "molotov",
+              "pitch": -30.249817,
+              "yaw": 115.765251,
+              "throw_type": "Left click"
+            }
+          ]
+        },
+        {
+          "x": -632.027527,
+          "y": -2066.69458,
+          "z": -146.96875,
+          "aim_points": [
+            {
+              "label": "Top Mid From T Spawn",
+              "type": "smoke",
+              "pitch": -26.62878,
+              "yaw": 86.980049,
+              "throw_type": "Jump throw"
+            }
+          ]
+        },
+        {
+          "x": -1230.565552,
+          "y": -1044.03125,
+          "z": 8.256172000000007,
+          "aim_points": [
+            {
+              "label": "Mid From T Mid",
+              "type": "flash",
+              "pitch": -32.674026,
+              "yaw": 52.203629,
+              "throw_type": "Left click"
+            }
+          ]
+        },
+        {
+          "x": -1116.03125,
+          "y": -1100.630493,
+          "z": 4.3058089999999964,
+          "aim_points": [
+            {
+              "label": "Donut From T Mid",
+              "type": "smoke",
+              "pitch": -60.837639,
+              "yaw": 80.807457,
+              "throw_type": "Left click"
+            }
+          ]
+        },
+        {
+          "x": -735.968994,
+          "y": -1946.985352,
+          "z": -165.913544,
+          "aim_points": [
+            {
+              "label": "Mid From T Spawn",
+              "type": "flash",
+              "pitch": -23.069672,
+              "yaw": 85.138412,
+              "throw_type": "Jump throw"
+            }
+          ]
+        },
+        {
+          "x": -1599.03125,
+          "y": 1187.96875,
+          "z": 52.03125,
+          "aim_points": [
+            {
+              "label": "A Main From Big Box",
+              "type": "smoke",
+              "pitch": -13.472486,
+              "yaw": -120.882263,
+              "throw_type": "Left click"
+            }
+          ]
+        },
+        {
+          "x": -1170.518311,
+          "y": 992.838806,
+          "z": 53.009879999999995,
+          "aim_points": [
+            {
+              "label": "A Long From A Site",
+              "type": "smoke",
+              "pitch": -21.318745,
+              "yaw": -148.370743,
+              "throw_type": "Left click"
+            }
+          ]
+        },
+        {
+          "x": -1023.484985,
+          "y": 1018.029114,
+          "z": 67.151398,
+          "aim_points": [
+            {
+              "label": "A Stairs From Ct Spawn",
+              "type": "smoke",
+              "pitch": -13.697779,
+              "yaw": -124.215942,
+              "throw_type": "Jump throw"
+            }
+          ]
+        },
+        {
+          "x": -1485.02771,
+          "y": -101.607727,
+          "z": 106.457581,
+          "aim_points": [
+            {
+              "label": "Donut From Donut",
+              "type": "flash",
+              "pitch": -74.126495,
+              "yaw": 178.544403,
+              "throw_type": "Left click"
+            }
+          ]
+        },
+        {
+          "x": -66.03125,
+          "y": 1771.968262,
+          "z": 35.075851,
+          "aim_points": [
+            {
+              "label": "B Ramp From Ct Spawn",
+              "type": "smoke",
+              "pitch": -39.09848,
+              "yaw": -56.05933,
+              "throw_type": "Jump throw"
+            }
+          ]
+        },
+        {
+          "x": 746.665894,
+          "y": 437.645203,
+          "z": 128.651535,
+          "aim_points": [
+            {
+              "label": "T Upper From B Site",
+              "type": "smoke",
+              "pitch": -18.383251,
+              "yaw": -96.737968,
+              "throw_type": "Walk + Left click"
+            }
+          ]
+        },
+        {
+          "x": 519.96875,
+          "y": -413.03125,
+          "z": 185.323669,
+          "aim_points": [
+            {
+              "label": "Catwalk From Jaguar",
+              "type": "flash",
+              "pitch": -15.722957,
+              "yaw": -139.540604,
+              "throw_type": "Both clicks"
+            }
+          ]
+        },
+        {
+          "x": 334.030518,
+          "y": -63.840332,
+          "z": 154.03125,
+          "aim_points": [
+            {
+              "label": "B Ramp From Cave",
+              "type": "flash",
+              "pitch": -9.421845,
+              "yaw": -2.253344,
+              "throw_type": "Left click"
+            }
+          ]
+        },
+        {
+          "x": 1234.009399,
+          "y": 532.435547,
+          "z": 122.97174100000001,
+          "aim_points": [
+            {
+              "label": "Boost From B Long",
+              "type": "frag",
+              "pitch": -13.74003,
+              "yaw": -93.76368,
+              "throw_type": "Crouch walk + Left click"
+            }
+          ]
+        },
+        {
+          "x": 602.033325,
+          "y": 756.02832,
+          "z": 114.961487,
+          "aim_points": [
+            {
+              "label": "Lower Catwalk From B Entry",
+              "type": "molotov",
+              "pitch": 9.421843,
+              "yaw": -80.841034,
+              "throw_type": "Run + Jump throw"
+            }
+          ]
+        },
+        {
+          "x": -457.402466,
+          "y": 302.03125,
+          "z": 161.051682,
+          "aim_points": [
+            {
+              "label": "Elbow From Top Mid",
+              "type": "smoke",
+              "pitch": -9.421242,
+              "yaw": -107.83342,
+              "throw_type": "Left click"
+            }
+          ]
+        },
+        {
+          "x": -476.03125,
+          "y": 219.289505,
+          "z": 167.593201,
+          "aim_points": [
+            {
+              "label": "Elbow From Top Mid",
+              "type": "molotov",
+              "pitch": 11.24301,
+              "yaw": -117.693893,
+              "throw_type": "Jump throw"
+            }
+          ]
+        },
+        {
+          "x": 743.96875,
+          "y": -318.96875,
+          "z": 139.255661,
+          "aim_points": [
+            {
+              "label": "Mid From Wood",
+              "type": "flash",
+              "pitch": -11.294238,
+              "yaw": 177.622543,
+              "throw_type": "Crouch + Jump throw"
+            }
+          ]
+        },
+        {
+          "x": -285.521973,
+          "y": 1771.969116,
+          "z": 26.438598999999996,
+          "aim_points": [
+            {
+              "label": "B Doors From Ct Spawn",
+              "type": "smoke",
+              "pitch": -21.871952,
+              "yaw": -49.701855,
+              "throw_type": "Run + Jump throw"
+            }
+          ]
+        },
+        {
+          "x": -192,
+          "y": 1696,
+          "z": 24.633125000000007,
+          "aim_points": [
+            {
+              "label": "B Doors From Ct Spawn 1",
+              "type": "smoke",
+              "pitch": -17.048941,
+              "yaw": -51.153271,
+              "throw_type": "Run + Jump throw"
+            },
+            {
+              "label": "Bottom Mid From Ct Spawn 1",
+              "type": "smoke",
+              "pitch": -30.041077,
+              "yaw": -108.799324,
+              "throw_type": "Walk + Jump throw"
+            }
+          ]
+        },
+        {
+          "x": -256.000183,
+          "y": 1727.635254,
+          "z": 24.820510999999996,
+          "aim_points": [
+            {
+              "label": "B Doors From Ct Spawn 2",
+              "type": "smoke",
+              "pitch": -22.758865,
+              "yaw": -49.389374,
+              "throw_type": "Run + Jump throw"
+            },
+            {
+              "label": "Bottom Mid From Ct Spawn 2",
+              "type": "smoke",
+              "pitch": -29.162729,
+              "yaw": -106.963852,
+              "throw_type": "Walk + Jump throw"
+            }
+          ]
+        },
+        {
+          "x": -352,
+          "y": 1728,
+          "z": 27.548370000000006,
+          "aim_points": [
+            {
+              "label": "B Doors From Ct Spawn 3",
+              "type": "smoke",
+              "pitch": -28.141815,
+              "yaw": -46.456024,
+              "throw_type": "Run + Jump throw"
+            },
+            {
+              "label": "Bottom Mid From Ct Spawn 3",
+              "type": "smoke",
+              "pitch": -29.543274,
+              "yaw": -105.25795,
+              "throw_type": "Walk + Jump throw"
+            }
+          ]
+        },
+        {
+          "x": -448,
+          "y": 1728,
+          "z": 29.239127999999994,
+          "aim_points": [
+            {
+              "label": "B Doors From Ct Spawn 4",
+              "type": "smoke",
+              "pitch": -15.165672,
+              "yaw": -49.06406,
+              "throw_type": "Run + Jump throw"
+            },
+            {
+              "label": "Bottom Mid From Ct Spawn 4",
+              "type": "smoke",
+              "pitch": -29.037676,
+              "yaw": -103.017082,
+              "throw_type": "Walk + Jump throw"
+            }
+          ]
+        },
+        {
+          "x": -512,
+          "y": 1696,
+          "z": 24.682266,
+          "aim_points": [
+            {
+              "label": "B Doors From Ct Spawn 5",
+              "type": "smoke",
+              "pitch": -15.33771,
+              "yaw": -46.838409,
+              "throw_type": "Run + Jump throw"
+            },
+            {
+              "label": "Bottom Mid From Ct Spawn 5",
+              "type": "smoke",
+              "pitch": -30.877075,
+              "yaw": -101.814423,
+              "throw_type": "Walk + Jump throw"
+            }
+          ]
+        },
+        {
+          "x": -520,
+          "y": -2224,
+          "z": -163.255676,
+          "aim_points": [
+            {
+              "label": "Top Mid From T Spawn 1",
+              "type": "smoke",
+              "pitch": -39.577961,
+              "yaw": 88.653549,
+              "throw_type": "Run + Jump throw"
+            }
+          ]
+        },
+        {
+          "x": -392,
+          "y": -2224,
+          "z": -163.255676,
+          "aim_points": [
+            {
+              "label": "Top Mid From T Spawn 2",
+              "type": "smoke",
+              "pitch": -28.662354,
+              "yaw": 92.407135,
+              "throw_type": "Run + Jump throw"
+            }
+          ]
+        },
+        {
+          "x": -584.049683,
+          "y": -2288,
+          "z": -162.797562,
+          "aim_points": [
+            {
+              "label": "Top Mid From T Spawn 3",
+              "type": "smoke",
+              "pitch": -34.70969,
+              "yaw": 88.59771,
+              "throw_type": "Run + Jump throw"
+            }
+          ]
+        },
+        {
+          "x": -456,
+          "y": -2288,
+          "z": -163.255676,
+          "aim_points": [
+            {
+              "label": "Top Mid From T Spawn 4",
+              "type": "smoke",
+              "pitch": -30.368622,
+              "yaw": 92.056854,
+              "throw_type": "Run + Jump throw"
+            }
+          ]
+        },
+        {
+          "x": -328,
+          "y": -2288,
+          "z": -163.255676,
+          "aim_points": [
+            {
+              "label": "Top Mid From T Spawn 5",
+              "type": "smoke",
+              "pitch": -31.985836,
+              "yaw": 94.438652,
+              "throw_type": "Run + Jump throw"
+            }
+          ]
+        },
+        {
+          "x": -646.968262,
+          "y": 1308.03125,
+          "z": 29.682304000000002,
+          "aim_points": [
+            {
+              "label": "Elbow From Ct Spawn",
+              "type": "smoke",
+              "pitch": -43.9478,
+              "yaw": -98.497993,
+              "throw_type": "Jump throw"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "map": "de_inferno",
+      "spots": [
+        {
+          "x": 729.032532,
+          "y": 183.914368,
+          "z": 90.53834499999999,
+          "aim_points": [
+            {
+              "label": "Moto From Alt Mid",
+              "type": "smoke",
+              "pitch": -56.059471,
+              "yaw": 23.410418,
+              "throw_type": "Jump throw"
+            }
+          ]
+        },
+        {
+          "x": 356.96875,
+          "y": -293.96875,
+          "z": 97.28211999999999,
+          "aim_points": [
+            {
+              "label": "Arches From Alt Mid",
+              "type": "smoke",
+              "pitch": -20.12236,
+              "yaw": 42.904331,
+              "throw_type": "Jump throw"
+            }
+          ]
+        },
+        {
+          "x": 187.96875,
+          "y": -197.96875,
+          "z": 67.306793,
+          "aim_points": [
+            {
+              "label": "Pit From Alt Mid",
+              "type": "smoke",
+              "pitch": -22.09659,
+              "yaw": 3.939515,
+              "throw_type": "Jump throw"
+            }
+          ]
+        },
+        {
+          "x": 1579.335571,
+          "y": -377.96875,
+          "z": 256.03125,
+          "aim_points": [
+            {
+              "label": "Balcony From Apts",
+              "type": "flash",
+              "pitch": -24.480705,
+              "yaw": -30.09289,
+              "throw_type": "Left click"
+            }
+          ]
+        },
+        {
+          "x": 120.611656,
+          "y": 1593.880737,
+          "z": 105.626251,
+          "aim_points": [
+            {
+              "label": "Ct From Banana",
+              "type": "smoke",
+              "pitch": -32.122128,
+              "yaw": 55.047455,
+              "throw_type": "Left click"
+            }
+          ]
+        },
+        {
+          "x": 423.931122,
+          "y": 1761.745117,
+          "z": 134.031235,
+          "aim_points": [
+            {
+              "label": "Coffins From Half Wall A",
+              "type": "smoke",
+              "pitch": -18.792429,
+              "yaw": 87.284302,
+              "throw_type": "Jump throw"
+            }
+          ]
+        },
+        {
+          "x": 479.274414,
+          "y": 2017.96875,
+          "z": 136.031311,
+          "aim_points": [
+            {
+              "label": "New Box From Car",
+              "type": "molotov",
+              "pitch": -10.588449,
+              "yaw": 123.033058,
+              "throw_type": "Jump throw"
+            },
+            {
+              "label": "Oranges From Car",
+              "type": "molotov",
+              "pitch": -37.574696,
+              "yaw": 136.296204,
+              "throw_type": "Left click"
+            }
+          ]
+        },
+        {
+          "x": 729.031494,
+          "y": 243.912567,
+          "z": 91.573914,
+          "aim_points": [
+            {
+              "label": "Boiler From Alt Mid",
+              "type": "smoke",
+              "pitch": -19.713053,
+              "yaw": 41.69558,
+              "throw_type": "Left click"
+            }
+          ]
+        },
+        {
+          "x": 1136.3479,
+          "y": 587.96875,
+          "z": 115.43014500000001,
+          "aim_points": [
+            {
+              "label": "Quad From Top Mid",
+              "type": "molotov",
+              "pitch": -19.877815,
+              "yaw": -44.787476,
+              "throw_type": "Run + Left click"
+            }
+          ]
+        },
+        {
+          "x": 292.988708,
+          "y": 648.044922,
+          "z": 11.770920000000004,
+          "aim_points": [
+            {
+              "label": "Top Mid From Underpass",
+              "type": "flash",
+              "pitch": -18.219749,
+              "yaw": -8.62345,
+              "throw_type": "Left click"
+            }
+          ]
+        },
+        {
+          "x": 844.308533,
+          "y": 711.96875,
+          "z": 96.03125,
+          "aim_points": [
+            {
+              "label": "Arches From Mid",
+              "type": "smoke",
+              "pitch": -7.477009,
+              "yaw": -44.1339,
+              "throw_type": "Run + Jump throw"
+            }
+          ]
+        },
+        {
+          "x": 2552.343018,
+          "y": 2193.372559,
+          "z": 136.897049,
+          "aim_points": [
+            {
+              "label": "Top Mid From Ct Spawn",
+              "type": "smoke",
+              "pitch": -25.738585,
+              "yaw": -125.363625,
+              "throw_type": "Jump throw"
+            }
+          ]
+        },
+        {
+          "x": 2628.96875,
+          "y": -305.993652,
+          "z": 107.985352,
+          "aim_points": [
+            {
+              "label": "Moto From Pit",
+              "type": "smoke",
+              "pitch": -9.55387,
+              "yaw": 99.83931,
+              "throw_type": "Both + Jump throw"
+            }
+          ]
+        },
+        {
+          "x": 2445.03125,
+          "y": -226.03125,
+          "z": 98.775665,
+          "aim_points": [
+            {
+              "label": "Short From Pit",
+              "type": "flash",
+              "pitch": -10.608932,
+              "yaw": 158.623093,
+              "throw_type": "Left click"
+            }
+          ]
+        },
+        {
+          "x": 1964.952759,
+          "y": 1235.968994,
+          "z": 172.90863,
+          "aim_points": [
+            {
+              "label": "Front Graveyard From Arch",
+              "type": "smoke",
+              "pitch": -3.774652,
+              "yaw": -54.132935,
+              "throw_type": "Both + Jump throw"
+            }
+          ]
+        },
+        {
+          "x": 1441.968628,
+          "y": 2983.96875,
+          "z": 128.032013,
+          "aim_points": [
+            {
+              "label": "B Entrance From Ct",
+              "type": "smoke",
+              "pitch": -16.613552,
+              "yaw": -148.700287,
+              "throw_type": "Left click"
+            }
+          ]
+        },
+        {
+          "x": 1313.96875,
+          "y": 2645.04126,
+          "z": 134.234177,
+          "aim_points": [
+            {
+              "label": "New Box From Ct",
+              "type": "molotov",
+              "pitch": -17.534555,
+              "yaw": -179.065979,
+              "throw_type": "Run + Left click"
+            }
+          ]
+        },
+        {
+          "x": 1148.03125,
+          "y": 2798.269043,
+          "z": 125.269714,
+          "aim_points": [
+            {
+              "label": "Top Banana From Ct",
+              "type": "flash",
+              "pitch": -29.86203,
+              "yaw": -146.876907,
+              "throw_type": "Left click"
+            }
+          ]
+        },
+        {
+          "x": 2537.322998,
+          "y": 2468.384521,
+          "z": 124.236343,
+          "aim_points": [
+            {
+              "label": "Half Wall From Ct Spawn",
+              "type": "smoke",
+              "pitch": -25.922775,
+              "yaw": -165.315002,
+              "throw_type": "Jump throw"
+            }
+          ]
+        },
+        {
+          "x": 772.065491,
+          "y": 2129.185547,
+          "z": 136.031311,
+          "aim_points": [
+            {
+              "label": "Banana From Top Banana",
+              "type": "molotov",
+              "pitch": -5.238741,
+              "yaw": -144.06424,
+              "throw_type": "Run + Left click"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "map": "de_anubis",
+      "spots": [
+        {
+          "x": 1149.96875,
+          "y": 610.03125,
+          "z": -188.833618,
+          "aim_points": [
+            {
+              "label": "Heaven From Water B",
+              "type": "smoke",
+              "pitch": -4.418572,
+              "yaw": 93.985794,
+              "throw_type": "Jump throw"
+            },
+            {
+              "label": "Platform From Water",
+              "type": "smoke",
+              "pitch": -5.441439,
+              "yaw": 117.796814,
+              "throw_type": "Jump throw"
+            }
+          ]
+        },
+        {
+          "x": 1382.03125,
+          "y": 800.03125,
+          "z": -151.96875,
+          "aim_points": [
+            {
+              "label": "Fountain From A Main",
+              "type": "molotov",
+              "pitch": -13.166149,
+              "yaw": 60.661682,
+              "throw_type": "Walk + Left click"
+            }
+          ]
+        },
+        {
+          "x": 744.028442,
+          "y": 684.806702,
+          "z": -107.96875,
+          "aim_points": [
+            {
+              "label": "A Site From Water",
+              "type": "molotov",
+              "pitch": 8.470527,
+              "yaw": 76.739265,
+              "throw_type": "Jump throw"
+            }
+          ]
+        },
+        {
+          "x": 867.635498,
+          "y": 678.73053,
+          "z": -188.821838,
+          "aim_points": [
+            {
+              "label": "A Site From Water",
+              "type": "flash",
+              "pitch": -6.906279,
+              "yaw": 61.995499,
+              "throw_type": "Jump throw"
+            }
+          ]
+        },
+        {
+          "x": -1016.03125,
+          "y": -201.272644,
+          "z": 0.03125,
+          "aim_points": [
+            {
+              "label": "Ebox From Ruins",
+              "type": "smoke",
+              "pitch": -48.091095,
+              "yaw": 126.990288,
+              "throw_type": "Left click"
+            },
+            {
+              "label": "Back Site From Ruins B",
+              "type": "smoke",
+              "pitch": -28.155107,
+              "yaw": 126.1147,
+              "throw_type": "Jump throw"
+            }
+          ]
+        },
+        {
+          "x": -1267.970581,
+          "y": -314.813599,
+          "z": 4.0406949999999995,
+          "aim_points": [
+            {
+              "label": "B Site From Ruins",
+              "type": "smoke",
+              "pitch": -25.042871,
+              "yaw": 86.642555,
+              "throw_type": "Jump throw"
+            }
+          ]
+        },
+        {
+          "x": -1016.03125,
+          "y": -49.245483,
+          "z": 0.03125,
+          "aim_points": [
+            {
+              "label": "B Pillar From Ruins B",
+              "type": "molotov",
+              "pitch": -54.588818,
+              "yaw": 103.195366,
+              "throw_type": "Jump throw"
+            }
+          ]
+        },
+        {
+          "x": -596.031799,
+          "y": 272.261841,
+          "z": -93.586464,
+          "aim_points": [
+            {
+              "label": "Backsite From Ebox",
+              "type": "molotov",
+              "pitch": -4.583258,
+              "yaw": 169.273743,
+              "throw_type": "Run + Jump throw"
+            }
+          ]
+        },
+        {
+          "x": -1013.914001,
+          "y": -407.088989,
+          "z": 0.03125,
+          "aim_points": [
+            {
+              "label": "B Site From Ruins B",
+              "type": "flash",
+              "pitch": -16.05114,
+              "yaw": 112.025597,
+              "throw_type": "Jump throw"
+            }
+          ]
+        },
+        {
+          "x": -299.410522,
+          "y": -1725.968872,
+          "z": 5.240440000000007,
+          "aim_points": [
+            {
+              "label": "Top Mid From T Spawn B",
+              "type": "smoke",
+              "pitch": -12.88204,
+              "yaw": 85.062614,
+              "throw_type": "Jump throw"
+            },
+            {
+              "label": "Canals From T Spawn",
+              "type": "smoke",
+              "pitch": -16.695263,
+              "yaw": 96.087639,
+              "throw_type": "Jump throw"
+            }
+          ]
+        },
+        {
+          "x": -245.03363,
+          "y": -110.03125,
+          "z": 0.26654800000000023,
+          "aim_points": [
+            {
+              "label": "Mid Doors From Bridge",
+              "type": "molotov",
+              "pitch": -18.628958,
+              "yaw": 41.915001,
+              "throw_type": "Left click"
+            }
+          ]
+        },
+        {
+          "x": -706.20813,
+          "y": -705.840576,
+          "z": 106.54333500000001,
+          "aim_points": [
+            {
+              "label": "Bridge From Ruins",
+              "type": "flash",
+              "pitch": 8.131204,
+              "yaw": 63.827709,
+              "throw_type": "Jump throw"
+            }
+          ]
+        },
+        {
+          "x": -344.447754,
+          "y": -278.88147,
+          "z": 0.263298000000006,
+          "aim_points": [
+            {
+              "label": "Canals From T Mid",
+              "type": "flash",
+              "pitch": 0.61378,
+              "yaw": 57.495152,
+              "throw_type": "Left click"
+            }
+          ]
+        },
+        {
+          "x": -890.438171,
+          "y": 2157.357178,
+          "z": 16.056595,
+          "aim_points": [
+            {
+              "label": "A Main From Ct Spawn",
+              "type": "smoke",
+              "pitch": -22.649691,
+              "yaw": -31.568838,
+              "throw_type": "Jump throw"
+            }
+          ]
+        },
+        {
+          "x": 419.315338,
+          "y": 1247.03125,
+          "z": -28.735011999999998,
+          "aim_points": [
+            {
+              "label": "A Main From Connector",
+              "type": "flash",
+              "pitch": -14.107212,
+              "yaw": 20.030392,
+              "throw_type": "Walk + Left click"
+            }
+          ]
+        },
+        {
+          "x": 750.03125,
+          "y": 2040.542725,
+          "z": -39.96875,
+          "aim_points": [
+            {
+              "label": "Water From Heaven",
+              "type": "flash",
+              "pitch": -21.47274,
+              "yaw": -81.185501,
+              "throw_type": "Left click"
+            }
+          ]
+        },
+        {
+          "x": 935.189697,
+          "y": 1566.768555,
+          "z": -87.96875,
+          "aim_points": [
+            {
+              "label": "A Main From Plat",
+              "type": "frag",
+              "pitch": -1.493908,
+              "yaw": -63.74147,
+              "throw_type": "Jump throw"
+            }
+          ]
+        },
+        {
+          "x": -368.94458,
+          "y": 2360.893311,
+          "z": 24.031493999999995,
+          "aim_points": [
+            {
+              "label": "B Main From Ct Spawn",
+              "type": "smoke",
+              "pitch": -19.499245,
+              "yaw": -119.051476,
+              "throw_type": "Jump throw"
+            },
+            {
+              "label": "Bridge From Ct Spawn",
+              "type": "smoke",
+              "pitch": -31.763067,
+              "yaw": -82.2668,
+              "throw_type": "Jump throw"
+            }
+          ]
+        },
+        {
+          "x": -633.484985,
+          "y": 1193.96875,
+          "z": 36.439987,
+          "aim_points": [
+            {
+              "label": "Backsite From Temple",
+              "type": "molotov",
+              "pitch": -8.133836,
+              "yaw": -155.299332,
+              "throw_type": "Run + Left click"
+            }
+          ]
+        },
+        {
+          "x": -1146.139038,
+          "y": 1759.905029,
+          "z": 48.03125,
+          "aim_points": [
+            {
+              "label": "B Default From Sniper",
+              "type": "molotov",
+              "pitch": -8.399689,
+              "yaw": -92.140213,
+              "throw_type": "Left click"
+            }
+          ]
+        },
+        {
+          "x": -1122.914429,
+          "y": 1236.027344,
+          "z": 1.03125,
+          "aim_points": [
+            {
+              "label": "B Long From Ct",
+              "type": "flash",
+              "pitch": -17.657879,
+              "yaw": -115.444496,
+              "throw_type": "Jump throw"
+            }
+          ]
+        },
+        {
+          "x": 130.159302,
+          "y": 1025.885498,
+          "z": -31.913756999999997,
+          "aim_points": [
+            {
+              "label": "Bridge From Mid",
+              "type": "smoke",
+              "pitch": -12.489795,
+              "yaw": -115.299675,
+              "throw_type": "Left click"
+            }
+          ]
+        },
+        {
+          "x": 379.972473,
+          "y": 1199.472168,
+          "z": -20.452148,
+          "aim_points": [
+            {
+              "label": "Bridge From Connector",
+              "type": "flash",
+              "pitch": -20.32671,
+              "yaw": -118.338989,
+              "throw_type": "Jump throw"
+            }
+          ]
+        },
+        {
+          "x": -384,
+          "y": -1552,
+          "z": -11.968688999999998,
+          "aim_points": [
+            {
+              "label": "Top Mid From T Spawn 1",
+              "type": "smoke",
+              "pitch": -16.775085,
+              "yaw": 82.025635,
+              "throw_type": "Jump throw"
+            }
+          ]
+        },
+        {
+          "x": -328,
+          "y": -1528,
+          "z": -11.968688999999998,
+          "aim_points": [
+            {
+              "label": "Top Mid From T Spawn 2",
+              "type": "smoke",
+              "pitch": -20.553535,
+              "yaw": 83.815323,
+              "throw_type": "Jump throw"
+            }
+          ]
+        },
+        {
+          "x": -234,
+          "y": -1503.079956,
+          "z": -11.968688999999998,
+          "aim_points": [
+            {
+              "label": "Top Mid From T Spawn 3",
+              "type": "smoke",
+              "pitch": -18.66547,
+              "yaw": 86.210915,
+              "throw_type": "Jump throw"
+            }
+          ]
+        },
+        {
+          "x": -154,
+          "y": -1503.079956,
+          "z": -11.96875,
+          "aim_points": [
+            {
+              "label": "Top Mid From T Spawn 4",
+              "type": "smoke",
+              "pitch": -19.316833,
+              "yaw": 87.320908,
+              "throw_type": "Jump throw"
+            }
+          ]
+        },
+        {
+          "x": -416,
+          "y": -1608,
+          "z": -4.435192000000001,
+          "aim_points": [
+            {
+              "label": "Top Mid From T Spawn 5",
+              "type": "smoke",
+              "pitch": -24.199497,
+              "yaw": 82.55304,
+              "throw_type": "Jump throw"
+            }
+          ]
+        },
+        {
+          "x": -304,
+          "y": -1608,
+          "z": -11.968688999999998,
+          "aim_points": [
+            {
+              "label": "Top Mid From T Spawn 6",
+              "type": "smoke",
+              "pitch": -9.865526,
+              "yaw": 84.608383,
+              "throw_type": "Jump throw"
+            }
+          ]
+        },
+        {
+          "x": -264,
+          "y": -1560,
+          "z": -11.968688999999998,
+          "aim_points": [
+            {
+              "label": "Top Mid From T Spawn 7",
+              "type": "smoke",
+              "pitch": -18.359896,
+              "yaw": 85.164413,
+              "throw_type": "Jump throw"
+            }
+          ]
+        },
+        {
+          "x": -192,
+          "y": -1608,
+          "z": -11.96875,
+          "aim_points": [
+            {
+              "label": "Top Mid From T Spawn 8",
+              "type": "smoke",
+              "pitch": -15.122405,
+              "yaw": 87.172386,
+              "throw_type": "Jump throw"
+            }
+          ]
+        },
+        {
+          "x": -144,
+          "y": -1568,
+          "z": -11.968688999999998,
+          "aim_points": [
+            {
+              "label": "Top Mid From T Spawn 9",
+              "type": "smoke",
+              "pitch": -19.239401,
+              "yaw": 88.390701,
+              "throw_type": "Jump throw"
+            }
+          ]
+        },
+        {
+          "x": -128.004028,
+          "y": -1613.984009,
+          "z": -11.96875,
+          "aim_points": [
+            {
+              "label": "Top Mid From T Spawn 10",
+              "type": "smoke",
+              "pitch": -12.043651,
+              "yaw": 89.041862,
+              "throw_type": "Jump throw"
+            }
+          ]
+        },
+        {
+          "x": -416,
+          "y": -1696,
+          "z": 2.0312959999999975,
+          "aim_points": [
+            {
+              "label": "Top Mid From T Spawn 11",
+              "type": "smoke",
+              "pitch": -10.569246,
+              "yaw": 81.922501,
+              "throw_type": "Jump throw"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "map": "de_nuke",
+      "spots": [
+        {
+          "x": -105.03125,
+          "y": -280.03125,
+          "z": -171.965271,
+          "aim_points": [
+            {
+              "label": "A Main From T Roof",
+              "type": "smoke",
+              "pitch": -11.498542,
+              "yaw": -58.413708,
+              "throw_type": "Both + Jump throw"
+            }
+          ]
+        },
+        {
+          "x": -19.397888,
+          "y": -1461.60376,
+          "z": -46.820152,
+          "aim_points": [
+            {
+              "label": "Hut Roof From Silo",
+              "type": "molotov",
+              "pitch": -11.131254,
+              "yaw": 29.823231,
+              "throw_type": "Left click"
+            }
+          ]
+        },
+        {
+          "x": 1.293061,
+          "y": -769.648621,
+          "z": -94.726929,
+          "aim_points": [
+            {
+              "label": "A Site From T Roof A",
+              "type": "flash",
+              "pitch": 3.702358,
+              "yaw": 13.68026,
+              "throw_type": "Jump throw"
+            }
+          ]
+        },
+        {
+          "x": 85.491196,
+          "y": -793.82959,
+          "z": -415.96875,
+          "aim_points": [
+            {
+              "label": "Hut From Lobby A",
+              "type": "flash",
+              "pitch": -2.916612,
+              "yaw": -61.275227,
+              "throw_type": "Run + Left click"
+            }
+          ]
+        },
+        {
+          "x": 217.82991,
+          "y": -390.026489,
+          "z": -415.96875,
+          "aim_points": [
+            {
+              "label": "Ramp From Trophy",
+              "type": "flash",
+              "pitch": -1.791814,
+              "yaw": 106.175125,
+              "throw_type": "Run + Left click"
+            }
+          ]
+        },
+        {
+          "x": 251.968018,
+          "y": -463.702759,
+          "z": -415.96875,
+          "aim_points": [
+            {
+              "label": "Ramp From Trophy B",
+              "type": "smoke",
+              "pitch": -1.627657,
+              "yaw": 107.368484,
+              "throw_type": "Run + Left click"
+            }
+          ]
+        },
+        {
+          "x": -731.442749,
+          "y": -1322.25354,
+          "z": -413.639404,
+          "aim_points": [
+            {
+              "label": "Secret Far From Outside T Spawn",
+              "type": "smoke",
+              "pitch": -11.181433,
+              "yaw": -22.398926,
+              "throw_type": "Jump throw"
+            }
+          ]
+        },
+        {
+          "x": -228.683899,
+          "y": -1719.738159,
+          "z": -415.96875,
+          "aim_points": [
+            {
+              "label": "T Red From Under Silo",
+              "type": "flash",
+              "pitch": -6.32325,
+              "yaw": -65.395569,
+              "throw_type": "Run + Left click"
+            }
+          ]
+        },
+        {
+          "x": -916.570251,
+          "y": -992.030212,
+          "z": -415.462189,
+          "aim_points": [
+            {
+              "label": "Garage From Outside T Spawn",
+              "type": "smoke",
+              "pitch": -20.379208,
+              "yaw": -20.680742,
+              "throw_type": "Jump throw"
+            }
+          ]
+        },
+        {
+          "x": 1011.644836,
+          "y": -457.96875,
+          "z": -127.96875,
+          "aim_points": [
+            {
+              "label": "Squeaky From Heaven",
+              "type": "smoke",
+              "pitch": -8.194401,
+              "yaw": -120.156166,
+              "throw_type": "Left click"
+            },
+            {
+              "label": "Squeaky From Heaven",
+              "type": "molotov",
+              "pitch": -1.044459,
+              "yaw": -120.541222,
+              "throw_type": "Left click"
+            }
+          ]
+        },
+        {
+          "x": 1269.96875,
+          "y": -459.96875,
+          "z": -127.960037,
+          "aim_points": [
+            {
+              "label": "A Site From Heaven",
+              "type": "flash",
+              "pitch": 12.714302,
+              "yaw": 165.669373,
+              "throw_type": "Left click"
+            },
+            {
+              "label": "A Site From Heaven",
+              "type": "molotov",
+              "pitch": 2.208789,
+              "yaw": 146.813156,
+              "throw_type": "Left click"
+            }
+          ]
+        },
+        {
+          "x": 656.910156,
+          "y": 722.090271,
+          "z": -479.96875,
+          "aim_points": [
+            {
+              "label": "Trophy From Ramp B",
+              "type": "frag",
+              "pitch": -13.483152,
+              "yaw": -118.950417,
+              "throw_type": "Walk + Left click"
+            }
+          ]
+        },
+        {
+          "x": 847.991699,
+          "y": 95.96875,
+          "z": -639.969543,
+          "aim_points": [
+            {
+              "label": "Dark From B Ramp",
+              "type": "frag",
+              "pitch": 8.31575,
+              "yaw": -91.109459,
+              "throw_type": "Left click"
+            },
+            {
+              "label": "Dark From B Ramp",
+              "type": "molotov",
+              "pitch": 8.33649,
+              "yaw": -91.10363,
+              "throw_type": "Left click"
+            }
+          ]
+        },
+        {
+          "x": 402.87262,
+          "y": 12.149245,
+          "z": -639.96875,
+          "aim_points": [
+            {
+              "label": "Double Doors From B Ramp",
+              "type": "smoke",
+              "pitch": 5.72898,
+              "yaw": -59.947685,
+              "throw_type": "Run + Left click"
+            }
+          ]
+        },
+        {
+          "x": 1507.751831,
+          "y": -1152.739258,
+          "z": -415.972046,
+          "aim_points": [
+            {
+              "label": "T Red From Ct Red",
+              "type": "smoke",
+              "pitch": 1.686859,
+              "yaw": -134.530319,
+              "throw_type": "Run + Left click"
+            }
+          ]
+        },
+        {
+          "x": 1783.28064,
+          "y": -1014.4776,
+          "z": -351.974548,
+          "aim_points": [
+            {
+              "label": "Outside From Outside Ct",
+              "type": "molotov",
+              "pitch": 7.814812,
+              "yaw": -144.153473,
+              "throw_type": "Walk + Jump throw"
+            }
+          ]
+        },
+        {
+          "x": 1487.96875,
+          "y": -1711.96875,
+          "z": -415.96875,
+          "aim_points": [
+            {
+              "label": "Silo From Ct Red",
+              "type": "molotov",
+              "pitch": -12.901032,
+              "yaw": 173.069443,
+              "throw_type": "Jump throw"
+            }
+          ]
+        },
+        {
+          "x": 1978.005005,
+          "y": -788.419434,
+          "z": -341.632202,
+          "aim_points": [
+            {
+              "label": "Top Silo From Ct Spawn",
+              "type": "smoke",
+              "pitch": -17.616205,
+              "yaw": -155.530838,
+              "throw_type": "Jump throw"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "map": "de_train",
+      "spots": [
+        {
+          "x": -1460.96875,
+          "y": 1479.967529,
+          "z": -190.12875400000001,
+          "aim_points": [
+            {
+              "label": "Camera From T Spawn C",
+              "type": "smoke",
+              "pitch": -21.728487,
+              "yaw": -30.06625,
+              "throw_type": "Left click"
+            },
+            {
+              "label": "Connector From T Spawn C",
+              "type": "smoke",
+              "pitch": -35.293278,
+              "yaw": -45.926586,
+              "throw_type": "Jump throw"
+            }
+          ]
+        },
+        {
+          "x": -1499.028564,
+          "y": 1479.74939,
+          "z": -172.12875400000001,
+          "aim_points": [
+            {
+              "label": "Camera From T Spawn",
+              "type": "smoke",
+              "pitch": -36.510803,
+              "yaw": -29.726171,
+              "throw_type": "Left click"
+            },
+            {
+              "label": "Connector From T Spawn",
+              "type": "smoke",
+              "pitch": -31.23295,
+              "yaw": -45.956001,
+              "throw_type": ""
+            }
+          ]
+        },
+        {
+          "x": -834.493591,
+          "y": 1285.032104,
+          "z": -216.128754,
+          "aim_points": [
+            {
+              "label": "Sandwich From Outside A Main",
+              "type": "smoke",
+              "pitch": -38.198734,
+              "yaw": -45.033966,
+              "throw_type": "Left click"
+            },
+            {
+              "label": "A Site From Outside A Main",
+              "type": "flash",
+              "pitch": -8.941714,
+              "yaw": -39.030605,
+              "throw_type": "Left click"
+            }
+          ]
+        },
+        {
+          "x": -362.029053,
+          "y": 1384.031372,
+          "z": -161.126801,
+          "aim_points": [
+            {
+              "label": "Popdog From Dumpster",
+              "type": "smoke",
+              "pitch": -33.523434,
+              "yaw": -92.350456,
+              "throw_type": "Jump throw"
+            }
+          ]
+        },
+        {
+          "x": -783.033691,
+          "y": 599.006287,
+          "z": -216.128754,
+          "aim_points": [
+            {
+              "label": "Popdog Box From A Main",
+              "type": "molotov",
+              "pitch": -15.079128,
+              "yaw": -59.899708,
+              "throw_type": "Jump throw"
+            }
+          ]
+        },
+        {
+          "x": -922.034912,
+          "y": -812.732056,
+          "z": -154.12875400000001,
+          "aim_points": [
+            {
+              "label": "Sidewalk From Halls",
+              "type": "smoke",
+              "pitch": 21.390907,
+              "yaw": -12.345027,
+              "throw_type": "Run + Left click"
+            }
+          ]
+        },
+        {
+          "x": -1152.965698,
+          "y": -1014.676697,
+          "z": -102.128731,
+          "aim_points": [
+            {
+              "label": "Sidewalk From Halls D",
+              "type": "smoke",
+              "pitch": -6.260818,
+              "yaw": -0.13298,
+              "throw_type": "Jump throw"
+            },
+            {
+              "label": "Left Bomb From Halls D",
+              "type": "smoke",
+              "pitch": -6.734897,
+              "yaw": -3.552184,
+              "throw_type": ""
+            },
+            {
+              "label": "Back Left Bomb From Halls",
+              "type": "molotov",
+              "pitch": -6.734897,
+              "yaw": -3.552184,
+              "throw_type": ""
+            }
+          ]
+        },
+        {
+          "x": -1040.968628,
+          "y": -1112.476562,
+          "z": -154.12875400000001,
+          "aim_points": [
+            {
+              "label": "Left Bomb From Halls",
+              "type": "smoke",
+              "pitch": 3.365668,
+              "yaw": 24.274433,
+              "throw_type": "Run + Left click"
+            }
+          ]
+        },
+        {
+          "x": -1145.96875,
+          "y": -1175.825073,
+          "z": -102.128754,
+          "aim_points": [
+            {
+              "label": "B Site From Halls",
+              "type": "flash",
+              "pitch": 15.058523,
+              "yaw": 21.345778,
+              "throw_type": "Run + Left click"
+            }
+          ]
+        },
+        {
+          "x": -1152.971313,
+          "y": -1278.669067,
+          "z": -102.128761,
+          "aim_points": [
+            {
+              "label": "Default B From Halls",
+              "type": "molotov",
+              "pitch": -15.385939,
+              "yaw": 35.030117,
+              "throw_type": "Left click"
+            }
+          ]
+        },
+        {
+          "x": -439.03125,
+          "y": 1384.031616,
+          "z": -212.207352,
+          "aim_points": [
+            {
+              "label": "Connector From Dumpster B",
+              "type": "smoke",
+              "pitch": -39.274014,
+              "yaw": -58.23275,
+              "throw_type": "Jump throw"
+            }
+          ]
+        },
+        {
+          "x": 1279.96814,
+          "y": 1743.96875,
+          "z": -212.541443,
+          "aim_points": [
+            {
+              "label": "Back Ivey From Pigeons",
+              "type": "smoke",
+              "pitch": -15.222467,
+              "yaw": -114.420395,
+              "throw_type": "Left click"
+            }
+          ]
+        },
+        {
+          "x": 459.488037,
+          "y": -639.880432,
+          "z": -216.128754,
+          "aim_points": [
+            {
+              "label": "A Main From Connector B",
+              "type": "molotov",
+              "pitch": -17.77968,
+              "yaw": 130.953262,
+              "throw_type": "Run + Left click"
+            }
+          ]
+        },
+        {
+          "x": 710.966248,
+          "y": -217.968735,
+          "z": -216.128754,
+          "aim_points": [
+            {
+              "label": "A Main From Backsite",
+              "type": "smoke",
+              "pitch": -22.372915,
+              "yaw": 152.992523,
+              "throw_type": "Run + Left click"
+            }
+          ]
+        },
+        {
+          "x": 379.015961,
+          "y": -548.032043,
+          "z": -210.639069,
+          "aim_points": [
+            {
+              "label": "Red Train From Connector",
+              "type": "flash",
+              "pitch": 8.067851,
+              "yaw": 114.685776,
+              "throw_type": "Run + Left click"
+            }
+          ]
+        },
+        {
+          "x": 214.03421,
+          "y": -337.42041,
+          "z": -217.843903,
+          "aim_points": [
+            {
+              "label": "A Main From Connector B",
+              "type": "smoke",
+              "pitch": -17.421574,
+              "yaw": 130.824341,
+              "throw_type": "Run + Jump throw"
+            }
+          ]
+        },
+        {
+          "x": -299.251099,
+          "y": -883.125854,
+          "z": -319.12875399999996,
+          "aim_points": [
+            {
+              "label": "Halls From Lower B",
+              "type": "flash",
+              "pitch": -0.331001,
+              "yaw": -178.757309,
+              "throw_type": "Right + Jump throw"
+            }
+          ]
+        },
+        {
+          "x": -786.325134,
+          "y": -919.782776,
+          "z": -205.209824,
+          "aim_points": [
+            {
+              "label": "Window From Lower B",
+              "type": "molotov",
+              "pitch": -27.069201,
+              "yaw": 143.029144,
+              "throw_type": "Left click"
+            }
+          ]
+        },
+        {
+          "x": 1061.968506,
+          "y": -807.031616,
+          "z": -319.12875399999996,
+          "aim_points": [
+            {
+              "label": "Default B From Barrels",
+              "type": "molotov",
+              "pitch": -12.183988,
+              "yaw": -163.756668,
+              "throw_type": ""
+            },
+            {
+              "label": "Upper B From Barrels",
+              "type": "molotov",
+              "pitch": 6.096961,
+              "yaw": -144.918884,
+              "throw_type": ""
+            }
+          ]
+        },
+        {
+          "x": 820.035217,
+          "y": 374.0242,
+          "z": -212.128754,
+          "aim_points": [
+            {
+              "label": "Ivy From Back 6",
+              "type": "flash",
+              "pitch": 13.810549,
+              "yaw": 47.203606,
+              "throw_type": ""
+            }
+          ]
+        },
+        {
+          "x": 794.032166,
+          "y": 451.181244,
+          "z": -212.128754,
+          "aim_points": [
+            {
+              "label": "Ivy From Back 6",
+              "type": "smoke",
+              "pitch": -51.385292,
+              "yaw": -53.795811,
+              "throw_type": ""
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "map": "de_vertigo",
+      "spots": [
+        {
+          "x": -656.922302,
+          "y": -1016.96875,
+          "z": 11645.726562,
+          "aim_points": [
+            {
+              "label": "A Site From Ramp",
+              "type": "smoke",
+              "pitch": -11.530025,
+              "yaw": 144.646225,
+              "throw_type": "Walk + Jump throw"
+            }
+          ]
+        },
+        {
+          "x": -1135.96875,
+          "y": -1221.96875,
+          "z": 11776.03125,
+          "aim_points": [
+            {
+              "label": "A Entry From Tarp",
+              "type": "smoke",
+              "pitch": -0.726251,
+              "yaw": 46.360096,
+              "throw_type": "Jump throw"
+            }
+          ]
+        },
+        {
+          "x": -842.164368,
+          "y": -1358.96875,
+          "z": 11648.03125,
+          "aim_points": [
+            {
+              "label": "Snipers Nest From Ramp",
+              "type": "smoke",
+              "pitch": -33.206562,
+              "yaw": 60.303345,
+              "throw_type": "Left click"
+            }
+          ]
+        },
+        {
+          "x": -640.143555,
+          "y": -1358.965942,
+          "z": 11649.366211,
+          "aim_points": [
+            {
+              "label": "Headshot From Ramp",
+              "type": "molotov",
+              "pitch": -28.745995,
+              "yaw": 55.518734,
+              "throw_type": "Left click"
+            }
+          ]
+        },
+        {
+          "x": -880.026367,
+          "y": -1295.933594,
+          "z": 11648.03125,
+          "aim_points": [
+            {
+              "label": "Default A From Ramp",
+              "type": "molotov",
+              "pitch": -29.780499,
+              "yaw": 51.987476,
+              "throw_type": "Walk + Jump throw"
+            }
+          ]
+        },
+        {
+          "x": -1135.96875,
+          "y": -1055.73291,
+          "z": 11776.03125,
+          "aim_points": [
+            {
+              "label": "Sidewalk From Sidewalk",
+              "type": "flash",
+              "pitch": 5.350014,
+              "yaw": 88.558907,
+              "throw_type": "Right + Jump throw"
+            }
+          ]
+        },
+        {
+          "x": -2374.270996,
+          "y": -112.96875,
+          "z": 11531.871094,
+          "aim_points": [
+            {
+              "label": "Ebox From B Stairs",
+              "type": "smoke",
+              "pitch": -62.747147,
+              "yaw": 57.509773,
+              "throw_type": "Left click"
+            }
+          ]
+        },
+        {
+          "x": -2240.194336,
+          "y": -151.447815,
+          "z": 11603.258789,
+          "aim_points": [
+            {
+              "label": "Pillar From B Stairs",
+              "type": "molotov",
+              "pitch": 5.136031,
+              "yaw": 101.362907,
+              "throw_type": "Jump throw"
+            },
+            {
+              "label": "Generator Left From Stairs",
+              "type": "smoke",
+              "pitch": -72.663162,
+              "yaw": 63.368538,
+              "throw_type": "Crouch + Jump throw"
+            },
+            {
+              "label": "Whitebox From Stairs",
+              "type": "flash",
+              "pitch": -29.656677,
+              "yaw": 110.859238,
+              "throw_type": "Left click"
+            }
+          ]
+        },
+        {
+          "x": -2374.270996,
+          "y": -112.96875,
+          "z": 11552.03125,
+          "aim_points": [
+            {
+              "label": "Triple From B Stairs",
+              "type": "molotov",
+              "pitch": -33.472359,
+              "yaw": 79.245087,
+              "throw_type": "Left click"
+            }
+          ]
+        },
+        {
+          "x": -2264.025879,
+          "y": -295.970703,
+          "z": 11618.075195,
+          "aim_points": [
+            {
+              "label": "B Cross From Stairs",
+              "type": "smoke",
+              "pitch": -24.807795,
+              "yaw": 92.129868,
+              "throw_type": "Left click"
+            }
+          ]
+        },
+        {
+          "x": -2528.970947,
+          "y": -186.353577,
+          "z": 11552.03125,
+          "aim_points": [
+            {
+              "label": "B Headshot From Stairs",
+              "type": "smoke",
+              "pitch": -53.615582,
+              "yaw": 54.582458,
+              "throw_type": "Left click"
+            }
+          ]
+        },
+        {
+          "x": -1969.971069,
+          "y": -273.530884,
+          "z": 11788.46582,
+          "aim_points": [
+            {
+              "label": "B Connector From Mid",
+              "type": "smoke",
+              "pitch": -16.541542,
+              "yaw": 51.867107,
+              "throw_type": "Left click"
+            },
+            {
+              "label": "Mid From Iron",
+              "type": "flash",
+              "pitch": -34.249706,
+              "yaw": 51.796398,
+              "throw_type": "Both clicks"
+            }
+          ]
+        },
+        {
+          "x": -1680.030518,
+          "y": -55.781738,
+          "z": 11776.03125,
+          "aim_points": [
+            {
+              "label": "Top Mid From Mid",
+              "type": "smoke",
+              "pitch": 0.430068,
+              "yaw": 166.593002,
+              "throw_type": "Run + Jump throw"
+            }
+          ]
+        },
+        {
+          "x": -1969.96936,
+          "y": -72.347839,
+          "z": 11776.03125,
+          "aim_points": [
+            {
+              "label": "Ct From Mid",
+              "type": "smoke",
+              "pitch": -11.702839,
+              "yaw": 26.312632,
+              "throw_type": "Left click"
+            }
+          ]
+        },
+        {
+          "x": -1947.530884,
+          "y": -295.96875,
+          "z": 11799.03125,
+          "aim_points": [
+            {
+              "label": "Connector From Mid Iron",
+              "type": "molotov",
+              "pitch": -13.922842,
+              "yaw": 53.318878,
+              "throw_type": "Left click"
+            }
+          ]
+        },
+        {
+          "x": -897.03125,
+          "y": 342.966553,
+          "z": 11776.03125,
+          "aim_points": [
+            {
+              "label": "A Ramp From Ct Mid",
+              "type": "smoke",
+              "pitch": -26.761667,
+              "yaw": -83.484726,
+              "throw_type": "Left click"
+            },
+            {
+              "label": "Mid From Ct Mid",
+              "type": "flash",
+              "pitch": -13.943545,
+              "yaw": -172.741791,
+              "throw_type": "Left click"
+            }
+          ]
+        },
+        {
+          "x": -503.96875,
+          "y": -509.122986,
+          "z": 11776.03125,
+          "aim_points": [
+            {
+              "label": "Tarp From A Site",
+              "type": "smoke",
+              "pitch": -8.858819,
+              "yaw": -147.825195,
+              "throw_type": "Run + Left click"
+            }
+          ]
+        },
+        {
+          "x": -63.03125,
+          "y": -354.96875,
+          "z": 11776.03125,
+          "aim_points": [
+            {
+              "label": "Default A From Headshot",
+              "type": "frag",
+              "pitch": -2.700796,
+              "yaw": -48.136364,
+              "throw_type": "Left click"
+            }
+          ]
+        },
+        {
+          "x": -187.03125,
+          "y": 238.96875,
+          "z": 11783.03125,
+          "aim_points": [
+            {
+              "label": "Default A From Heaven",
+              "type": "molotov",
+              "pitch": -9.135046,
+              "yaw": -98.323433,
+              "throw_type": "Jump throw"
+            },
+            {
+              "label": "A Site From Heaven",
+              "type": "flash",
+              "pitch": -31.53919,
+              "yaw": -113.053619,
+              "throw_type": "Left click"
+            }
+          ]
+        },
+        {
+          "x": -1295.96875,
+          "y": 980.365906,
+          "z": 11776.03125,
+          "aim_points": [
+            {
+              "label": "B Main From Ct Spawn",
+              "type": "smoke",
+              "pitch": -19.948698,
+              "yaw": -158.663406,
+              "throw_type": "Left click"
+            }
+          ]
+        },
+        {
+          "x": -2146.03125,
+          "y": 780.96875,
+          "z": 11744.03125,
+          "aim_points": [
+            {
+              "label": "Bottom B Main From B Site",
+              "type": "smoke",
+              "pitch": -29.636806,
+              "yaw": -133.699081,
+              "throw_type": "Left click"
+            }
+          ]
+        },
+        {
+          "x": -1435.284912,
+          "y": 540.973938,
+          "z": 11874.03125,
+          "aim_points": [
+            {
+              "label": "Default B From Connector",
+              "type": "molotov",
+              "pitch": -4.808038,
+              "yaw": 145.73674,
+              "throw_type": "Walk + Left click"
+            }
+          ]
+        },
+        {
+          "x": -1042.96875,
+          "y": 975.46698,
+          "z": 11776.03125,
+          "aim_points": [
+            {
+              "label": "Default B From Ct Spawn",
+              "type": "molotov",
+              "pitch": -14.372972,
+              "yaw": -175.724609,
+              "throw_type": "Left click"
+            }
+          ]
+        },
+        {
+          "x": -1737.856079,
+          "y": 764.682861,
+          "z": 11776.03125,
+          "aim_points": [
+            {
+              "label": "Default B From Generator",
+              "type": "frag",
+              "pitch": -13.237661,
+              "yaw": -126.629562,
+              "throw_type": "Left click"
+            }
+          ]
+        },
+        {
+          "x": -1187.969604,
+          "y": 359.93985,
+          "z": 11776.03125,
+          "aim_points": [
+            {
+              "label": "Mid From Ct",
+              "type": "smoke",
+              "pitch": 6.06642,
+              "yaw": -157.403427,
+              "throw_type": "Run + Left click"
+            }
+          ]
+        },
+        {
+          "x": -1585.653809,
+          "y": 438.96875,
+          "z": 11776.03125,
+          "aim_points": [
+            {
+              "label": "T Mid From Sandbags",
+              "type": "molotov",
+              "pitch": -19.825136,
+              "yaw": -115.104263,
+              "throw_type": "Jump throw"
+            }
+          ]
+        },
+        {
+          "x": -1758.536743,
+          "y": 155.028809,
+          "z": 11776.03125,
+          "aim_points": [
+            {
+              "label": "T Mid From Boost Box",
+              "type": "frag",
+              "pitch": -15.580291,
+              "yaw": -111.75322,
+              "throw_type": "Left click"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "map": "de_cache",
+      "spots": [
+        {
+          "x": 659.934631,
+          "y": 1400.936157,
+          "z": 1699.871216,
+          "aim_points": [
+            {
+              "label": "Forklift From A Main",
+              "type": "smoke",
+              "pitch": -7.651978,
+              "yaw": 125.45919,
+              "throw_type": "Walk + Left click"
+            }
+          ]
+        },
+        {
+          "x": 537.147217,
+          "y": 1426.031372,
+          "z": 1699.871216,
+          "aim_points": [
+            {
+              "label": "Forklift From A Main",
+              "type": "molotov",
+              "pitch": -8.296511,
+              "yaw": 97.433029,
+              "throw_type": "Run + Left click"
+            }
+          ]
+        },
+        {
+          "x": 680.128723,
+          "y": 1499.406372,
+          "z": 1699.871216,
+          "aim_points": [
+            {
+              "label": "Nbk From A Main",
+              "type": "molotov",
+              "pitch": -2.056178,
+              "yaw": 144.006256,
+              "throw_type": "Run + Left click"
+            }
+          ]
+        },
+        {
+          "x": 1764.534668,
+          "y": 500.907013,
+          "z": 1611.871216,
+          "aim_points": [
+            {
+              "label": "A Site From Outside Garage",
+              "type": "smoke",
+              "pitch": -46.628056,
+              "yaw": 140.033844,
+              "throw_type": "Jump throw"
+            }
+          ]
+        },
+        {
+          "x": 1797.64978,
+          "y": 726.429443,
+          "z": 1629.899414,
+          "aim_points": [
+            {
+              "label": "Highway From T Truck",
+              "type": "smoke",
+              "pitch": -22.771957,
+              "yaw": 172.157303,
+              "throw_type": "Jump throw"
+            }
+          ]
+        },
+        {
+          "x": 782.46875,
+          "y": 983.032532,
+          "z": 1699.871216,
+          "aim_points": [
+            {
+              "label": "A Main From A Main",
+              "type": "flash",
+              "pitch": -12.040845,
+              "yaw": 110.099152,
+              "throw_type": "Left click"
+            }
+          ]
+        },
+        {
+          "x": 1226.119873,
+          "y": -598.035767,
+          "z": 1611.871216,
+          "aim_points": [
+            {
+              "label": "B Main From B Halls",
+              "type": "smoke",
+              "pitch": -16.132547,
+              "yaw": -131.084,
+              "throw_type": "Run + Left click"
+            }
+          ]
+        },
+        {
+          "x": 433.812347,
+          "y": -871.463867,
+          "z": 1611.871216,
+          "aim_points": [
+            {
+              "label": "Ct From B Main",
+              "type": "smoke",
+              "pitch": -17.257473,
+              "yaw": 136.496201,
+              "throw_type": "Run + Left click"
+            }
+          ]
+        },
+        {
+          "x": 1702.942871,
+          "y": -1137.636108,
+          "z": 1632.033691,
+          "aim_points": [
+            {
+              "label": "Ct From T Boxes",
+              "type": "smoke",
+              "pitch": -49.062889,
+              "yaw": 175.598785,
+              "throw_type": "Jump throw"
+            }
+          ]
+        },
+        {
+          "x": 322.551636,
+          "y": -770.279358,
+          "z": 1593.871216,
+          "aim_points": [
+            {
+              "label": "Heaven From B Main",
+              "type": "smoke",
+              "pitch": -33.0116,
+              "yaw": 138.828247,
+              "throw_type": "Crouch walk + Left click"
+            }
+          ]
+        },
+        {
+          "x": 1448.715576,
+          "y": -792.220337,
+          "z": 1611.871216,
+          "aim_points": [
+            {
+              "label": "Heaven From B Halls B",
+              "type": "smoke",
+              "pitch": -37.349804,
+              "yaw": 176.531021,
+              "throw_type": "Jump throw"
+            }
+          ]
+        },
+        {
+          "x": 940.463989,
+          "y": -1464.469238,
+          "z": 1706.371216,
+          "aim_points": [
+            {
+              "label": "Headshot From Sun Room",
+              "type": "molotov",
+              "pitch": 8.879694,
+              "yaw": 171.962219,
+              "throw_type": "Jump throw"
+            }
+          ]
+        },
+        {
+          "x": 962.429565,
+          "y": -1464.470581,
+          "z": 1644.03125,
+          "aim_points": [
+            {
+              "label": "Default B From Sun Room",
+              "type": "molotov",
+              "pitch": -23.640791,
+              "yaw": 170.965759,
+              "throw_type": "Left click"
+            }
+          ]
+        },
+        {
+          "x": 2779.432373,
+          "y": -28.029297,
+          "z": 1611.635132,
+          "aim_points": [
+            {
+              "label": "Connector From T Spawn",
+              "type": "smoke",
+              "pitch": -8.766868,
+              "yaw": -179.56041,
+              "throw_type": "Run + Jump throw"
+            }
+          ]
+        },
+        {
+          "x": 1737.164917,
+          "y": 308.59375,
+          "z": 1612.246216,
+          "aim_points": [
+            {
+              "label": "Left Mid From Garage",
+              "type": "smoke",
+              "pitch": -10.935654,
+              "yaw": -174.030243,
+              "throw_type": "Left click"
+            }
+          ]
+        },
+        {
+          "x": 1233.091919,
+          "y": -161.136719,
+          "z": 1611.871216,
+          "aim_points": [
+            {
+              "label": "Mid From Garbage",
+              "type": "flash",
+              "pitch": -6.415309,
+              "yaw": 130.686539,
+              "throw_type": "Left click"
+            }
+          ]
+        },
+        {
+          "x": -925.78302,
+          "y": 1053.033325,
+          "z": 1684.736206,
+          "aim_points": [
+            {
+              "label": "A Main From Truck",
+              "type": "smoke",
+              "pitch": -21.666931,
+              "yaw": 24.274679,
+              "throw_type": "Jump throw"
+            }
+          ]
+        },
+        {
+          "x": -433.467773,
+          "y": 2244.96875,
+          "z": 1686.871216,
+          "aim_points": [
+            {
+              "label": "A Main From Quad",
+              "type": "flash",
+              "pitch": 9.104703,
+              "yaw": -31.449219,
+              "throw_type": "Run + Left click"
+            }
+          ]
+        },
+        {
+          "x": -376.607849,
+          "y": -766.384033,
+          "z": 1795.871216,
+          "aim_points": [
+            {
+              "label": "B Halls From Heaven",
+              "type": "smoke",
+              "pitch": 11.007466,
+              "yaw": 39.273014,
+              "throw_type": "Crouch + Left click"
+            }
+          ]
+        },
+        {
+          "x": -613.97229,
+          "y": -765.346619,
+          "z": 1795.871216,
+          "aim_points": [
+            {
+              "label": "Checkers From Heaven",
+              "type": "smoke",
+              "pitch": -2.363319,
+              "yaw": 14.09239,
+              "throw_type": "Run + Left click"
+            }
+          ]
+        },
+        {
+          "x": -509.146484,
+          "y": -3.620911,
+          "z": 1661.871216,
+          "aim_points": [
+            {
+              "label": "Garage From Connector",
+              "type": "smoke",
+              "pitch": 6.138082,
+              "yaw": 11.432444,
+              "throw_type": "Run + Left click"
+            }
+          ]
+        },
+        {
+          "x": -431.01001,
+          "y": -16.835632,
+          "z": 1661.871216,
+          "aim_points": [
+            {
+              "label": "Boost From Connector",
+              "type": "molotov",
+              "pitch": -18.98671,
+              "yaw": 27.333498,
+              "throw_type": "Crouch + Both clicks"
+            }
+          ]
+        },
+        {
+          "x": -685.95874,
+          "y": 194.933243,
+          "z": 1625.208008,
+          "aim_points": [
+            {
+              "label": "Mid From Connector",
+              "type": "flash",
+              "pitch": -51.304493,
+              "yaw": -1.915173,
+              "throw_type": ""
+            }
+          ]
+        },
+        {
+          "x": 1738.064453,
+          "y": 215.412933,
+          "z": 1612.246216,
+          "aim_points": [
+            {
+              "label": "Right Mid From Garage",
+              "type": "smoke",
+              "pitch": -10.9765,
+              "yaw": 174.379074,
+              "throw_type": ""
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
