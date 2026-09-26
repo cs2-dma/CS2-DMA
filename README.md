@@ -35,7 +35,8 @@ An open-source software framework designed for the research and implementation o
 
 <p style="font-size: 1.05em; color: #7f8c8d; margin: 20px 0;">
 <b>Are you a developer?</b> Suggest improvements to the project!<br>
-<b>Telegram:</b> <a href="https://t.me/ne_sravnim" style="text-decoration: none; color: #0088cc;">@ne_sravnim</a> &nbsp;|&nbsp;Write thanks for the project!
+<b>Telegram:</b> <a href="https://t.me/ne_sravnim" style="text-decoration: none; color: #0088cc;">@ne_sravnim</a> &nbsp;|&nbsp;Write thanks for the project!<br>
+<b>Discord:</b> <a style="text-decoration: none; color: #0088cc;">Corakevq</a> &nbsp;|&nbsp;Send a thank you for the work done on the project.!
 </p>
 
 <p style="font-size: 1.05em; color: #7f8c8d; margin: 15px 0;">
