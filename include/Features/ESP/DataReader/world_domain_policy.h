@@ -1,5 +1,7 @@
 #pragma once
 
+#include "app/Core/memory_address.h"
+
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
@@ -104,6 +106,12 @@ namespace esp::data
         if (entityClass == WorldEntityClass::MolotovProjectile && rawItemId == 48)
             return 48;
         return utilityId != 0 ? utilityId : rawItemId;
+    }
+
+    inline bool IsWorldDesignerNamePointerSample(uintptr_t address, size_t completedBytes) noexcept
+    {
+        return completedBytes == sizeof(address) &&
+            app::memory_address::IsCanonicalUserPointer(address);
     }
 
     inline std::string_view ReadWorldDesignerName(const char* name, size_t capacity,

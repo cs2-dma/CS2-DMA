@@ -1,16 +1,13 @@
     const uint64_t coreNowUs = TickNowUs();
     constexpr uint64_t kCoreTeamRefreshIntervalUs = 100000;
     constexpr uint64_t kCoreArmorRefreshIntervalUs = 16667;
-    constexpr uint64_t kPlayerFlagRefreshIntervalUs = 8333;
     constexpr uint64_t kPlayerEyeAnglesRefreshIntervalUs = 8333;
-    static uint64_t s_lastPlayerFlagReadUs = 0;
     static uint64_t s_lastPlayerEyeAnglesReadUs = 0;
     static uint64_t s_dynamicCadenceResetSerial = 0;
     const uint64_t dynamicCadenceResetSerial =
         s_sceneResetSerial.load(std::memory_order_relaxed);
     if (s_dynamicCadenceResetSerial != dynamicCadenceResetSerial) {
         s_dynamicCadenceResetSerial = dynamicCadenceResetSerial;
-        s_lastPlayerFlagReadUs = 0;
         s_lastPlayerEyeAnglesReadUs = 0;
     }
     auto dynamicCadenceDue = [&](bool requested, uint64_t lastReadUs, uint64_t intervalUs) {
@@ -19,10 +16,8 @@
                 coreNowUs < lastReadUs ||
                 (coreNowUs - lastReadUs) >= intervalUs);
     };
-    const bool readPlayerFlagsThisTick = dynamicCadenceDue(
-        wantsFastScopedFlag || wantsFastDefusingFlag || wantsFastBlindFlag,
-        s_lastPlayerFlagReadUs,
-        kPlayerFlagRefreshIntervalUs);
+    const bool readPlayerFlagsThisTick =
+        wantsFastScopedFlag || wantsFastDefusingFlag || wantsFastBlindFlag;
     const bool readEyeAnglesThisTick = dynamicCadenceDue(
         wantsFastEyeAngles,
         s_lastPlayerEyeAnglesReadUs,
@@ -423,8 +418,6 @@
         }
     };
     queueCorePlayerReads();
-    if (queuedCorePlayerReads && readPlayerFlagsThisTick)
-        s_lastPlayerFlagReadUs = coreNowUs;
     if (queuedCorePlayerReads && readEyeAnglesThisTick)
         s_lastPlayerEyeAnglesReadUs = coreNowUs;
 
@@ -735,25 +728,36 @@
     }
     static esp::data::PlayerFlagFilterState s_scopedFlagFilters[64] = {};
     static esp::data::PlayerFlagFilterState s_defusingFlagFilters[64] = {};
-    static esp::data::PlayerFlagFilterState s_blindFlagFilters[64] = {};
+    static esp::data::BlindFlashState s_blindFlagFilters[64] = {};
     static uintptr_t s_playerFlagPawns[64] = {};
+    static uint32_t s_playerFlagHandles[64] = {};
     static uint64_t s_playerFlagResetSerial = 0;
     const uint64_t playerFlagResetSerial =
         s_sceneResetSerial.load(std::memory_order_relaxed);
+    esp::PlayerFlagDiagnostics flagDiagnostics;
+    flagDiagnostics.sceneSerial = playerFlagResetSerial;
+    flagDiagnostics.sampledAtUs = coreNowUs;
+    flagDiagnostics.requestedMask = (wantsFastScopedFlag ? 1u : 0u) |
+        (wantsFastDefusingFlag ? 2u : 0u) | (wantsFastBlindFlag ? 4u : 0u) |
+        (wantsEspFlags ? 8u : 0u);
+    flagDiagnostics.gameTime = currentGameTime;
+    flagDiagnostics.gameTimeFresh = currentGameTimeFresh;
     if (s_playerFlagResetSerial != playerFlagResetSerial) {
         s_playerFlagResetSerial = playerFlagResetSerial;
         memset(s_scopedFlagFilters, 0, sizeof(s_scopedFlagFilters));
         memset(s_defusingFlagFilters, 0, sizeof(s_defusingFlagFilters));
         memset(s_blindFlagFilters, 0, sizeof(s_blindFlagFilters));
         memset(s_playerFlagPawns, 0, sizeof(s_playerFlagPawns));
+        memset(s_playerFlagHandles, 0, sizeof(s_playerFlagHandles));
     }
 
     for (int i = 0; i < 64; ++i) {
-        if (s_playerFlagPawns[i] != pawns[i]) {
+        if (s_playerFlagPawns[i] != pawns[i] || s_playerFlagHandles[i] != pawnHandles[i]) {
             s_playerFlagPawns[i] = pawns[i];
+            s_playerFlagHandles[i] = pawnHandles[i];
             esp::data::ResetPlayerFlagFilter(s_scopedFlagFilters[i]);
             esp::data::ResetPlayerFlagFilter(s_defusingFlagFilters[i]);
-            esp::data::ResetPlayerFlagFilter(s_blindFlagFilters[i]);
+            s_blindFlagFilters[i] = {};
         }
 
         const bool confirmedDead =
@@ -762,7 +766,7 @@
         if (!pawns[i] || confirmedDead) {
             esp::data::ResetPlayerFlagFilter(s_scopedFlagFilters[i]);
             esp::data::ResetPlayerFlagFilter(s_defusingFlagFilters[i]);
-            esp::data::ResetPlayerFlagFilter(s_blindFlagFilters[i]);
+            s_blindFlagFilters[i] = {};
             scopedFlags[i] = 0;
             defusingFlags[i] = 0;
             flashBangTimes[i] = 0.0f;
@@ -791,29 +795,31 @@
             ? esp::data::EvaluateBlindFlashSample(
                   flashBangTimes[i],
                   flashDurations[i],
-                  currentGameTime,
-                  s_blindFlagFilters[i].active)
+                  currentGameTime)
             : esp::data::BlindFlashSample{};
-        const bool blindActive =
-            esp::data::UpdatePlayerFlagFilter(
-                s_blindFlagFilters[i],
-                wantsFastBlindFlag,
-                blindSample.fresh,
-                blindSample.active,
-                coreNowUs);
+        const float blindRemaining = s_blindFlagFilters[i].Update(
+            wantsFastBlindFlag, blindSample, currentGameTimeSampleUs, coreNowUs);
+
+        flagDiagnostics.fresh[0] += scopedReadFresh[i] ? 1 : 0;
+        flagDiagnostics.fresh[1] += defusingReadFresh[i] ? 1 : 0;
+        flagDiagnostics.fresh[2] += flashReadFresh[i] ? 1 : 0;
+        flagDiagnostics.active[0] += scopedActive ? 1 : 0;
+        flagDiagnostics.active[1] += defusingActive ? 1 : 0;
+        flagDiagnostics.active[2] += blindRemaining > 0.0f ? 1 : 0;
+        if (wantsFastBlindFlag && flashDurationBytesRead[i] == sizeof(float) &&
+            std::isfinite(flashDurations[i]) &&
+            (flagDiagnostics.flashSlot < 0 || flashDurations[i] > flagDiagnostics.flashDuration)) {
+            flagDiagnostics.flashSlot = i;
+            flagDiagnostics.flashBangTime = flashBangTimes[i];
+            flagDiagnostics.flashDuration = flashDurations[i];
+        }
 
         scopedFlags[i] = scopedActive ? 1u : 0u;
         defusingFlags[i] = defusingActive ? 1u : 0u;
         s_cachedScopedFlags[i] = scopedFlags[i];
         s_cachedDefusingFlags[i] = defusingFlags[i];
-        if (blindActive) {
-            if (blindSample.fresh)
-                s_cachedFlashDurations[i] = blindSample.remainingSeconds;
-            flashDurations[i] = s_cachedFlashDurations[i];
-        } else {
-            flashDurations[i] = 0.0f;
-            s_cachedFlashDurations[i] = 0.0f;
-        }
+        flashDurations[i] = blindRemaining;
+        s_cachedFlashDurations[i] = blindRemaining;
     }
 
     for (int resolvedIdx = 0; resolvedIdx < playerResolvedSlotCount; ++resolvedIdx) {

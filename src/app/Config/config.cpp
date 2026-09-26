@@ -8,6 +8,7 @@
 #include "app/Input/input_device_policy.h"
 #include "app/Platform/file_replace.h"
 #include "Features/Target/target_policy.h"
+#include "Features/ESP/Render/presentation_policy.h"
 #include "Features/WebRadar/webradar.h"
 #include "Features/WebRadar/web_remote.h"
 
@@ -37,11 +38,6 @@ namespace {
 
     std::string s_activeProfile = "KevqDefault";
     std::mutex s_profileStateMutex;
-    std::string s_lastSavedJson;
-    std::string s_lastQueuedJson;
-    bool s_asyncSaveInitialized = false;
-    std::mutex s_saveStateMutex;
-    std::chrono::steady_clock::time_point s_nextSaveRetryAt = {};
     std::atomic<int64_t> s_nextDirtyCheckMs{0};
 
     std::string CopyActiveProfile()
@@ -54,30 +50,6 @@ namespace {
     {
         std::lock_guard<std::mutex> lock(s_profileStateMutex);
         s_activeProfile = std::move(profileName);
-    }
-
-    void InitializeSaveState(std::string serialized)
-    {
-        std::lock_guard<std::mutex> lock(s_saveStateMutex);
-        s_lastSavedJson = serialized;
-        s_lastQueuedJson = std::move(serialized);
-        s_asyncSaveInitialized = true;
-        s_nextSaveRetryAt = {};
-    }
-
-    void MarkSaveSucceeded(std::string serialized)
-    {
-        std::lock_guard<std::mutex> lock(s_saveStateMutex);
-        s_lastSavedJson = std::move(serialized);
-        s_asyncSaveInitialized = true;
-        s_nextSaveRetryAt = {};
-    }
-
-    void MarkSaveFailed()
-    {
-        std::lock_guard<std::mutex> lock(s_saveStateMutex);
-        s_lastQueuedJson.clear();
-        s_nextSaveRetryAt = std::chrono::steady_clock::now() + std::chrono::seconds(2);
     }
 
     using app::config_parse::ParseBoolString;
@@ -479,6 +451,7 @@ namespace {
         restoreOutsideRange(g::espFlagMoneySize, 0.0f, 24.0f, defaults.esp.flagMoneySize);
         restoreOutsideRange(g::espBombTextSize, 0.0f, 24.0f, defaults.esp.bombTextSize);
         restoreOutsideRange(g::espBoxThickness, 0.5f, 4.0f, defaults.esp.boxThickness);
+        restoreOutsideRange(g::espSkeletonHeadScale, 0.5f, 2.0f, defaults.esp.skeletonHeadScale);
         if (g::espBoxStyle < 0 || g::espBoxStyle > 2)
             g::espBoxStyle = defaults.esp.boxStyle;
         if (g::espBoxCornerPercent < 10 || g::espBoxCornerPercent > 45)
@@ -487,6 +460,22 @@ namespace {
             g::espHealthColorMode = defaults.esp.healthColorMode;
         if (g::espArmorColorMode < 0 || g::espArmorColorMode > 2)
             g::espArmorColorMode = defaults.esp.armorColorMode;
+        {
+            auto& p=g::espSettings.presentation;
+            p.healthSide=std::clamp(p.healthSide,0,3); p.armorSide=std::clamp(p.armorSide,0,3);
+            p.healthValueMode=std::clamp(p.healthValueMode,-1,2); p.armorValueMode=std::clamp(p.armorValueMode,-1,2);
+            p.armorStyle=std::clamp(p.armorStyle,0,1); p.nameSide=std::clamp(p.nameSide,0,3);
+            p.flagsSide=std::clamp(p.flagsSide,0,1); p.flagsStyle=std::clamp(p.flagsStyle,0,2);
+            p.flagsLimit=std::clamp(p.flagsLimit,1,7); p.flagsOrder=esp::render::NormalizeFlagOrder(p.flagsOrder);
+            p.snapOrigin=std::clamp(p.snapOrigin,-1,2); p.snapEndpoint=std::clamp(p.snapEndpoint,0,1);
+            p.snapLimit=std::clamp(p.snapLimit,1,64);
+            restoreOutsideRange(p.healthWidth,1.0f,8.0f,2.0f);
+            restoreOutsideRange(p.armorWidth,1.0f,8.0f,2.0f);
+            restoreOutsideRange(p.nameMaxWidth,50.0f,300.0f,150.0f);
+            restoreOutsideRange(p.snapThickness,0.5f,4.0f,1.0f);
+            restoreOutsideRange(p.snapOpacity,0.0f,1.0f,1.0f);
+            restoreOutsideRange(p.snapMaxDistance,1.0f,500.0f,150.0f);
+        }
         restoreOutsideRange(
             g::espSkeletonThickness,
             0.5f,
@@ -495,15 +484,9 @@ namespace {
         g::targetFovRadius = target::policy::SanitizeFovRadius(
             g::targetFovRadius,
             defaults.target.fovRadius);
-        g::targetAimSmoothing = target::policy::SanitizeSmoothing(
-            g::targetAimSmoothing,
-            defaults.target.aimSmoothing);
         g::targetAimBone = target::policy::SanitizeAimBone(
             g::targetAimBone,
             defaults.target.aimBone);
-        g::targetTriggerAimSmoothing = target::policy::SanitizeSmoothing(
-            g::targetTriggerAimSmoothing,
-            defaults.target.triggerAimSmoothing);
         g::targetTriggerAimBone = target::policy::SanitizeAimBone(
             g::targetTriggerAimBone,
             defaults.target.triggerAimBone);
@@ -513,6 +496,16 @@ namespace {
         for (size_t index = 0; index < g::targetWeaponProfiles.size(); ++index) {
             auto& profile = g::targetWeaponProfiles[index];
             const auto& fallback = defaults.target.weaponProfiles[index];
+            if (profile.aimMotionStyle < -1 || profile.aimMotionStyle > 2) profile.aimMotionStyle = -1;
+            profile.aimReactionMs = target::policy::SanitizeDelayMs(profile.aimReactionMs, 0);
+            restoreOutsideRange(profile.aimAssistStrength, 0.0f, 100.0f, fallback.aimAssistStrength);
+            restoreOutsideRange(profile.aimAssistMaxSpeed, 1.0f, 180.0f, fallback.aimAssistMaxSpeed);
+            restoreOutsideRange(profile.aimAssistDeadzone, 0.0f, 1.0f, fallback.aimAssistDeadzone);
+            restoreOutsideRange(profile.aimRecoilStrength, 0.0f, 100.0f, fallback.aimRecoilStrength);
+            restoreOutsideRange(profile.aimWindGravity, 4.0f, 40.0f, fallback.aimWindGravity);
+            restoreOutsideRange(profile.aimWindFluctuation, 0.0f, 40.0f, fallback.aimWindFluctuation);
+            restoreOutsideRange(profile.aimWindMaxStep, 1.0f, 40.0f, fallback.aimWindMaxStep);
+            restoreOutsideRange(profile.aimWindDistance, 1.0f, 40.0f, fallback.aimWindDistance);
             profile.fovRadius = target::policy::SanitizeFovRadius(
                 profile.fovRadius,
                 fallback.fovRadius);
@@ -645,6 +638,8 @@ namespace {
         LoadFloat(ini, "ESP", "DistanceSize", g::espDistanceSize);
         LoadBool(ini, "ESP", "Skeleton", g::espSkeleton);
         LoadBool(ini, "ESP", "SkeletonDots", g::espSkeletonDots);
+        LoadBool(ini, "ESP", "SkeletonHeadCircle", g::espSkeletonHeadCircle);
+        LoadFloat(ini, "ESP", "SkeletonHeadScale", g::espSkeletonHeadScale);
         LoadBool(ini, "ESP", "Snaplines", g::espSnaplines);
         LoadBool(ini, "ESP", "SnapFromTop", g::espSnaplineFromTop);
         LoadBool(ini, "ESP", "VisibilityColoring", g::espVisibilityColoring);
@@ -734,20 +729,20 @@ namespace {
         LoadInt(ini, "Target", "AimKey", g::targetAimKey);
         LoadInt(ini, "Target", "AimActivationMode", g::targetAimActivationMode);
         LoadInt(ini, "Target", "AimBone", g::targetAimBone);
-        LoadFloat(ini, "Target", "AimSmoothing", g::targetAimSmoothing);
         LoadBool(ini, "Target", "AimVisibleOnly", g::targetAimVisibleOnly);
         LoadBool(ini, "Target", "AimPredictive", g::targetAimPredictive);
         LoadBool(ini, "Target", "AimRecoilControl", g::targetAimRecoilControl);
         LoadBool(ini, "Target", "AimHumanization", g::targetAimHumanization);
+        LoadBool(ini, "Target", "AimTargetLock", g::targetAimTargetLock);
         LoadBool(ini, "Target", "TriggerbotEnabled", g::targetTriggerbotEnabled);
         LoadInt(ini, "Target", "TriggerKey", g::targetTriggerKey);
         LoadInt(ini, "Target", "TriggerActivationMode", g::targetTriggerActivationMode);
         LoadBool(ini, "Target", "TriggerAimAssist", g::targetTriggerAimAssist);
         LoadInt(ini, "Target", "TriggerAimBone", g::targetTriggerAimBone);
-        LoadFloat(ini, "Target", "TriggerAimSmoothing", g::targetTriggerAimSmoothing);
         LoadBool(ini, "Target", "TriggerAimPredictive", g::targetTriggerAimPredictive);
         LoadBool(ini, "Target", "TriggerAimRecoilControl", g::targetTriggerAimRecoilControl);
         LoadBool(ini, "Target", "TriggerAimHumanization", g::targetTriggerAimHumanization);
+        LoadBool(ini, "Target", "TriggerTargetLock", g::targetTriggerTargetLock);
         LoadInt(ini, "Target", "TriggerDelayMs", g::targetTriggerDelayMs);
         LoadBool(ini, "Target", "TriggerVisibleOnly", g::targetTriggerVisibleOnly);
         LoadBool(ini, "Target", "TriggerAutoShot", g::targetTriggerAutoShot);
@@ -755,8 +750,23 @@ namespace {
             const std::string prefix = "WeaponProfile" +
                 std::to_string(index);
             auto& profile = g::targetWeaponProfiles[index];
+            LoadFloat(ini, "Target", "AimSmoothing", profile.aimSmoothing);
+            LoadFloat(ini, "Target", "TriggerAimSmoothing", profile.triggerSmoothing);
             LoadFloat(ini, "Target", (prefix + "FovRadius").c_str(), profile.fovRadius);
             LoadFloat(ini, "Target", (prefix + "AimSmoothing").c_str(), profile.aimSmoothing);
+            LoadBool(ini, "Target", (prefix + "AimSoftAssist").c_str(), profile.aimSoftAssist);
+            LoadInt(ini, "Target", (prefix + "AimMotionStyle").c_str(), profile.aimMotionStyle);
+            LoadInt(ini, "Target", (prefix + "AimReactionMs").c_str(), profile.aimReactionMs);
+            LoadBool(ini, "Target", (prefix + "TriggerForceCenter").c_str(), profile.triggerForceCenter);
+            LoadFloat(ini, "Target", (prefix + "AimAssistStrength").c_str(), profile.aimAssistStrength);
+            LoadFloat(ini, "Target", (prefix + "AimAssistMaxSpeed").c_str(), profile.aimAssistMaxSpeed);
+            LoadFloat(ini, "Target", (prefix + "AimAssistDeadzone").c_str(), profile.aimAssistDeadzone);
+            LoadFloat(ini, "Target", (prefix + "AimRecoilStrength").c_str(), profile.aimRecoilStrength);
+            LoadBool(ini, "Target", (prefix + "AimWindMouse").c_str(), profile.aimWindMouse);
+            LoadFloat(ini, "Target", (prefix + "AimWindGravity").c_str(), profile.aimWindGravity);
+            LoadFloat(ini, "Target", (prefix + "AimWindFluctuation").c_str(), profile.aimWindFluctuation);
+            LoadFloat(ini, "Target", (prefix + "AimWindMaxStep").c_str(), profile.aimWindMaxStep);
+            LoadFloat(ini, "Target", (prefix + "AimWindDistance").c_str(), profile.aimWindDistance);
             LoadFloat(ini, "Target", (prefix + "TriggerSmoothing").c_str(), profile.triggerSmoothing);
             LoadFloat(ini, "Target", (prefix + "Hitchance").c_str(), profile.hitchance);
             LoadFloat(ini, "Target", (prefix + "MinimumDamage").c_str(), profile.minimumDamage);
@@ -765,6 +775,7 @@ namespace {
             profile.aimAutowall = profile.autowall;
             LoadFloat(ini, "Target", (prefix + "AimMinimumDamage").c_str(), profile.aimMinimumDamage);
             LoadBool(ini, "Target", (prefix + "AimAutowall").c_str(), profile.aimAutowall);
+            LoadBool(ini, "Target", (prefix + "AimDamageCheck").c_str(), profile.aimDamageCheck);
             LoadFloat(ini, "Target", (prefix + "TriggerHitchance").c_str(), profile.hitchance);
             LoadBool(ini, "Target", (prefix + "TriggerHitchanceEnabled").c_str(), profile.hitchanceEnabled);
             LoadBool(ini, "Target", (prefix + "TriggerSeedWindowEnabled").c_str(), profile.seedWindowEnabled);
@@ -855,15 +866,8 @@ namespace {
         return ini;
     }
 
-    bool SaveJsonConfig(const std::string& jsonPath)
+    bool WriteJsonConfig(const std::string& jsonPath, const json& finalRoot)
     {
-        json finalRoot;
-        {
-            std::lock_guard<std::recursive_mutex> lock(g::settingsMutex);
-            #include "config_parts/config_save_json_body.inl"
-            finalRoot = std::move(root);
-        }
-
         std::filesystem::path path(jsonPath);
         std::error_code ec;
         std::filesystem::create_directories(path.parent_path(), ec);
@@ -883,8 +887,14 @@ namespace {
             std::filesystem::remove(tmpPath, ec);
             return false;
         }
-        MarkSaveSucceeded(finalRoot.dump());
         return true;
+    }
+
+    bool SaveJsonConfig(const std::string& jsonPath)
+    {
+        std::lock_guard<std::recursive_mutex> lock(g::settingsMutex);
+        #include "config_parts/config_save_json_body.inl"
+        return WriteJsonConfig(jsonPath, root);
     }
 
     bool LoadJsonConfig(const std::string& jsonPath)
@@ -904,12 +914,6 @@ namespace {
             ValidateLoadedValues();
             g::configJustLoaded = true;
 
-            json saveRoot;
-            {
-                #include "config_parts/config_save_json_body.inl"
-                saveRoot = std::move(root);
-            }
-            InitializeSaveState(saveRoot.dump());
         }
         return true;
     }
@@ -927,12 +931,6 @@ namespace {
             ValidateLoadedValues();
             g::configJustLoaded = true;
 
-            json saveRoot;
-            {
-                #include "config_parts/config_save_json_body.inl"
-                saveRoot = std::move(root);
-            }
-            InitializeSaveState(saveRoot.dump());
         }
         return true;
     }
@@ -1014,129 +1012,118 @@ namespace {
 }
 
 namespace {
-    bool SaveProfileContents(const std::string& profileName)
-    {
-        const std::string cleanName = SanitizeProfileName(profileName);
-        if (!SaveToPath(BuildProfilePath(cleanName)))
-            return false;
+    struct ProfileSaveJob {
+        std::string profile;
+        json root;
+        webradar::remote::Settings remote;
+        uint64_t sequence = 0;
+    };
 
-        webradar::remote::SaveSettings(cleanName);
-        DeleteLegacyProfileFiles(cleanName);
+    std::mutex s_asyncSaveMutex;
+    std::condition_variable_any s_asyncSaveCv;
+    std::unordered_map<std::string, ProfileSaveJob> s_pendingSaves;
+    std::unordered_map<std::string, std::string> s_queuedSnapshots;
+    std::unordered_map<std::string, std::chrono::steady_clock::time_point> s_saveRetryAt;
+    std::mutex s_profileWriteMutex;
+    std::unordered_map<std::string, uint64_t> s_writtenSequences;
+    uint64_t s_saveSequence = 0;
+    bool s_asyncSaveActive = false;
+    bool s_asyncSaveStarted = false;
+    std::jthread s_asyncSaveThread;
+
+    ProfileSaveJob CaptureProfileSave(const std::string& profileName)
+    {
+        std::lock_guard<std::recursive_mutex> lock(g::settingsMutex);
+        #include "config_parts/config_save_json_body.inl"
+        return {SanitizeProfileName(profileName), std::move(root),
+            webradar::remote::CaptureSettingsFromGlobals(), ++s_saveSequence};
+    }
+
+    bool SaveProfileContents(const ProfileSaveJob& job)
+    {
+        std::lock_guard<std::mutex> writeLock(s_profileWriteMutex);
+        auto& written = s_writtenSequences[job.profile];
+        if (job.sequence <= written)
+            return true;
+        if (!WriteJsonConfig(BuildProfilePath(job.profile), job.root) ||
+            !webradar::remote::SaveSettings(job.profile, job.remote))
+            return false;
+        written = job.sequence;
+        DeleteLegacyProfileFiles(job.profile);
         return true;
     }
 
-    bool SaveDirtyProfileIfNeeded()
+    void AsyncSaveLoop(const std::stop_token& stopToken) noexcept
     {
-        json currentRoot;
-        {
-            std::lock_guard<std::recursive_mutex> lock(g::settingsMutex);
-            #include "config_parts/config_save_json_body.inl"
-            currentRoot = std::move(root);
-        }
-
-        std::string currentDump = currentRoot.dump();
-        bool shouldSave = false;
-        {
-            std::lock_guard<std::mutex> lock(s_saveStateMutex);
-            if (!s_asyncSaveInitialized) {
-                s_lastSavedJson = currentDump;
-                s_lastQueuedJson = std::move(currentDump);
-                s_asyncSaveInitialized = true;
-                s_nextSaveRetryAt = {};
-                return true;
+        for (;;) {
+            ProfileSaveJob job;
+            {
+                std::unique_lock<std::mutex> lock(s_asyncSaveMutex);
+                s_asyncSaveCv.wait(lock, stopToken, [&] {
+                    return !s_pendingSaves.empty() || stopToken.stop_requested();
+                });
+                if (s_pendingSaves.empty())
+                    break;
+                auto it = s_pendingSaves.begin();
+                job = std::move(it->second);
+                s_pendingSaves.erase(it);
+                s_asyncSaveActive = true;
             }
-
-            const auto now = std::chrono::steady_clock::now();
-            const bool retryAllowed =
-                s_nextSaveRetryAt.time_since_epoch().count() == 0 ||
-                now >= s_nextSaveRetryAt;
-            if (retryAllowed &&
-                currentDump != s_lastSavedJson &&
-                currentDump != s_lastQueuedJson) {
-                s_lastQueuedJson = std::move(currentDump);
-                shouldSave = true;
+            bool saved = false;
+            try {
+                saved = SaveProfileContents(job);
+            } catch (...) {
+                app::diagnostics::WriteFallbackError("Config snapshot save failed");
             }
+            {
+                std::lock_guard<std::mutex> lock(s_asyncSaveMutex);
+                if (!saved) {
+                    s_queuedSnapshots.erase(job.profile);
+                    s_saveRetryAt[job.profile] = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+                } else {
+                    s_saveRetryAt.erase(job.profile);
+                }
+                s_asyncSaveActive = false;
+            }
+            s_asyncSaveCv.notify_all();
         }
+    }
 
-        return !shouldSave || SaveProfileContents(CopyActiveProfile());
+    void QueueProfileSave(ProfileSaveJob job, bool onlyIfDirty)
+    {
+        std::lock_guard<std::mutex> lock(s_asyncSaveMutex);
+        const std::string serialized = job.root.dump() + json::array({job.remote.enabled,
+            job.remote.host, job.remote.webPort, job.remote.sshPort, job.remote.login,
+            job.remote.password, job.remote.remotePath}).dump();
+        if (onlyIfDirty) {
+            const auto retry = s_saveRetryAt.find(job.profile);
+            if (retry != s_saveRetryAt.end() && std::chrono::steady_clock::now() < retry->second)
+                return;
+        }
+        const auto previous = s_queuedSnapshots.find(job.profile);
+        if (onlyIfDirty && previous != s_queuedSnapshots.end() &&
+            previous->second == serialized)
+            return;
+        if (!s_asyncSaveStarted) {
+            s_asyncSaveThread = std::jthread(AsyncSaveLoop);
+            s_asyncSaveStarted = true;
+        }
+        s_queuedSnapshots[job.profile] = serialized;
+        s_pendingSaves.insert_or_assign(job.profile, std::move(job));
+        s_asyncSaveCv.notify_one();
     }
 }
 
 void config::Save()
 {
+    std::lock_guard<std::recursive_mutex> settingsLock(g::settingsMutex);
     SaveNamed(CopyActiveProfile());
-}
-
-namespace {
-    std::mutex s_asyncSaveMutex;
-    std::condition_variable s_asyncSaveCv;
-    std::jthread s_asyncSaveThread;
-    std::string s_asyncSaveProfile = "KevqDefault";
-    std::atomic<bool> s_asyncSavePending{false};
-    std::atomic<bool> s_asyncDirtyCheckPending{false};
-    std::atomic<bool> s_asyncSaveActive{false};
-    std::atomic<bool> s_asyncSaveStarted{false};
-
-    void AsyncSaveLoop(const std::stop_token& stopToken) noexcept
-    {
-        while (!stopToken.stop_requested()) {
-            try {
-                std::unique_lock<std::mutex> lock(s_asyncSaveMutex);
-                s_asyncSaveCv.wait_for(lock, std::chrono::milliseconds(250), [&stopToken] {
-                    return s_asyncSavePending.load(std::memory_order_acquire) ||
-                           s_asyncDirtyCheckPending.load(std::memory_order_acquire) ||
-                           stopToken.stop_requested();
-                });
-                if (stopToken.stop_requested())
-                    break;
-                const bool saveRequested =
-                    s_asyncSavePending.exchange(false, std::memory_order_acq_rel);
-                const bool dirtyCheckRequested =
-                    s_asyncDirtyCheckPending.exchange(false, std::memory_order_acq_rel);
-                if (!saveRequested && !dirtyCheckRequested)
-                    continue;
-                const std::string profileToSave =
-                    saveRequested ? s_asyncSaveProfile : std::string{};
-                lock.unlock();
-                std::this_thread::sleep_for(std::chrono::milliseconds(50));
-                s_asyncSaveActive.store(true, std::memory_order_release);
-                const bool saveSucceeded = saveRequested
-                    ? SaveProfileContents(profileToSave)
-                    : SaveDirtyProfileIfNeeded();
-                if (!saveSucceeded)
-                    MarkSaveFailed();
-            } catch (...) {
-                try {
-                    MarkSaveFailed();
-                } catch (...) {
-                    app::diagnostics::WriteFallbackError(
-                        "Config async-save failure handler threw an exception");
-                }
-            }
-            s_asyncSaveActive.store(false, std::memory_order_release);
-            s_asyncSaveCv.notify_all();
-        }
-    }
-
-    void EnsureAsyncSaveThread()
-    {
-        bool expected = false;
-        if (!s_asyncSaveStarted.compare_exchange_strong(expected, true, std::memory_order_acq_rel))
-            return;
-        s_asyncSaveThread = std::jthread(AsyncSaveLoop);
-    }
 }
 
 void config::SaveAsync()
 {
-    const std::string activeProfile = CopyActiveProfile();
-    {
-        std::lock_guard<std::mutex> lock(s_asyncSaveMutex);
-        EnsureAsyncSaveThread();
-        s_asyncSaveProfile = activeProfile;
-        s_asyncSavePending.store(true, std::memory_order_release);
-    }
-    s_asyncSaveCv.notify_one();
+    std::lock_guard<std::recursive_mutex> lock(g::settingsMutex);
+    QueueProfileSave(CaptureProfileSave(CopyActiveProfile()), false);
 }
 
 void config::SaveIfDirty()
@@ -1145,52 +1132,29 @@ void config::SaveIfDirty()
     const int64_t nowMs = std::chrono::duration_cast<std::chrono::milliseconds>(
         std::chrono::steady_clock::now().time_since_epoch()).count();
     int64_t nextCheckMs = s_nextDirtyCheckMs.load(std::memory_order_relaxed);
-    if (nowMs < nextCheckMs)
+    if (nowMs < nextCheckMs || !s_nextDirtyCheckMs.compare_exchange_strong(
+            nextCheckMs, nowMs + kDirtyCheckIntervalMs, std::memory_order_relaxed))
         return;
-    if (!s_nextDirtyCheckMs.compare_exchange_strong(
-            nextCheckMs,
-            nowMs + kDirtyCheckIntervalMs,
-            std::memory_order_relaxed,
-            std::memory_order_relaxed)) {
-        return;
-    }
-
-    {
-        std::lock_guard<std::mutex> lock(s_asyncSaveMutex);
-        EnsureAsyncSaveThread();
-        s_asyncDirtyCheckPending.store(true, std::memory_order_release);
-    }
-    s_asyncSaveCv.notify_one();
+    std::lock_guard<std::recursive_mutex> lock(g::settingsMutex);
+    QueueProfileSave(CaptureProfileSave(CopyActiveProfile()), true);
 }
 
 void config::FlushAsyncSaves()
 {
-    if (!s_asyncSaveStarted.load(std::memory_order_acquire))
-        return;
-
-    const std::string activeProfile = CopyActiveProfile();
-    {
-        std::lock_guard<std::mutex> lock(s_asyncSaveMutex);
-        s_asyncSaveProfile = activeProfile;
-        s_asyncSavePending.store(true, std::memory_order_release);
-    }
-    s_asyncSaveCv.notify_one();
-
-    
+    std::lock_guard<std::recursive_mutex> settingsLock(g::settingsMutex);
+    SaveAsync();
     {
         std::unique_lock<std::mutex> lock(s_asyncSaveMutex);
-        s_asyncSaveCv.wait_for(lock, std::chrono::seconds(2), [] {
-            return !s_asyncSavePending.load(std::memory_order_acquire) &&
-                   !s_asyncDirtyCheckPending.load(std::memory_order_acquire) &&
-                   !s_asyncSaveActive.load(std::memory_order_acquire);
+        s_asyncSaveCv.wait(lock, [] {
+            return s_pendingSaves.empty() && !s_asyncSaveActive;
         });
+        s_asyncSaveThread.request_stop();
+        s_asyncSaveCv.notify_one();
     }
-
-    
-    s_asyncSaveThread.request_stop();
-    s_asyncSaveCv.notify_one();
     if (s_asyncSaveThread.joinable())
         s_asyncSaveThread.join();
+    std::lock_guard<std::mutex> lock(s_asyncSaveMutex);
+    s_asyncSaveStarted = false;
 }
 
 void config::Load()
@@ -1208,10 +1172,11 @@ void config::Load()
 
 bool config::SaveNamed(const std::string& profileName)
 {
+    std::lock_guard<std::recursive_mutex> settingsLock(g::settingsMutex);
     if (!IsUsableProfileName(profileName))
         return false;
     const std::string cleanName = SanitizeProfileName(profileName);
-    if (!SaveProfileContents(cleanName))
+    if (!SaveProfileContents(CaptureProfileSave(cleanName)))
         return false;
 
     SetActiveProfile(cleanName);
@@ -1221,6 +1186,12 @@ bool config::SaveNamed(const std::string& profileName)
 
 bool config::LoadNamed(const std::string& profileName)
 {
+    std::lock_guard<std::recursive_mutex> settingsLock(g::settingsMutex);
+    {
+        std::unique_lock<std::mutex> pendingLock(s_asyncSaveMutex);
+        s_asyncSaveCv.wait(pendingLock, [] { return s_pendingSaves.empty() && !s_asyncSaveActive; });
+    }
+    std::lock_guard<std::mutex> writeLock(s_profileWriteMutex);
     if (!IsUsableProfileName(profileName))
         return false;
     const std::string cleanName = SanitizeProfileName(profileName);
@@ -1237,6 +1208,8 @@ bool config::LoadNamed(const std::string& profileName)
 
 std::vector<std::string> config::ListProfiles()
 {
+    std::lock_guard<std::recursive_mutex> settingsLock(g::settingsMutex);
+    std::lock_guard<std::mutex> writeLock(s_profileWriteMutex);
     MigrateAllLegacyProfilesToJson();
 
     std::vector<std::string> result;

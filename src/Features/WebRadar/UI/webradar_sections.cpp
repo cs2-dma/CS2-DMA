@@ -7,6 +7,7 @@
 #include "app/UI/MenuShell/menu_utils.h"
 #include "app/UI/MenuShell/ui_widgets.h"
 #include "Features/WebRadar/webradar.h"
+#include "Features/Radar/map_registry.h"
 
 #include <algorithm>
 #include <atomic>
@@ -31,26 +32,6 @@ namespace
     std::string s_remoteTaskStatus;
     bool s_remoteSaveDirty = false;
     std::chrono::steady_clock::time_point s_remoteLastChange{};
-
-    constexpr const char* kMapOverrideItems[] = {
-        "Auto (Detect)",
-        "de_mirage",
-        "de_inferno",
-        "de_dust2",
-        "de_nuke",
-        "de_overpass",
-        "de_train",
-        "ar_baggage",
-        "ar_shoots",
-        "ar_shoots_night",
-        "de_ancient",
-        "de_ancient_night",
-        "de_anubis",
-        "de_vertigo",
-        "cs_office",
-        "cs_italy",
-        "aim_custom"
-    };
 
     void OpenRadarLink(const std::string& link, ui::IStatusSink& statusSink, const char* okStatus, const char* failStatus)
     {
@@ -83,7 +64,7 @@ namespace
 
     void SaveRemoteSettings()
     {
-        webradar::remote::SaveSettings(config::GetActiveProfile());
+        config::SaveAsync();
         webradar::remote::Configure(webradar::remote::CaptureSettingsFromGlobals());
         s_remoteSaveDirty = false;
     }
@@ -264,34 +245,28 @@ void ui::tabs::webradar_sections::RenderConnectionSection(MenuState& state, cons
 
     }
 
-    int mapOverrideIndex = 0;
-    for (int i = 1; i < IM_ARRAYSIZE(kMapOverrideItems); ++i) {
-        if (_stricmp(state.webMapOverride, kMapOverrideItems[i]) == 0) {
-            mapOverrideIndex = i;
-            break;
-        }
-    }
-
-        ImGui::TextDisabled("%s", KEVQ_TR("Map Override"));
+    ImGui::TextDisabled("%s", KEVQ_TR("Map Override"));
     ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x);
     bool mapChanged = false;
-        const char* mapOverrideLabel = mapOverrideIndex == 0
-            ? KEVQ_TR("Auto (Detect)")
-            : kMapOverrideItems[mapOverrideIndex];
-        if (ImGui::BeginCombo("##map_override", mapOverrideLabel)) {
-        for (int i = 0; i < IM_ARRAYSIZE(kMapOverrideItems); ++i) {
-            const bool selected = (mapOverrideIndex == i);
-                const char* itemLabel = i == 0
-                    ? KEVQ_TR("Auto (Detect)")
-                    : kMapOverrideItems[i];
-                if (ImGui::Selectable(itemLabel, selected)) {
-                mapOverrideIndex = i;
-                const char* selectedValue = (i == 0) ? "" : kMapOverrideItems[i];
-                strncpy_s(state.webMapOverride, sizeof(state.webMapOverride), selectedValue, _TRUNCATE);
+    const auto* selectedMap = radar::FindMapByName(state.webMapOverride);
+    const char* mapOverrideLabel = !state.webMapOverride[0] ? KEVQ_TR("Auto (Detect)") :
+        selectedMap ? selectedMap->displayName.c_str() : state.webMapOverride;
+    if (ImGui::BeginCombo("##map_override", mapOverrideLabel)) {
+        if (ImGui::Selectable(KEVQ_TR("Auto (Detect)"), !state.webMapOverride[0])) {
+            state.webMapOverride[0] = '\0';
+            mapChanged = true;
+        }
+        if (!state.webMapOverride[0]) ImGui::SetItemDefaultFocus();
+        for (const auto& map : radar::GetMapDefinitions()) {
+            const bool selected = _stricmp(state.webMapOverride, map.name.c_str()) == 0;
+            ImGui::PushID(map.name.c_str());
+            if (ImGui::Selectable(map.displayName.c_str(), selected)) {
+                strncpy_s(state.webMapOverride, sizeof(state.webMapOverride), map.name.c_str(), _TRUNCATE);
                 mapChanged = true;
             }
             if (selected)
                 ImGui::SetItemDefaultFocus();
+            ImGui::PopID();
         }
         ImGui::EndCombo();
     }

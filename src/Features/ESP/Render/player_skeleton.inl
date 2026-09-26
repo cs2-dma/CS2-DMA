@@ -1,68 +1,26 @@
-if (g::espSkeleton) {
-    const ImU32 skeletonRenderCol = g::espVisibilityColoring ? entityCol : skelCol;
-    const float skeletonThickness = std::clamp(g::espSkeletonThickness, 0.5f, 4.0f);
-    const float skeletonOutlineThickness = skeletonThickness + 1.4f;
-    if (canRenderRealSkeleton) {
-        for (int b = 0; b < skeletonPairCount; b++) {
-            const int from = skeletonPairs[b].from;
-            const int to = skeletonPairs[b].to;
-            if (!boneScreenValid[from] || !boneScreenValid[to]) continue;
-            const ImVec2 p1(boneScreen[from].x, boneScreen[from].y);
-            const ImVec2 p2(boneScreen[to].x, boneScreen[to].y);
-            drawList->AddLine(p1, p2, IM_COL32(0, 0, 0, 180), skeletonOutlineThickness);
-            drawList->AddLine(p1, p2, skeletonRenderCol, skeletonThickness);
-        }
-        if (hasLeftToeBone && boneScreenValid[esp::FOOT_HEEL_L] && boneScreenValid[leftToeBoneId]) {
-            const ImVec2 p1(boneScreen[esp::FOOT_HEEL_L].x, boneScreen[esp::FOOT_HEEL_L].y);
-            const ImVec2 p2(boneScreen[leftToeBoneId].x, boneScreen[leftToeBoneId].y);
-            drawList->AddLine(p1, p2, IM_COL32(0, 0, 0, 180), skeletonOutlineThickness);
-            drawList->AddLine(p1, p2, skeletonRenderCol, skeletonThickness);
-        }
-        if (hasRightToeBone && boneScreenValid[esp::FOOT_HEEL_R] && boneScreenValid[rightToeBoneId]) {
-            const ImVec2 p1(boneScreen[esp::FOOT_HEEL_R].x, boneScreen[esp::FOOT_HEEL_R].y);
-            const ImVec2 p2(boneScreen[rightToeBoneId].x, boneScreen[rightToeBoneId].y);
-            drawList->AddLine(p1, p2, IM_COL32(0, 0, 0, 180), skeletonOutlineThickness);
-            drawList->AddLine(p1, p2, skeletonRenderCol, skeletonThickness);
-        }
-
-        if (g::espSkeletonDots) {
-            const int jointBones[] = {
-                esp::PELVIS,
-                esp::SPINE1,
-                esp::SPINE2,
-                esp::CHEST,
-                esp::NECK,
-                esp::SHOULDER_L,
-                esp::ELBOW_L,
-                esp::HAND_L,
-                esp::SHOULDER_R,
-                esp::ELBOW_R,
-                esp::HAND_R,
-                esp::HIP_L,
-                esp::KNEE_L,
-                esp::FOOT_HEEL_L,
-                esp::HIP_R,
-                esp::KNEE_R,
-                esp::FOOT_HEEL_R,
-                esp::HEAD
-            };
-            for (int jIdx = 0; jIdx < static_cast<int>(sizeof(jointBones) / sizeof(jointBones[0])); ++jIdx) {
-                const int b = jointBones[jIdx];
-                if (!boneScreenValid[b]) continue;
-                const ImVec2 jp(boneScreen[b].x, boneScreen[b].y);
-                drawList->AddCircleFilled(jp, 2.2f, IM_COL32(0, 0, 0, 180), 6);
-                drawList->AddCircleFilled(jp, 1.4f, skeletonRenderCol, 6);
-            }
-            if (hasLeftToeBone && boneScreenValid[leftToeBoneId]) {
-                const ImVec2 jp(boneScreen[leftToeBoneId].x, boneScreen[leftToeBoneId].y);
-                drawList->AddCircleFilled(jp, 2.2f, IM_COL32(0, 0, 0, 180), 6);
-                drawList->AddCircleFilled(jp, 1.4f, skeletonRenderCol, 6);
-            }
-            if (hasRightToeBone && boneScreenValid[rightToeBoneId]) {
-                const ImVec2 jp(boneScreen[rightToeBoneId].x, boneScreen[rightToeBoneId].y);
-                drawList->AddCircleFilled(jp, 2.2f, IM_COL32(0, 0, 0, 180), 6);
-                drawList->AddCircleFilled(jp, 1.4f, skeletonRenderCol, 6);
-            }
+if (g::espSkeleton && canRenderRealSkeleton) {
+    const ImU32 skeletonRenderCol = g::espVisibilityColoring && g::espSettings.presentation.visibilitySkeleton
+        ? visibilityCol : skelCol;
+    const float thickness = std::clamp(g::espSkeletonThickness,0.5f,4.0f);
+    const auto segment = [&](int from,int to) {
+        if (!boneWorldValid[from] || !boneWorldValid[to]) return;
+        ScreenPos a{},b{};
+        if (!esp::render::ClipProjectedSegment(boneWorld[from],boneWorld[to],viewMatrix,screenW,screenH,a,b)) return;
+        drawList->AddLine(ImVec2(a.x,a.y),ImVec2(b.x,b.y),IM_COL32(0,0,0,180),thickness+1.4f);
+        drawList->AddLine(ImVec2(a.x,a.y),ImVec2(b.x,b.y),skeletonRenderCol,thickness);
+    };
+    for (int pair=0;pair<skeletonPairCount;++pair) segment(skeletonPairs[pair].from,skeletonPairs[pair].to);
+    if (hasLeftToeBone && leftToeBoneId>=0) segment(esp::FOOT_HEEL_L,leftToeBoneId);
+    if (hasRightToeBone && rightToeBoneId>=0) segment(esp::FOOT_HEEL_R,rightToeBoneId);
+    if (g::espSkeletonHeadCircle && boneWorldValid[esp::HEAD])
+        esp::render::DrawHeadContour(*drawList,p,poseRenderOffset,boneWorld[esp::HEAD],nowUs,
+            viewMatrix,screenW,screenH,g::espSkeletonHeadScale,thickness,skeletonRenderCol);
+    if (g::espSkeletonDots) {
+        for (int id:esp::kPlayerStoredBoneIds) {
+            if (!boneWorldValid[id] || !boneScreen[id].onScreen) continue;
+            const ImVec2 point(boneScreen[id].x,boneScreen[id].y);
+            drawList->AddCircleFilled(point,2.2f,IM_COL32(0,0,0,180),8);
+            drawList->AddCircleFilled(point,1.4f,skeletonRenderCol,8);
         }
     }
 }

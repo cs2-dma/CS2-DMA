@@ -4,6 +4,13 @@
 
 namespace esp::data
 {
+    constexpr bool SameCommittedWeapon(uint32_t handle, uintptr_t entity,
+        uint32_t cachedHandle, uintptr_t cachedEntity) noexcept
+    {
+        return handle != 0 && handle != 0xFFFFFFFFu && entity != 0 &&
+            handle == cachedHandle && entity == cachedEntity;
+    }
+
     inline constexpr uint64_t kPlayerCommitCoreStaleHoldUs = 4000000u;
     inline constexpr uint64_t kPlayerCommitCoreStaleHoldAfterResetUs = 5000000u;
     inline constexpr uint64_t kPlayerCommitCoreStaleHoldAfterBulkUs = 8000000u;

@@ -80,6 +80,7 @@ namespace target::physics
     };
 
     void RequestForMap(const char* mapKey);
+    bool IsReadyForMap(const char* mapKey);
     bool TraceRay(
         const char* mapKey,
         const Vector3& start,

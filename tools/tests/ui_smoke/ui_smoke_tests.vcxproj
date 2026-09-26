@@ -47,16 +47,19 @@
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
+      <AdditionalDependencies>d3d11.lib;d3dcompiler.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="ui_smoke_tests.cpp" />
+    <ClCompile Include="..\..\..\src\app\Bootstrap\version_update.cpp" />
     <ClCompile Include="..\..\..\src\app\Config\project_paths.cpp" />
     <ClCompile Include="..\..\..\src\app\Localization\localization.cpp" />
     <ClCompile Include="..\..\..\src\app\Platform\console_text.cpp" />
     <ClCompile Include="..\..\..\src\app\UI\MenuShell\ui_icons.cpp" />
     <ClCompile Include="..\..\..\src\app\UI\MenuShell\menu_utils.cpp" />
     <ClCompile Include="..\..\..\src\Features\ESP\UI\esp_sections.cpp" />
+    <ClCompile Include="..\..\..\src\Features\ESP\UI\esp_tab.cpp" />
     <ClCompile Include="..\..\..\src\Features\ESP\UI\esp_preview.cpp" />
     <ClCompile Include="..\..\..\src\Features\ESP\weapon_catalog.cpp" />
     <ClCompile Include="..\..\..\src\Features\Radar\UI\radar_sections.cpp" />
@@ -66,6 +69,7 @@
     <ClCompile Include="..\..\..\src\vendor\qrcodegen\qrcodegen.cpp" />
     <ClCompile Include="..\..\..\src\vendor\imgui\imgui.cpp" />
     <ClCompile Include="..\..\..\src\vendor\imgui\imgui_draw.cpp" />
+    <ClCompile Include="..\..\..\src\vendor\imgui\backends\imgui_impl_dx11.cpp" />
     <ClCompile Include="..\..\..\src\vendor\imgui\imgui_tables.cpp" />
     <ClCompile Include="..\..\..\src\vendor\imgui\imgui_widgets.cpp" />
   </ItemGroup>

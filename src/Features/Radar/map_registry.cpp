@@ -15,28 +15,6 @@
 
 namespace
 {
-    std::vector<radar::MapDefinition> BuildFallbackMaps()
-    {
-        return {
-            { "de_mirage", "Mirage", -3230.0, 1890.0, -3407.0, 1713.0, -3230.0, 1713.0, 5.00, false, "/data/de_mirage/radar.webp", "/data/de_mirage/radar.webp" },
-            { "de_inferno", "Inferno", -2087.0, 2930.6, -1147.6, 3870.0, -2087.0, 3870.0, 4.90, false, "/data/de_inferno/radar.webp", "/data/de_inferno/radar.webp" },
-            { "de_dust2", "Dust II", -2476.0, 2029.6, -1266.6, 3239.0, -2476.0, 3239.0, 4.40, false, "/data/de_dust2/radar.webp", "/data/de_dust2/radar.webp" },
-            { "de_nuke", "Nuke", -3453.0, 3715.0, -4281.0, 2887.0, -3453.0, 2887.0, 7.00, false, "/data/de_nuke/radar.webp", "/data/de_nuke/radar.webp" },
-            { "de_overpass", "Overpass", -4831.0, 493.8, -3543.8, 1781.0, -4831.0, 1781.0, 5.20, false, "/data/de_overpass/radar.webp", "/data/de_overpass/radar.webp" },
-            { "de_train", "Train", -2308.0, 1872.046848, -2102.046848, 2078.0, -2308.0, 2078.0, 4.082077, false, "/data/de_train/radar.webp", "/data/de_train/radar.webp" },
-            { "de_cache", "Cache", -2000.0, 3632.0, -2382.0, 3250.0, -2000.0, 3250.0, 5.50, false, "/data/de_cache/radar.webp", "/data/de_cache/radar.webp" },
-            { "ar_baggage", "Baggage", -1838.0, 2360.4, -2340.4, 1858.0, -1838.0, 1858.0, 4.10, false, "/data/ar_baggage/radar.webp", "/data/ar_baggage/radar.webp" },
-            { "ar_shoots", "Shoots", -2953.0, 2167.0, -2956.0, 2164.0, -2953.0, 2164.0, 5.00, false, "/data/ar_shoots/radar.webp", "/data/ar_shoots/radar.webp" },
-            { "ar_shoots_night", "Shoots (Night)", -2953.0, 2167.0, -2956.0, 2164.0, -2953.0, 2164.0, 5.00, false, "/data/ar_shoots_night/radar.webp", "/data/ar_shoots_night/radar.webp" },
-            { "de_ancient", "Ancient", -2953.0, 2167.0, -2956.0, 2164.0, -2953.0, 2164.0, 5.00, false, "/data/de_ancient/radar.webp", "/data/de_ancient/radar.webp" },
-            { "de_ancient_night", "Ancient (Night)", -2953.0, 2167.0, -2956.0, 2164.0, -2953.0, 2164.0, 5.00, false, "/data/de_ancient_night/radar.webp", "/data/de_ancient_night/radar.webp" },
-            { "de_anubis", "Anubis", -2796.0, 2549.28, -2017.28, 3328.0, -2796.0, 3328.0, 5.22, false, "/data/de_anubis/radar.webp", "/data/de_anubis/radar.webp" },
-            { "de_vertigo", "Vertigo", -3168.0, 928.0, -2334.0, 1762.0, -3168.0, 1762.0, 4.00, false, "/data/de_vertigo/radar.webp", "/data/de_vertigo/radar.webp" },
-            { "cs_office", "Office", -1838.0, 2360.4, -2340.4, 1858.0, -1838.0, 1858.0, 4.10, false, "/data/cs_office/radar.webp", "/data/cs_office/radar.webp" },
-            { "cs_italy", "Italy", -2647.0, 2063.4, -2118.4, 2592.0, -2647.0, 2592.0, 4.60, false, "/data/cs_italy/radar.webp", "/data/cs_italy/radar.webp" },
-            { "aim_custom", "Aim / Workshop (Dynamic)", -1024.0, 1024.0, -1024.0, 1024.0, 0.0, 0.0, 1.00, true, "/data/aim_custom/radar.webp", "/data/aim_custom/radar.webp" },
-        };
-    }
 
     bool AppendMapsFromJson(const nlohmann::json& root, std::vector<radar::MapDefinition>& maps)
     {
@@ -49,8 +27,24 @@ namespace
 
             radar::MapDefinition map = {};
             map.name = item["name"].get<std::string>();
-            map.displayName = item.value("display_name", map.name);
-            map.dynamic = item.value("dynamic", false);
+            map.displayName = item.contains("display_name") && item["display_name"].is_string()
+                ? item["display_name"].get<std::string>() : map.name;
+            map.dynamic = item.contains("dynamic") && item["dynamic"].is_boolean() && item["dynamic"].get<bool>();
+            if (item.contains("parent") && item["parent"].is_string()) map.parent = item["parent"].get<std::string>();
+            if (item.contains("section")) {
+                if (!item["section"].is_string() || !item.contains("altitude") || !item["altitude"].is_object())
+                    continue;
+                const auto& altitude = item["altitude"];
+                if (!altitude.contains("min") || !altitude["min"].is_number() ||
+                    !altitude.contains("max") || !altitude["max"].is_number())
+                    continue;
+                map.section = item["section"].get<std::string>();
+                map.altitudeMin = altitude["min"].get<double>();
+                map.altitudeMax = altitude["max"].get<double>();
+                if (map.section.empty() || !std::isfinite(map.altitudeMin) || !std::isfinite(map.altitudeMax) ||
+                    map.altitudeMin >= map.altitudeMax)
+                    continue;
+            }
 
             if (item.contains("origin") && item["origin"].is_object()) {
                 const auto& origin = item["origin"];
@@ -160,7 +154,7 @@ namespace
         if (!maps.empty())
             return maps;
 
-        return BuildFallbackMaps();
+        return {};
     }
 
     bool EqualsIgnoreCase(std::string_view lhs, std::string_view rhs)
@@ -256,6 +250,38 @@ const MapDefinition* FindMapByName(std::string_view name)
     return nullptr;
 }
 
+const MapDefinition* FindMapForPosition(std::string_view name, double worldX, double worldY,
+    double worldZ, std::string_view previousName)
+{
+    const auto* root = FindMapByName(name);
+    if (!root || !std::isfinite(worldX) || !std::isfinite(worldY)) return root;
+    if (!root->section.empty()) {
+        if (!root->parent.empty() || !std::isfinite(worldZ)) return root;
+        if (const auto* previous = FindMapByName(previousName);
+            previous && !previous->section.empty() && (previous == root || previous->parent == root->name) &&
+            worldZ >= previous->altitudeMin - 16.0 && worldZ < previous->altitudeMax + 16.0)
+            return previous;
+        if (worldZ >= root->altitudeMin && worldZ < root->altitudeMax) return root;
+        for (const auto& map : GetMapDefinitions()) {
+            if (map.parent == root->name && !map.section.empty() &&
+                worldZ >= map.altitudeMin && worldZ < map.altitudeMax)
+                return &map;
+        }
+        return root;
+    }
+    const MapDefinition* selected = root;
+    double bestScore = 10.0;
+    for (const auto& map : GetMapDefinitions()) {
+        if (map.parent != root->name || map.dynamic || !map.section.empty()) continue;
+        const double x = (worldX - map.originX) / (map.scale * 1024.0);
+        const double y = (map.originY - worldY) / (map.scale * 1024.0);
+        if (x < 0 || x > 1 || y < 0 || y > 1) continue;
+        const double score = (x - 0.5) * (x - 0.5) + (y - 0.5) * (y - 0.5);
+        if (score < bestScore) { bestScore = score; selected = &map; }
+    }
+    return selected;
+}
+
 const MapDefinition* ResolveMapByBounds(
     double minX,
     double minY,
@@ -283,7 +309,7 @@ const MapDefinition* ResolveMapByBounds(
     double secondCenterScore = 1e18;
 
     for (const auto& map : GetMapDefinitions()) {
-        if (map.dynamic)
+        if (map.dynamic || !map.parent.empty())
             continue;
 
         const double mapSpanX = std::fabs(map.maxX - map.minX);
@@ -380,6 +406,7 @@ std::string BuildMapsJson()
             {"origin", { {"x", map.originX}, {"y", map.originY} }},
             {"scale", map.scale},
             {"dynamic", map.dynamic},
+            {"parent", map.parent},
             {"bounds", {
                 {"min_x", map.minX},
                 {"max_x", map.maxX},
@@ -391,6 +418,10 @@ std::string BuildMapsJson()
                 {"background", map.backgroundImage}
             }}
         });
+        if (!map.section.empty()) {
+            root["maps"].back()["section"] = map.section;
+            root["maps"].back()["altitude"] = {{"min", map.altitudeMin}, {"max", map.altitudeMax}};
+        }
     }
 
     return root.dump();

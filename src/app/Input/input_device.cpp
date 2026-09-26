@@ -19,6 +19,7 @@
 #include <deque>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <random>
 #include <string>
 #include <thread>
@@ -50,6 +51,13 @@ namespace
     constexpr uint32_t kKmBoxNetConnect = 0xAF3C2828u;
     constexpr uint32_t kKmBoxNetMouseMove = 0xAEDE7345u;
     constexpr uint32_t kKmBoxNetMouseLeft = 0x9823AE8Du;
+    constexpr uint32_t kKmBoxNetMonitor = 0x27388020u;
+
+    uint64_t InputNowUs()
+    {
+        return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::microseconds>(
+            std::chrono::steady_clock::now().time_since_epoch()).count());
+    }
 
     struct ConnectionResult
     {
@@ -547,6 +555,10 @@ namespace
             return true;
         }
         virtual bool Probe() = 0;
+        virtual app::input::PhysicalKeyboardState PhysicalKeyboard() const { return {}; }
+        virtual uint64_t PhysicalInputUpdatedAtMs() const { return 0; }
+        virtual uint16_t InputMonitorPort() const { return 0; }
+        virtual void PopulateInputDiagnostics(DeviceStatus&) const {}
         virtual DWORD LastSystemError() const = 0;
         virtual std::chrono::milliseconds TestStepDelay() const = 0;
     };
@@ -648,6 +660,10 @@ namespace
             monitoringEnabled_ = false;
             buttonMask_ = 0;
             buttonParser_.Reset();
+            monitorPackets_ = 0;
+            monitorReceivedBytes_ = 0;
+            monitorUpdatedAtMs_ = 0;
+            monitorRetryAtMs_ = 0;
             serial_.Disconnect();
         }
 
@@ -673,18 +689,34 @@ namespace
             if (buttonMask)
                 *buttonMask = buttonMask_;
             if (available)
-                *available = monitoringEnabled_;
+                *available = monitoringEnabled_ && buttonParser_.HasSample();
             if (!monitoringEnabled_)
                 return serial_.IsAlive();
 
             std::vector<uint8_t> bytes;
             if (!serial_.ReadAvailable(bytes))
                 return false;
-            for (const uint8_t value : bytes)
-                buttonParser_.Consume(value, &buttonMask_);
+            ConsumeInput(bytes);
+            const auto nowMs = GetTickCount64();
+            if (!buttonParser_.HasSample() && nowMs >= monitorRetryAtMs_) {
+                constexpr std::string_view command = "km.buttons(1)\r\n";
+                if (!serial_.WriteBytes(command.data(), command.size())) return false;
+                monitorRetryAtMs_ = nowMs + 2000;
+            }
+            if (available)
+                *available = buttonParser_.HasSample();
             if (buttonMask)
                 *buttonMask = buttonMask_;
             return true;
+        }
+
+        uint64_t PhysicalInputUpdatedAtMs() const override { return monitorUpdatedAtMs_; }
+
+        void PopulateInputDiagnostics(DeviceStatus& status) const override
+        {
+            status.inputMonitorPackets = monitorPackets_;
+            status.inputMonitorReceivedBytes = monitorReceivedBytes_;
+            status.inputMonitorLastPacketBytes = buttonParser_.HasSample() ? buttonParser_.LastPacketBytes() : 0;
         }
 
         bool Probe() override
@@ -715,8 +747,21 @@ namespace
         }
 
     private:
+        void ConsumeInput(std::span<const uint8_t> bytes)
+        {
+            monitorReceivedBytes_ += bytes.size();
+            for (const auto byte : bytes) {
+                if (buttonParser_.Consume(byte, &buttonMask_)) {
+                    ++monitorPackets_;
+                    monitorUpdatedAtMs_ = GetTickCount64();
+                }
+            }
+        }
+
         bool EnableButtonMonitoring()
         {
+            buttonMask_ = 0;
+            buttonParser_.Reset();
             std::string response;
             if (!serial_.ExecuteCommand(
                     "km.buttons(1)\r\n",
@@ -726,8 +771,8 @@ namespace
                 return false;
             }
             monitoringEnabled_ = true;
-            buttonMask_ = 0;
-            buttonParser_.Reset();
+            ConsumeInput(std::span(reinterpret_cast<const uint8_t*>(response.data()), response.size()));
+            monitorRetryAtMs_ = GetTickCount64() + 2000;
             return true;
         }
 
@@ -735,6 +780,10 @@ namespace
         app::input::MakcuButtonStreamParser buttonParser_;
         uint8_t buttonMask_ = 0;
         bool monitoringEnabled_ = false;
+        uint64_t monitorPackets_ = 0;
+        uint64_t monitorReceivedBytes_ = 0;
+        uint64_t monitorUpdatedAtMs_ = 0;
+        uint64_t monitorRetryAtMs_ = 0;
     };
 
     class KmBoxSerialBackend final : public InputBackend
@@ -779,6 +828,11 @@ namespace
 
         void Disconnect() override
         {
+            buttonParser_.Reset();
+            buttonMask_ = 0;
+            buttonsUpdatedAtMs_ = 0;
+            nextButtonsQueryAtMs_ = 0;
+            buttonsQueryPending_ = false;
             serial_.Disconnect();
         }
 
@@ -797,10 +851,47 @@ namespace
             return WriteSerialLeftButton(serial_, pressed);
         }
 
+        bool PollPhysicalButtons(uint8_t* buttonMask, bool* available) override
+        {
+            std::vector<uint8_t> bytes;
+            if (!serial_.ReadAvailable(bytes)) return false;
+            const auto nowMs = GetTickCount64();
+            for (const auto byte : bytes) {
+                uint8_t mask = 0;
+                if (buttonParser_.Consume(byte, mask) && buttonsQueryPending_ &&
+                    nowMs < nextButtonsQueryAtMs_) {
+                    buttonMask_ = mask;
+                    buttonsUpdatedAtMs_ = nowMs;
+                    buttonsQueryPending_ = false;
+                    nextButtonsQueryAtMs_ = nowMs + 25;
+                }
+            }
+            if (nowMs >= nextButtonsQueryAtMs_) {
+                constexpr std::string_view query =
+                    "print('KVQB',km.left(),km.right(),km.middle(),km.side1(),km.side2())\r\n";
+                if (!buttonsQueryPending_) {
+                    if (!serial_.WriteBytes(query.data(), query.size())) return false;
+                    buttonsQueryPending_ = true;
+                    nextButtonsQueryAtMs_ = nowMs + 200;
+                } else {
+                    buttonsQueryPending_ = false;
+                    nextButtonsQueryAtMs_ = nowMs + 2000;
+                }
+            }
+            const bool fresh = app::input::IsNetworkInputFresh(buttonsUpdatedAtMs_, nowMs);
+            if (buttonMask) *buttonMask = fresh ? buttonMask_ : 0;
+            if (available) *available = fresh;
+            return true;
+        }
+
+        uint64_t PhysicalInputUpdatedAtMs() const override { return buttonsUpdatedAtMs_; }
+
         bool Probe() override
         {
             if (!serial_.IsConnected())
                 return false;
+            if (app::input::IsNetworkInputFresh(buttonsUpdatedAtMs_, GetTickCount64()))
+                return serial_.IsAlive();
             if (!serial_.DrainOutput())
                 return false;
             std::string response;
@@ -824,6 +915,11 @@ namespace
 
     private:
         SerialPort serial_;
+        app::input::KmBoxSerialButtonParser buttonParser_;
+        uint8_t buttonMask_ = 0;
+        uint64_t buttonsUpdatedAtMs_ = 0;
+        uint64_t nextButtonsQueryAtMs_ = 0;
+        bool buttonsQueryPending_ = false;
     };
 
     class WinsockSession
@@ -1001,11 +1097,25 @@ namespace
                 Disconnect();
                 return { false, kind, error, failedEndpoint };
             }
+            StartMonitoring();
             return { true, DeviceError::None, 0, endpoint_ };
         }
 
         void Disconnect() override
         {
+            if (monitorSocket_ && socket_)
+                (void)SendPacket(kKmBoxNetMonitor, nullptr, 0, true, false, 0u);
+            monitorSocket_.Reset();
+            monitorPort_ = 0;
+            monitorUpdatedAtMs_ = 0;
+            monitorRetryAtMs_ = 0;
+            monitorMouseButtons_ = 0;
+            monitorKeyboard_ = {};
+            monitorPackets_ = 0;
+            monitorRejectedPackets_ = 0;
+            monitorLastPacketBytes_ = 0;
+            monitorError_ = 0;
+            outputButtons_ = 0;
             socket_.Reset();
             winsock_.Reset();
             destination_ = {};
@@ -1022,6 +1132,7 @@ namespace
         bool Move(int x, int y) override
         {
             KmBoxNetMouse mouse = {};
+            mouse.buttons = outputButtons_;
             mouse.x = x;
             mouse.y = y;
             return SendPacket(
@@ -1035,17 +1146,90 @@ namespace
         {
             KmBoxNetMouse mouse = {};
             mouse.buttons = pressed ? 1 : 0;
-            return SendPacket(
-                kKmBoxNetMouseLeft,
-                &mouse,
-                sizeof(mouse),
-                true,
-                false);
+            outputButtons_ = mouse.buttons;
+            for (int attempt = 0; attempt < (pressed ? 1 : 3); ++attempt) {
+                if (SendPacket(kKmBoxNetMouseLeft, &mouse, sizeof(mouse), true, !pressed))
+                    return true;
+                if (pressed || !IsTimeoutError(lastError_))
+                    break;
+            }
+            return false;
         }
 
         bool Probe() override
         {
             return Move(0, 0);
+        }
+
+        bool PollPhysicalButtons(uint8_t* buttonMask, bool* available) override
+        {
+            if (monitorSocket_) {
+                std::array<uint8_t, 64> bytes = {};
+                for (int attempt = 0; attempt < 256; ++attempt) {
+                    sockaddr_in sender = {};
+                    int senderLength = sizeof(sender);
+                    const int received = recvfrom(monitorSocket_.Get(),
+                        reinterpret_cast<char*>(bytes.data()), static_cast<int>(bytes.size()),
+                        0, reinterpret_cast<sockaddr*>(&sender), &senderLength);
+                    if (received == SOCKET_ERROR) {
+                        const int error = WSAGetLastError();
+                        if (error == WSAEMSGSIZE) {
+                            ++monitorRejectedPackets_;
+                            monitorError_ = error;
+                            continue;
+                        }
+                        if (error != WSAEWOULDBLOCK) {
+                            monitorUpdatedAtMs_ = 0;
+                            monitorKeyboard_ = {};
+                            monitorError_ = error;
+                        }
+                        break;
+                    }
+                    if (sender.sin_family != AF_INET ||
+                        sender.sin_addr.s_addr != destination_.sin_addr.s_addr)
+                        continue;
+                    ++monitorPackets_;
+                    monitorLastPacketBytes_ = static_cast<uint32_t>(received);
+                    if (app::input::ParseNetworkInputReport(
+                        std::span<const uint8_t>(bytes.data(), static_cast<size_t>(received)),
+                        monitorMouseButtons_, monitorKeyboard_)) {
+                        monitorUpdatedAtMs_ = GetTickCount64();
+                        monitorError_ = 0;
+                    } else {
+                        ++monitorRejectedPackets_;
+                    }
+                }
+                const auto nowMs = GetTickCount64();
+                if (!app::input::IsNetworkInputFresh(monitorUpdatedAtMs_, nowMs) &&
+                    nowMs >= monitorRetryAtMs_) {
+                    if (!SendPacket(kKmBoxNetMonitor, nullptr, 0, true, false,
+                            0xAA550000u | monitorPort_))
+                        monitorError_ = lastError_;
+                    monitorRetryAtMs_ = nowMs + 2000;
+                }
+            }
+            const bool fresh = app::input::IsNetworkInputFresh(
+                monitorUpdatedAtMs_, GetTickCount64());
+            if (buttonMask) *buttonMask = fresh ? monitorMouseButtons_ : 0;
+            if (available) *available = fresh;
+            return true;
+        }
+
+        app::input::PhysicalKeyboardState PhysicalKeyboard() const override
+        {
+            return app::input::IsNetworkInputFresh(monitorUpdatedAtMs_, GetTickCount64())
+                ? monitorKeyboard_ : app::input::PhysicalKeyboardState{};
+        }
+
+        uint64_t PhysicalInputUpdatedAtMs() const override { return monitorUpdatedAtMs_; }
+        uint16_t InputMonitorPort() const override { return monitorPort_; }
+
+        void PopulateInputDiagnostics(DeviceStatus& status) const override
+        {
+            status.inputMonitorPackets = monitorPackets_;
+            status.inputMonitorRejectedPackets = monitorRejectedPackets_;
+            status.inputMonitorLastPacketBytes = monitorLastPacketBytes_;
+            status.inputMonitorError = monitorError_;
         }
 
         DWORD LastSystemError() const override
@@ -1060,6 +1244,42 @@ namespace
         }
 
     private:
+        void StartMonitoring()
+        {
+            monitorSocket_.Reset(socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP));
+            if (!monitorSocket_) {
+                monitorError_ = WSAGetLastError();
+                return;
+            }
+            const BOOL exclusive = TRUE;
+            u_long nonBlocking = 1;
+            if (setsockopt(monitorSocket_.Get(), SOL_SOCKET, SO_EXCLUSIVEADDRUSE,
+                    reinterpret_cast<const char*>(&exclusive), sizeof(exclusive)) == SOCKET_ERROR ||
+                ioctlsocket(monitorSocket_.Get(), FIONBIO, &nonBlocking) == SOCKET_ERROR) {
+                monitorError_ = WSAGetLastError();
+                monitorSocket_.Reset();
+                return;
+            }
+            sockaddr_in local = {};
+            local.sin_family = AF_INET;
+            local.sin_addr.s_addr = htonl(INADDR_ANY);
+            for (int attempt = 0; attempt < 64; ++attempt) {
+                const auto port = static_cast<uint16_t>(1024u + random_() % (32768u - 1024u));
+                local.sin_port = htons(port);
+                if (bind(monitorSocket_.Get(), reinterpret_cast<const sockaddr*>(&local),
+                        sizeof(local)) == 0) {
+                    monitorPort_ = port;
+                    if (!SendPacket(kKmBoxNetMonitor, nullptr, 0, true, false,
+                            0xAA550000u | monitorPort_))
+                        monitorError_ = lastError_;
+                    monitorRetryAtMs_ = GetTickCount64() + 2000;
+                    return;
+                }
+                monitorError_ = WSAGetLastError();
+            }
+            monitorSocket_.Reset();
+        }
+
         static bool IsTimeoutError(DWORD error)
         {
             return error == WSAETIMEDOUT || error == WSAEWOULDBLOCK;
@@ -1070,7 +1290,8 @@ namespace
             const void* payload,
             size_t payloadSize,
             bool incrementIndex,
-            bool waitForReply = true)
+            bool waitForReply = true,
+            std::optional<uint32_t> headerRandom = std::nullopt)
         {
             if (!socket_ || payloadSize > 1024u)
                 return false;
@@ -1079,7 +1300,7 @@ namespace
 
             KmBoxNetHeader header = {};
             header.hardwareKey = hardwareKey_;
-            header.random = random_();
+            header.random = headerRandom.value_or(random_());
             header.index = index_;
             header.command = command;
 
@@ -1180,6 +1401,17 @@ namespace
 
         WinsockSession winsock_;
         UniqueSocket socket_;
+        UniqueSocket monitorSocket_;
+        uint16_t monitorPort_ = 0;
+        uint64_t monitorUpdatedAtMs_ = 0;
+        uint64_t monitorRetryAtMs_ = 0;
+        uint8_t monitorMouseButtons_ = 0;
+        uint64_t monitorPackets_ = 0;
+        uint64_t monitorRejectedPackets_ = 0;
+        uint32_t monitorLastPacketBytes_ = 0;
+        DWORD monitorError_ = 0;
+        int32_t outputButtons_ = 0;
+        app::input::PhysicalKeyboardState monitorKeyboard_;
         sockaddr_in destination_ = {};
         uint32_t hardwareKey_ = 0;
         uint32_t index_ = 0;
@@ -1205,18 +1437,20 @@ namespace
         }
     }
 
-    bool RunCircularMovementTest(InputBackend& backend)
+    template<class IsCancelled, class Wait>
+    bool RunCircularMovementTest(InputBackend& backend, IsCancelled cancelled, Wait wait)
     {
         if (!backend.IsAlive())
             return false;
         const std::vector<app::input::MouseDelta> path =
             app::input::BuildCircularTestPath();
         for (const auto& delta : path) {
-            if (!backend.Move(delta.x, delta.y))
+            if (cancelled() || !backend.Move(delta.x, delta.y))
                 return false;
-            std::this_thread::sleep_for(backend.TestStepDelay());
+            if (!wait(backend.TestStepDelay()))
+                return false;
         }
-        return backend.Probe();
+        return !cancelled() && backend.Probe();
     }
 
     enum class CommandAction : uint8_t
@@ -1306,7 +1540,13 @@ namespace
         DeviceStatus GetStatus() const
         {
             std::lock_guard<std::mutex> lock(mutex_);
-            return status_;
+            return GetStatusLocked();
+        }
+
+        app::input::KeyState ActivationKeyState(int key, app::input::KeyState primary)
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            return activationKeys_.Read(GetStatusLocked(), key, primary, GetTickCount64());
         }
 
         app::input::LeftClickTiming GetLeftClickTiming() const
@@ -1338,11 +1578,10 @@ namespace
                 virtualKey);
             if (mask == 0)
                 return false;
-            std::lock_guard<std::mutex> lock(mutex_);
-            return !stopping_ &&
-                   status_.state == ConnectionState::Connected &&
-                   status_.physicalButtonsAvailable &&
-                   (status_.physicalButtonMask & mask) != 0;
+            const auto status = GetStatus();
+            return status.state == ConnectionState::Connected &&
+                   status.physicalButtonsAvailable &&
+                   (status.physicalButtonMask & mask) != 0;
         }
 
         bool ConnectAndTest()
@@ -1412,25 +1651,28 @@ namespace
             return true;
         }
 
-        bool Move(int deltaX, int deltaY)
+        bool Move(int deltaX, int deltaY, uint64_t validForUs)
         {
-            if (deltaX == 0 && deltaY == 0)
-                return true;
             std::lock_guard<std::mutex> lock(mutex_);
             if (stopping_ || status_.state != ConnectionState::Connected)
                 return false;
-            constexpr int kMaxQueuedDelta = 2048;
-            pendingMoveX_ = std::clamp(
-                pendingMoveX_ + deltaX,
-                -kMaxQueuedDelta,
-                kMaxQueuedDelta);
-            pendingMoveY_ = std::clamp(
-                pendingMoveY_ + deltaY,
-                -kMaxQueuedDelta,
-                kMaxQueuedDelta);
-            pendingRealtimeGeneration_ = generation_;
+            if (deltaX == 0 && deltaY == 0) {
+                CancelPendingMovesLocked();
+                return true;
+            }
+            const bool replaced = pendingMove_.HasPending();
+            if (!pendingMove_.Submit(deltaX, deltaY, InputNowUs(), validForUs))
+                return false;
+            if (replaced) ++status_.moveReplacements;
+            ++status_.moveRequests;
             condition_.notify_one();
             return true;
+        }
+
+        void CancelPendingMoves()
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            CancelPendingMovesLocked();
         }
 
         bool LeftButton(bool pressed)
@@ -1471,25 +1713,34 @@ namespace
             return true;
         }
 
-        bool LeftClick(uint32_t holdMs)
+        app::input::ClickRequestResult LeftClick(uint32_t holdMs, bool requireIdleOutput,
+            uint64_t validForUs = app::input::kMaximumQueuedMoveAgeUs)
         {
+            const uint64_t requestedAtUs = InputNowUs();
             std::lock_guard<std::mutex> lock(mutex_);
+            using Result = app::input::ClickRequestResult;
+            if (stopping_ || status_.state != ConnectionState::Connected)
+                return Result::Unavailable;
+            validForUs = std::min(validForUs, app::input::kMaximumQueuedMoveAgeUs);
+            if (validForUs == 0 || InputNowUs() - requestedAtUs >= validForUs)
+                return Result::Unavailable;
             bool primaryLeftButtonDown = false;
 #if !defined(KEVQ_INPUT_DEVICE_TESTING)
             primaryLeftButtonDown =
-                app::input::IsPrimaryKeyDown(VK_LBUTTON) ||
-                (GetAsyncKeyState(VK_LBUTTON) & 0x8000) != 0;
+                app::input::IsPrimaryKeyDown(VK_LBUTTON);
 #endif
-            if (stopping_ || status_.state != ConnectionState::Connected ||
-                (status_.physicalButtonsAvailable &&
+            if ((status_.physicalButtonsAvailable &&
                  (status_.physicalButtonMask & 0x01u) != 0u) ||
-                primaryLeftButtonDown ||
-                leftClickPhase_ != LeftClickPhase::Idle ||
+                primaryLeftButtonDown)
+                return Result::ManualInput;
+            if ((requireIdleOutput && (pendingMove_.HasPending() || status_.moveInFlight ||
+                    status_.probeInFlight)) || leftClickPhase_ != LeftClickPhase::Idle ||
                 leftButtonActionInFlight_ || leftButtonOutputDown_ ||
                 pendingLeftButton_ >= 0) {
-                return false;
+                return Result::Busy;
             }
 
+            CancelPendingMovesLocked();
             leftClickPhase_ = LeftClickPhase::Queued;
             leftClickCancelRequested_ = false;
             leftClickHoldMs_ = std::clamp(
@@ -1501,8 +1752,9 @@ namespace
             if (leftClickToken_ == 0)
                 leftClickToken_ = nextLeftClickToken_++;
             leftClickQueuedAt_ = std::chrono::steady_clock::now();
+            leftClickExpiresAtUs_ = requestedAtUs + validForUs;
             condition_.notify_one();
-            return true;
+            return Result::Queued;
         }
 
         void Shutdown()
@@ -1521,6 +1773,20 @@ namespace
         }
 
     private:
+        DeviceStatus GetStatusLocked() const
+        {
+            auto result = status_;
+            result.movePending = pendingMove_.HasPending();
+            if (stopping_) result.state = ConnectionState::Disconnected;
+            if ((app::input::IsNetworkDeviceKind(result.selected) ||
+                 result.selected == DeviceKind::KmBox) &&
+                !app::input::IsNetworkInputFresh(result.physicalInputUpdatedAtMs, GetTickCount64())) {
+                result.physicalButtonsAvailable = false;
+                result.physicalKeyboard.available = false;
+            }
+            return result;
+        }
+
         void ClearLeftClickLocked()
         {
             leftClickPhase_ = LeftClickPhase::Idle;
@@ -1530,12 +1796,17 @@ namespace
             leftClickToken_ = 0;
             leftClickQueuedAt_ = {};
             leftClickReleaseAt_ = {};
+            leftClickExpiresAtUs_ = 0;
+        }
+
+        void CancelPendingMovesLocked()
+        {
+            if (pendingMove_.Cancel()) ++status_.moveCancellations;
         }
 
         void ClearRealtimeLocked()
         {
-            pendingMoveX_ = 0;
-            pendingMoveY_ = 0;
+            pendingMove_.Cancel();
             pendingLeftButton_ = -1;
             pendingRealtimeGeneration_ = 0;
             ClearLeftClickLocked();
@@ -1544,6 +1815,23 @@ namespace
             leftClickTimingSamples_ = 0;
             status_.physicalButtonMask = 0;
             status_.physicalButtonsAvailable = false;
+            status_.physicalKeyboard = {};
+            status_.physicalInputUpdatedAtMs = 0;
+            status_.inputMonitorPort = 0;
+            status_.inputMonitorPackets = 0;
+            status_.inputMonitorRejectedPackets = 0;
+            status_.inputMonitorReceivedBytes = 0;
+            status_.inputMonitorLastPacketBytes = 0;
+            status_.inputMonitorError = 0;
+            status_.moveRequests = 0;
+            status_.moveCompletions = 0;
+            status_.moveReplacements = 0;
+            status_.moveCancellations = 0;
+            status_.moveExpirations = 0;
+            status_.moveInFlight = false;
+            status_.probeInFlight = false;
+            status_.lastMoveQueueAgeUs = 0;
+            activationKeys_ = {};
         }
 
         bool IsCurrent(const ServiceCommand& command) const
@@ -1621,6 +1909,10 @@ namespace
                     status_.selected == connectedCommand.kind) {
                     status_.physicalButtonMask = buttonMask;
                     status_.physicalButtonsAvailable = available;
+                    status_.physicalKeyboard = backend->PhysicalKeyboard();
+                    status_.physicalInputUpdatedAtMs = backend->PhysicalInputUpdatedAtMs();
+                    status_.inputMonitorPort = backend->InputMonitorPort();
+                    backend->PopulateInputDiagnostics(status_);
                 }
                 return true;
             };
@@ -1632,8 +1924,7 @@ namespace
                 bool hasLeftButton = false;
                 bool hasClickStart = false;
                 bool completesClick = false;
-                int moveX = 0;
-                int moveY = 0;
+                app::input::QueuedMouseMove move;
                 bool leftButtonPressed = false;
                 uint64_t realtimeGeneration = 0;
                 uint64_t clickToken = 0;
@@ -1646,7 +1937,8 @@ namespace
                     condition_.wait_for(lock, waitInterval, [&] {
                         const auto now = std::chrono::steady_clock::now();
                         return stopping_ || !queue_.empty() ||
-                               pendingMoveX_ != 0 || pendingMoveY_ != 0 ||
+                               (pendingMove_.HasPending() && !leftButtonOutputDown_ &&
+                                leftClickPhase_ == LeftClickPhase::Idle) ||
                                pendingLeftButton_ >= 0 ||
                                leftClickPhase_ == LeftClickPhase::Queued ||
                                (leftClickPhase_ == LeftClickPhase::Down &&
@@ -1711,20 +2003,28 @@ namespace
                         clickToken = leftClickToken_;
                         clickHoldMs = leftClickHoldMs_;
                         leftClickPhase_ = LeftClickPhase::Dispatching;
-                    } else if (pendingMoveX_ != 0 || pendingMoveY_ != 0) {
+                    } else if (pendingMove_.HasPending() && !leftButtonOutputDown_ &&
+                               leftClickPhase_ == LeftClickPhase::Idle) {
+                        move = *pendingMove_.Take();
                         hasMove = true;
-                        moveX = std::exchange(pendingMoveX_, 0);
-                        moveY = std::exchange(pendingMoveY_, 0);
-                        realtimeGeneration = pendingRealtimeGeneration_;
+                        status_.moveInFlight = true;
+                        realtimeGeneration = generation_;
                     }
                 }
 
                 if (hasClickStart) {
-                    const bool current =
+                    bool current =
                         backend &&
                         realtimeGeneration == connectedCommand.generation &&
                         IsCurrent(connectedCommand) &&
                         backend->IsAlive();
+                    if (current) {
+                        std::lock_guard<std::mutex> lock(mutex_);
+                        current = leftClickToken_ == clickToken &&
+                            leftClickPhase_ == LeftClickPhase::Dispatching &&
+                            !leftClickCancelRequested_ && generation_ == realtimeGeneration &&
+                            InputNowUs() < leftClickExpiresAtUs_;
+                    }
                     const bool sent = current && backend->SetLeftButton(true);
                     const auto sentAt = std::chrono::steady_clock::now();
                     bool releaseImmediately = false;
@@ -1830,6 +2130,20 @@ namespace
                 }
 
                 if (hasMove || hasLeftButton) {
+                    if (hasMove) {
+                        std::lock_guard<std::mutex> lock(mutex_);
+                        const auto nowUs = InputNowUs();
+                        if (generation_ != realtimeGeneration || !pendingMove_.IsCurrent(move)) {
+                            status_.moveInFlight = false;
+                            continue;
+                        }
+                        if (!app::input::LatestMoveMailbox::IsFresh(move, nowUs)) {
+                            ++status_.moveExpirations;
+                            status_.moveInFlight = false;
+                            continue;
+                        }
+                        status_.lastMoveQueueAgeUs = nowUs - move.submittedAtUs;
+                    }
                     const bool current =
                         backend &&
                         realtimeGeneration == connectedCommand.generation &&
@@ -1837,8 +2151,14 @@ namespace
                         backend->IsAlive();
                     const bool sent = current &&
                         (hasMove
-                            ? backend->Move(moveX, moveY)
+                            ? backend->Move(move.x, move.y)
                             : backend->SetLeftButton(leftButtonPressed));
+                    if (hasMove) {
+                        std::lock_guard<std::mutex> lock(mutex_);
+                        status_.moveInFlight = false;
+                        if (sent && generation_ == realtimeGeneration)
+                            ++status_.moveCompletions;
+                    }
                     if (sent && hasLeftButton) {
                         std::lock_guard<std::mutex> lock(mutex_);
                         leftButtonOutputDown_ = leftButtonPressed;
@@ -1882,9 +2202,20 @@ namespace
                         continue;
                     const auto now = std::chrono::steady_clock::now();
                     const bool locallyAlive = backend->IsAlive();
-                    const bool probeDue = now >= nextHealthProbe;
-                    if (!locallyAlive || !pollPhysicalButtons() ||
-                        (probeDue && !backend->Probe())) {
+                    bool probeDue = now >= nextHealthProbe;
+                    {
+                        std::lock_guard<std::mutex> lock(mutex_);
+                        probeDue = probeDue && !leftButtonOutputDown_ &&
+                            leftClickPhase_ == LeftClickPhase::Idle;
+                        status_.probeInFlight = probeDue;
+                    }
+                    const bool healthy = locallyAlive && pollPhysicalButtons() &&
+                        (!probeDue || backend->Probe());
+                    {
+                        std::lock_guard<std::mutex> lock(mutex_);
+                        status_.probeInFlight = false;
+                    }
+                    if (!healthy) {
                         const DWORD error = backend->LastSystemError();
                         disconnectBackend();
                         Publish(
@@ -1947,7 +2278,7 @@ namespace
                         ConnectionState::Testing,
                         DeviceError::None,
                         result.endpoint);
-                    if (!RunCircularMovementTest(*backend)) {
+                    if (!RunMovementTest(*backend, command)) {
                         const DWORD error = backend->LastSystemError();
                         disconnectBackend();
                         Publish(
@@ -1988,7 +2319,7 @@ namespace
                         ConnectionState::Testing,
                         DeviceError::None,
                         connectedEndpoint);
-                    if (!RunCircularMovementTest(*backend)) {
+                    if (!RunMovementTest(*backend, command)) {
                         const DWORD error = backend->LastSystemError();
                         disconnectBackend();
                         Publish(
@@ -2012,14 +2343,27 @@ namespace
             disconnectBackend();
         }
 
+        bool RunMovementTest(InputBackend& backend, const ServiceCommand& command)
+        {
+            return RunCircularMovementTest(backend,
+                [&] { return !IsCurrent(command); },
+                [&](auto delay) {
+                    std::unique_lock<std::mutex> lock(mutex_);
+                    return !condition_.wait_for(lock, delay, [&] {
+                        return stopping_ || generation_ != command.generation ||
+                            status_.selected != command.kind;
+                    });
+                });
+        }
+
         mutable std::mutex mutex_;
         std::condition_variable condition_;
         std::deque<ServiceCommand> queue_;
         DeviceStatus status_ = {};
+        app::input::ActivationKeyRouter activationKeys_;
         KmBoxNetConfig networkConfig_;
         uint64_t generation_ = 0;
-        int pendingMoveX_ = 0;
-        int pendingMoveY_ = 0;
+        app::input::LatestMoveMailbox pendingMove_;
         int pendingLeftButton_ = -1;
         uint64_t pendingRealtimeGeneration_ = 0;
         LeftClickPhase leftClickPhase_ = LeftClickPhase::Idle;
@@ -2030,6 +2374,7 @@ namespace
         uint64_t leftClickGeneration_ = 0;
         uint64_t leftClickToken_ = 0;
         uint64_t nextLeftClickToken_ = 1;
+        uint64_t leftClickExpiresAtUs_ = 0;
         std::chrono::steady_clock::time_point leftClickQueuedAt_ = {};
         std::chrono::steady_clock::time_point leftClickReleaseAt_ = {};
         double leftClickDispatchMeanUs_ = 0.0;
@@ -2086,9 +2431,14 @@ bool app::input::RequestMovementTest()
     return Service().TestMovement();
 }
 
-bool app::input::RequestMove(int deltaX, int deltaY)
+bool app::input::RequestMove(int deltaX, int deltaY, uint64_t validForUs)
 {
-    return Service().Move(deltaX, deltaY);
+    return Service().Move(deltaX, deltaY, validForUs);
+}
+
+void app::input::CancelPendingMoves()
+{
+    Service().CancelPendingMoves();
 }
 
 bool app::input::RequestLeftButton(bool pressed)
@@ -2098,7 +2448,12 @@ bool app::input::RequestLeftButton(bool pressed)
 
 bool app::input::RequestLeftClick(uint32_t holdMs)
 {
-    return Service().LeftClick(holdMs);
+    return Service().LeftClick(holdMs, false) == ClickRequestResult::Queued;
+}
+
+app::input::ClickRequestResult app::input::TryRequestLeftClick(uint32_t holdMs, uint64_t validForUs)
+{
+    return Service().LeftClick(holdMs, true, validForUs);
 }
 
 bool app::input::IsHardwareKeyDown(int virtualKey)
@@ -2110,19 +2465,12 @@ app::input::KeyState app::input::ReadActivationKeyState(int virtualKey)
 {
     if (virtualKey < 1 || virtualKey > 0xFE)
         return {};
-    const auto device = GetDeviceStatus();
-    const uint8_t mask = VirtualKeyToMouseButtonMask(virtualKey);
-    const KeyState hardware{
-        mask != 0 && device.state == ConnectionState::Connected && device.physicalButtonsAvailable,
-        (device.physicalButtonMask & mask) != 0
-    };
-    if (hardware.available)
-        return hardware;
 #if defined(KEVQ_INPUT_DEVICE_TESTING)
-    return {};
+    const KeyState primary = {};
 #else
-    return SelectActivationKeyState(hardware, ReadPrimaryKeyState(virtualKey));
+    const KeyState primary = ReadPrimaryKeyState(virtualKey);
 #endif
+    return Service().ActivationKeyState(virtualKey, primary);
 }
 
 bool app::input::IsActivationKeyDown(int virtualKey)

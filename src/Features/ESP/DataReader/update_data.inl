@@ -1,5 +1,8 @@
 #include "Features/ESP/DataReader/intervals.h"
 #include "Features/ESP/DataReader/deferred_lane_policy.h"
+#include "Features/ESP/DataReader/view_offset_sample.h"
+#include "Features/ESP/DataReader/checked_scatter_batch.h"
+#include "Features/ESP/DataReader/recoil_sample.h"
 
 // Large per-tick arrays live in thread-local scratch storage. The remaining
 // analyzer estimate is small relative to the configured 8 MiB stack reserve.
@@ -92,7 +95,6 @@ bool esp::PlayerDataReader::UpdateData()
     const bool wantsRadarShowBomb = settingsSnapshot.radarShowBomb;
     const bool wantsEspWeapon = settingsSnapshot.espWeapon;
     const bool wantsEspWeaponAmmo = settingsSnapshot.espWeaponAmmo;
-    const bool wantsEspWeaponIcon = settingsSnapshot.espWeaponIcon;
     const bool wantsEspName = settingsSnapshot.espName;
     const bool wantsRadarSpectatorList = settingsSnapshot.radarSpectatorList;
     const bool wantsEspFlags = settingsSnapshot.espFlags;
@@ -110,6 +112,7 @@ bool esp::PlayerDataReader::UpdateData()
     const bool wantsTargetVelocity = settingsSnapshot.targetNeedsVelocity;
     const bool wantsTargetWeaponState =
         settingsSnapshot.targetNeedsWeaponState;
+    const bool wantsGrenadeHelperWeaponState = settingsSnapshot.grenadeHelperNeedsWeaponState;
     s_visibilityEnabled.store(wantsPlayerVisibility, std::memory_order_relaxed);
     const bool wantsWebRadarEnabled = settingsSnapshot.webRadarEnabled;
     const bool wantsWebRadarRemoteEnabled = settingsSnapshot.webRadarRemoteEnabled;
@@ -374,11 +377,21 @@ bool esp::PlayerDataReader::UpdateData()
     const uint64_t _stageCommitEnd = TickNowUs();
     if (wantsPlayerVisibility)
         PublishPlayerVisibilityFrame();
+    static thread_local uint64_t lastBoneLaneOpportunityUs = 0;
+    static thread_local bool prioritizedBonesLastTick = false;
+    deferredFairness.Observe(DeferredLane::Bones, wantsEspSkeleton &&
+        TickNowUs() - lastBoneLaneOpportunityUs >= esp::intervals::kBoneReadsUs, TickNowUs());
+    const bool prioritizeBoneLane = forcedDeferredLane == DeferredLane::Bones ||
+        (forcedDeferredLane == DeferredLane::None && esp::data::ShouldPrioritizeBoneLane(
+            wantsEspSkeleton, prioritizedBonesLastTick, lastBoneLaneOpportunityUs, TickNowUs()));
+    prioritizedBonesLastTick = prioritizeBoneLane;
 #include "player_aux_reads.inl"
     const uint64_t _stagePlayerAuxEnd = TickNowUs();
 #include "Features/ESP/bone_reader.h"
 #include "inventory_reads.inl"
     const uint64_t _stageInvEnd = TickNowUs();
+    const bool allowBoneLane = prioritizeBoneLane || esp::data::ShouldRunBoneLane(
+        _playerHierarchyActiveTick || _playerAuxActiveTick, _inventoryActiveTick, _inventoryFullTick);
     {
         esp::BoneReader boneReader;
         // Reader-owned cache, reset by scene/pawn changes inside ReadBones.
@@ -398,10 +411,7 @@ bool esp::PlayerDataReader::UpdateData()
             localTeamLiveResolved,
             localControllerTeam,
             localTeamLikelySwitched,
-            esp::data::ShouldRunBoneLane(
-                _playerHierarchyActiveTick || _playerAuxActiveTick,
-                _inventoryActiveTick,
-                _inventoryFullTick),
+            allowBoneLane,
             sceneNodes,
             hasBoneData,
             boneSampleTimeUs,
@@ -415,11 +425,17 @@ bool esp::PlayerDataReader::UpdateData()
         );
     }
     const uint64_t _stageBoneEnd = TickNowUs();
+    if (allowBoneLane) {
+        lastBoneLaneOpportunityUs = _stageBoneEnd;
+        deferredFairness.Served(DeferredLane::Bones);
+    }
     const uint64_t nowUs = TickNowUs();
 #include "world_reads.inl"
     const uint64_t _stageWorldEnd = TickNowUs();
 #include "bomb_reads.inl"
     const uint64_t _stageBombEnd = TickNowUs();
+    uint64_t _stageWeaponTelemetryUs = 0;
+    uint64_t _stageHelmetReadsUs = 0;
 {
 #include "commit_enrichment_state.inl"
 }

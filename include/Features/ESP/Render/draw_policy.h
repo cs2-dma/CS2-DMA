@@ -8,6 +8,31 @@
 
 namespace esp::render
 {
+    struct OffscreenDirection
+    {
+        float x = 0.0f;
+        float y = 0.0f;
+        bool valid = false;
+    };
+
+    inline OffscreenDirection ResolveOffscreenDirection(float dx, float dy,
+        float cameraRightX, float cameraRightY) noexcept
+    {
+        if (!std::isfinite(dx) || !std::isfinite(dy) ||
+            !std::isfinite(cameraRightX) || !std::isfinite(cameraRightY)) return {};
+        const float distance = std::hypot(dx, dy);
+        const float basisLength = std::hypot(cameraRightX, cameraRightY);
+        if (!std::isfinite(distance) || distance < 0.001f ||
+            !std::isfinite(basisLength) || basisLength < 0.0001f) return {};
+        dx /= distance;
+        dy /= distance;
+        cameraRightX /= basisLength;
+        cameraRightY /= basisLength;
+        return {dx * cameraRightX + dy * cameraRightY,
+            dx * cameraRightY - dy * cameraRightX, true};
+    }
+
+
     inline constexpr uint64_t kCachedViewMatrixHoldUs = 200000u;
     inline constexpr uint64_t kPrevTickFallbackMaxAgeUs = 100000u;
     inline constexpr uint64_t kDrawEventThrottleUs = 500000u;
@@ -16,14 +41,11 @@ namespace esp::render
     inline constexpr uint64_t kWebRadarAliveHoldBulkRecoveryUs = 2500000u;
     inline constexpr uint64_t kWebRadarDeadHoldUs = 1800000u;
     inline constexpr uint64_t kWebRadarAliveHoldUs = 1200000u;
-    inline constexpr uint64_t kBonePersistUs = 150000u;
     inline constexpr uint64_t kPlayerRenderMaxAgeUs = 500000u;
     inline constexpr uint64_t kPoseRenderMaxAgeUs = 250000u;
     inline constexpr uint64_t kRenderDelaySlackUs = 500u;
     inline constexpr float kMaxRenderExtrapolationSec = 0.040f;
     inline constexpr float kMinVelocityExtrapolation2D = 1.0f;
-    inline constexpr uint64_t kBombPositionSampleMaxAgeUs = 50000u;
-    inline constexpr float kBombMaxExtrapolationSec = 0.025f;
     inline constexpr float kBombMaxVelocity = 4000.0f;
     inline constexpr float kFallbackBombDefuseSeconds = 10.0f;
     inline constexpr float kFallbackStandingHeight = 72.0f;
@@ -205,28 +227,7 @@ namespace esp::render
             SelectWebRadarPlayerHoldUs(bulkRecovery, health));
     }
 
-    inline bool ShouldHoldWebRadarPlayer(
-        bool liveContext,
-        bool slotReused,
-        bool heldValid,
-        uintptr_t heldPawn,
-        uint64_t heldSeenUs,
-        uint64_t nowUs,
-        uint64_t holdUs,
-        bool currentConfirmedDead = false)
-    {
-        return liveContext &&
-               !currentConfirmedDead &&
-               !slotReused &&
-               heldValid &&
-               heldPawn != 0 &&
-               IsFreshTimestamp(heldSeenUs, nowUs, holdUs);
-    }
 
-    inline bool ShouldReusePersistedBone(uint64_t lastBoneUs, uint64_t nowUs)
-    {
-        return IsFreshTimestamp(lastBoneUs, nowUs, kBonePersistUs);
-    }
 
     inline bool ShouldApplyVelocityExtrapolation(
         float extrapolationSec,
@@ -329,38 +330,6 @@ namespace esp::render
         }
     };
 
-    inline Vector3 ResolveBombRenderPosition(
-        const Vector3& position,
-        const Vector3& velocity,
-        bool dropped,
-        uint64_t positionSampleTimeUs,
-        uint64_t nowUs)
-    {
-        const bool positionValid =
-            std::isfinite(position.x) &&
-            std::isfinite(position.y) &&
-            std::isfinite(position.z);
-        const float velocityMagnitude = static_cast<float>(
-            std::sqrt(
-                velocity.x * velocity.x +
-                velocity.y * velocity.y +
-                velocity.z * velocity.z));
-        const bool velocityValid =
-            std::isfinite(velocityMagnitude) &&
-            velocityMagnitude > kMinVelocityExtrapolation2D &&
-            velocityMagnitude <= kBombMaxVelocity;
-        if (!positionValid ||
-            !dropped ||
-            !velocityValid ||
-            !IsFreshTimestamp(positionSampleTimeUs, nowUs, kBombPositionSampleMaxAgeUs)) {
-            return position;
-        }
-
-        const float ageSec = std::min(
-            static_cast<float>(nowUs - positionSampleTimeUs) / 1000000.0f,
-            kBombMaxExtrapolationSec);
-        return position + velocity * ageSec;
-    }
 
     enum class BombDefuseOutcome : uint8_t
     {

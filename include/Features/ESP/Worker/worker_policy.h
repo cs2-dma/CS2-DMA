@@ -83,9 +83,10 @@ namespace esp::worker
     inline constexpr uint64_t kLiveHistoryWindowUs = 15000000u;
     inline constexpr uint32_t kWorkerRestartInitialBackoffMs = 100u;
     inline constexpr uint32_t kWorkerRestartMaxBackoffMs = 2000u;
-    inline constexpr std::array<uint64_t, 13> kCycleLatencyUpperBoundsUs = {
+    inline constexpr std::array<uint64_t, 21> kCycleLatencyUpperBoundsUs = {
         500u, 750u, 1000u, 1250u, 1500u, 2000u,
-        2500u, 3334u, 4000u, 5000u, 8334u, 16667u, 1000000u,
+        2500u, 3334u, 4000u, 5000u, 6000u, 7000u, 8000u, 8334u,
+        10000u, 12000u, 14000u, 16000u, 16667u, 33000u, 1000000u,
     };
 
     inline std::size_t LatencyBucketIndex(uint64_t durationUs) noexcept

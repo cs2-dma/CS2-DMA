@@ -1,4 +1,5 @@
 #include "Features/ESP/UI/esp_sections.h"
+#include "Features/ESP/Render/presentation_policy.h"
 
 #include "app/Core/globals.h"
 #include "app/UI/MenuShell/ui_icons.h"
@@ -283,7 +284,8 @@ namespace
                 id);
 
             const ImGuiViewport* viewport = ImGui::GetMainViewport();
-            const float popupWidth = std::min(520.0f, std::max(1.0f, viewport->WorkSize.x - 24.0f));
+            const float desiredWidth = std::strcmp(id, "flags") == 0 ? 960.0f : 520.0f;
+            const float popupWidth = std::min(desiredWidth, std::max(1.0f, viewport->WorkSize.x - 24.0f));
             const float popupHeight = std::max(1.0f, viewport->WorkSize.y - 24.0f);
             ImGui::SetNextWindowPos(ImVec2(viewport->WorkPos.x + viewport->WorkSize.x * 0.5f,
                 viewport->WorkPos.y + 12.0f), ImGuiCond_Appearing, ImVec2(0.5f, 0.0f));
@@ -498,6 +500,22 @@ namespace
         EndSettingsRow(row);
     }
 
+    void BarSettings(bool armor)
+    {
+        auto& p = g::espSettings.presentation;
+        static constexpr const char* sides[] = {"Left", "Right", "Top", "Bottom"};
+        static constexpr const char* values[] = {"Always", "When not full", "Off"};
+        int& mode = armor ? p.armorValueMode : p.healthValueMode;
+        mode = esp::render::ValueMode(mode, armor ? g::espArmorText : g::espHealthText);
+        ChoiceSettingsRow("side", "Position", armor ? &p.armorSide : &p.healthSide, sides, 4);
+        ThicknessRow("width", "Bar width", armor ? &p.armorWidth : &p.healthWidth, 1, 8);
+        ChoiceSettingsRow("values", "Values", &mode, values, 3);
+        if (armor) {
+            static constexpr const char* styles[] = {"Bar", "Shield + value"};
+            ChoiceSettingsRow("armor_style", "Display", &p.armorStyle, styles, 2);
+        } else ToggleSetting("trail", "Damage trail", &p.healthTrail);
+    }
+
     float EspGridColumnWidth()
     {
         const float availableWidth = std::max(1.0f, ImGui::GetContentRegionAvail().x);
@@ -516,6 +534,7 @@ namespace
             : ImVec2(start.x, start.y + kEspRowHeight + kEspRowGap));
         rightFn(columnWidth);
         ImGui::SetCursorScreenPos(ImVec2(start.x, start.y + (kEspRowHeight + kEspRowGap) * (twoColumns ? 1.0f : 2.0f)));
+        ImGui::Dummy(ImVec2(0.0f, 0.0f));
     }
 }
 
@@ -553,6 +572,9 @@ void ui::tabs::esp_sections::RenderOptionsGrid()
             }, true, width); },
         [] (float width) { DrawOptionRow("skeleton", Icon::PersonArmsUp, "Skeleton", &g::espSkeleton, g::espSkeletonColor, [] {
                 ToggleSetting("dots", "Show Dots", &g::espSkeletonDots);
+                ToggleSetting("head_circle", "Head circle", &g::espSkeletonHeadCircle);
+                if (g::espSkeletonHeadCircle)
+                    ThicknessRow("head_scale", "Head circle scale", &g::espSkeletonHeadScale, 0.5f, 2.0f);
                 ThicknessRow("thick", "Thickness", &g::espSkeletonThickness, 0.5f, 4.0f);
             }, true, width); });
 
@@ -564,7 +586,7 @@ void ui::tabs::esp_sections::RenderOptionsGrid()
                     ColorRow("accent", "Accent Color", g::espHealthColor);
                 if (g::espHealthColorMode == 2)
                     ColorRow("low", "Low Color", g::espHealthLowColor);
-                ToggleSetting("value", "Show Value", &g::espHealthText);
+                BarSettings(false);
             }, true, width); },
         [] (float width) { DrawOptionRow("teammates", Icon::People, "Show Teammates", &g::espShowTeammates, nullptr, [] {
             ImGui::TextDisabled(
@@ -580,9 +602,13 @@ void ui::tabs::esp_sections::RenderOptionsGrid()
                     ColorRow("accent", "Accent Color", g::espArmorColor);
                 if (g::espArmorColorMode == 2)
                     ColorRow("low", "Low Color", g::espArmorLowColor);
-                ToggleSetting("value", "Show Value", &g::espArmorText);
+                BarSettings(true);
             }, true, width); },
         [] (float width) { DrawOptionRow("flags", Icon::Flag, "Player Flags", &g::espFlags, nullptr, [] {
+                const bool wide = ImGui::GetContentRegionAvail().x >= 880.0f;
+                if (!ImGui::BeginTable("flag_settings_layout", wide ? 2 : 1,
+                    ImGuiTableFlags_SizingStretchSame | ImGuiTableFlags_BordersInnerV | ImGuiTableFlags_PadOuterX)) return;
+                ImGui::TableNextColumn();
                 FlagSettingsRow("name", "Name", &g::espName, g::espNameColor, &g::espNameFontSize);
                 FlagSettingsRow("distance", "Distance", &g::espDistance, g::espDistanceColor, &g::espDistanceSize);
                 FlagSettingsRow("blind", "Blind", &g::espFlagBlind, g::espFlagBlindColor, &g::espFlagBlindSize);
@@ -590,18 +616,58 @@ void ui::tabs::esp_sections::RenderOptionsGrid()
                 FlagSettingsRow("defusing", "Defusing", &g::espFlagDefusing, g::espFlagDefusingColor, &g::espFlagDefusingSize);
                 FlagSettingsRow("kit", "Kit", &g::espFlagKit, g::espFlagKitColor, &g::espFlagKitSize);
                 FlagSettingsRow("money", "Money", &g::espFlagMoney, g::espFlagMoneyColor, &g::espFlagMoneySize);
+                auto& p = g::espSettings.presentation;
+                ToggleSetting("reload", "Reloading", &p.flagReload);
+                ToggleSetting("c4", "C4 carrier", &p.flagBomb);
+                ImGui::TableNextColumn();
+                ToggleSetting("money_compact", "Compact money", &p.compactMoney);
+                ToggleSetting("elevation", "Height indicator", &p.distanceHeight);
+                static constexpr const char* styles[] = {"Text", "Icons", "Icons + text"};
+                static constexpr const char* sides[] = {"Left", "Right"};
+                static constexpr const char* nameSides[] = {"Top", "Bottom", "Left", "Right"};
+                ChoiceSettingsRow("flag_style", "Status display", &p.flagsStyle, styles, 3);
+                ChoiceSettingsRow("flag_side", "Status position", &p.flagsSide, sides, 2);
+                ChoiceSettingsRow("name_side", "Name position", &p.nameSide, nameSides, 4);
+                SliderSettingsRow("name_width", "Name max width", &p.nameMaxWidth, 50, 300, "%.0f px");
+                IntSliderSettingsRow("flag_limit", "Status limit", &p.flagsLimit, 1, 7, "%d");
+                if (ImGui::TreeNode(KEVQ_TR("Status priority"))) {
+                    static constexpr const char* names[] = {"Defusing", "Reloading", "Blind", "Scoped", "C4", "Kit", "Money"};
+                    p.flagsOrder = esp::render::NormalizeFlagOrder(p.flagsOrder);
+                    for (int i = 0; i < 7; ++i) {
+                        ImGui::PushID(i);
+                        int selected = p.flagsOrder[i] > 5 ? p.flagsOrder[i] - 1 : p.flagsOrder[i];
+                        const std::string label = std::to_string(i+1);
+                        ChoiceSettingsRow("order", label.c_str(), &selected, names, 7);
+                        if (selected >= 5) ++selected;
+                        if (selected != p.flagsOrder[i]) {
+                            auto found = std::find(p.flagsOrder.begin(), p.flagsOrder.end(), selected);
+                            if (found != p.flagsOrder.end()) std::swap(p.flagsOrder[i], *found);
+                        }
+                        ImGui::PopID();
+                    }
+                    ImGui::TreePop();
+                }
+                ImGui::EndTable();
             }, true, width); });
 
     renderPair(
         [] (float width) { DrawOptionRow("vis", Icon::Eye, "Visibility Colors", &g::espVisibilityColoring, g::espVisibleColor, [] {
                 ColorRow("occ", "Occluded", g::espHiddenColor);
+                auto& p = g::espSettings.presentation;
+                ColorRow("unknown", "Unknown", p.unknownColor);
+                ToggleSetting("box", "Color box", &p.visibilityBox);
+                ToggleSetting("bones", "Color skeleton", &p.visibilitySkeleton);
+                ToggleSetting("arrows", "Color arrows", &p.visibilityArrows);
             }, true, width); },
         [] (float width) { DrawOptionRow("weapon", Icon::Crosshair, "Weapon Label", &g::espWeapon, nullptr, [] {
                 ToggleColorRow("txt", "Label Text", &g::espWeaponText, g::espWeaponTextColor);
                 SizeRow("txtsz", "Text Size", &g::espWeaponTextSize, 0.0f, 24.0f);
                 ImGui::Separator();
                 ToggleColorRow("icon", "Icon Weapon", &g::espWeaponIcon, g::espWeaponIconColor);
-                ToggleSetting("knife", "No Knife", &g::espWeaponIconNoKnife);
+                static constexpr const char* weapons[] = {"Active weapon", "Primary inventory weapon"};
+                int weaponMode = g::espWeaponIconNoKnife ? 1 : 0;
+                ChoiceSettingsRow("weapon_mode", "Weapon source", &weaponMode, weapons, 2);
+                g::espWeaponIconNoKnife = weaponMode == 1;
                 SizeRow("iconsz", "Icon Size", &g::espWeaponIconSize, 10.0f, 30.0f);
                 ImGui::Separator();
                 ToggleColorRow("ammo", "Weapon Ammo", &g::espWeaponAmmo, g::espWeaponAmmoColor);
@@ -618,7 +684,17 @@ void ui::tabs::esp_sections::RenderOptionsGrid()
                 SizeRow("bmbtxtsz", "Text Size", &g::espBombTextSize, 0.0f, 24.0f);
             }, true, width); },
         [] (float width) { DrawOptionRow("snap", Icon::Rulers, "Snap Lines", &g::espSnaplines, g::espSnaplineColor, [] {
-                ToggleSetting("top", "Snap From Top", &g::espSnaplineFromTop);
+                auto& p = g::espSettings.presentation;
+                if (p.snapOrigin < 0) p.snapOrigin = g::espSnaplineFromTop ? 0 : 1;
+                static constexpr const char* origins[] = {"Top", "Bottom", "Center"};
+                static constexpr const char* ends[] = {"Feet", "Body center"};
+                ChoiceSettingsRow("origin", "Start", &p.snapOrigin, origins, 3);
+                ChoiceSettingsRow("end", "End", &p.snapEndpoint, ends, 2);
+                ThicknessRow("thickness", "Thickness", &p.snapThickness, 0.5f, 4);
+                SliderSettingsRow("opacity", "Opacity", &p.snapOpacity, 0, 1, "%.2f");
+                SliderSettingsRow("distance", "Max distance", &p.snapMaxDistance, 1, 500, "%.0f m");
+                ToggleSetting("nearest", "Nearest only", &p.snapNearest);
+                if (!p.snapNearest) IntSliderSettingsRow("limit", "Maximum lines", &p.snapLimit, 1, 64, "%d");
             }, true, width); });
 
     renderPair(

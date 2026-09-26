@@ -98,8 +98,12 @@
         .pawnMaskBit = localMaskBit
     });
     addInventoryPlayerSlot(localInventorySlot);
-    for (int resolvedIdx = 0; resolvedIdx < playerResolvedSlotCount; ++resolvedIdx)
-        addInventoryPlayerSlot(playerResolvedSlots[resolvedIdx]);
+    if (!wantsGrenadeHelperWeaponState || webRadarDemandActive || wantsTargetWeaponState ||
+        wantsEspWeapon || wantsEspWeaponAmmo || settingsSnapshot.espWeaponPresentation ||
+        wantsEspBombInfo || wantsRadarShowBomb) {
+        for (int resolvedIdx = 0; resolvedIdx < playerResolvedSlotCount; ++resolvedIdx)
+            addInventoryPlayerSlot(playerResolvedSlots[resolvedIdx]);
+    }
     if (webRadarDemandActive) {
         for (int i = 0; i < inventoryCacheSlotLimit; ++i)
             addInventoryPlayerSlot(i);
@@ -145,7 +149,9 @@
 
     const uint64_t inventoryNowUs = TickNowUs();
     const bool wantsInventoryData =
+        settingsSnapshot.espWeaponPresentation ||
         webRadarDemandActive ||
+        wantsGrenadeHelperWeaponState ||
         wantsTargetWeaponState ||
         wantsEspWeapon ||
         wantsEspWeaponAmmo ||
@@ -153,7 +159,6 @@
         wantsRadarShowBomb;
     const bool wantsNoKnifeInventoryData =
         wantsEspWeapon &&
-        wantsEspWeaponIcon &&
         wantsEspWeaponIconNoKnife;
     const bool wantsBombInventoryData =
         wantsEspBombInfo || wantsRadarShowBomb;
@@ -170,9 +175,6 @@
     if (wantsInventoryData && wantsNoKnifeInventoryData) {
         for (int inventorySlotIdx = 0; inventorySlotIdx < inventoryPlayerSlotCount; ++inventorySlotIdx) {
             const int i = inventoryPlayerSlots[inventorySlotIdx];
-            if (!IsKnifeItemId(weaponIds[i]))
-                continue;
-
             const int inventorySlotCount = getInventorySlotCount(i);
             bool hasKnownInventoryWeapon = false;
             bool hasPrimaryInventoryWeapon = false;
@@ -193,21 +195,23 @@
             }
         }
     }
-    const bool activeWeaponLaneDue =
-        esp::data::ShouldRunActiveInventoryLane(
-            wantsInventoryData &&
+    const bool activeInventoryRequested = wantsInventoryData &&
                 (s_lastActiveWeaponLaneUs == 0 ||
                  (inventoryNowUs - s_lastActiveWeaponLaneUs) >=
-                    esp::intervals::kInventoryActiveWeaponLaneUs),
-            _playerHierarchyActiveTick || _playerAuxActiveTick);
-    const bool fullInventoryLaneDue =
-        esp::data::ShouldRunFullInventoryLane(
-            wantsFullInventoryData &&
+                    esp::intervals::kInventoryActiveWeaponLaneUs);
+    const bool fullInventoryRequested = wantsFullInventoryData &&
                 (noKnifePrimaryInventoryRefreshNeeded ||
                  s_lastFullInventoryLaneUs == 0 ||
-                 (inventoryNowUs - s_lastFullInventoryLaneUs) >= fullInventoryLaneIntervalUs),
-            _playerHierarchyActiveTick || _playerAuxActiveTick,
-            activeWeaponLaneDue);
+                 (inventoryNowUs - s_lastFullInventoryLaneUs) >= fullInventoryLaneIntervalUs);
+    deferredFairness.Observe(DeferredLane::ActiveInventory, activeInventoryRequested, inventoryNowUs);
+    deferredFairness.Observe(DeferredLane::FullInventory, fullInventoryRequested, inventoryNowUs);
+    const bool inventorySlotAvailable = !_playerHierarchyActiveTick && !_playerAuxActiveTick && !prioritizeBoneLane;
+    const bool activeWeaponLaneDue = esp::data::ShouldRunActiveInventoryLane(activeInventoryRequested, !inventorySlotAvailable) &&
+        (forcedDeferredLane == DeferredLane::None || forcedDeferredLane == DeferredLane::ActiveInventory);
+    const bool fullInventoryLaneDue = esp::data::ShouldRunFullInventoryLane(fullInventoryRequested, !inventorySlotAvailable, activeWeaponLaneDue) &&
+        (forcedDeferredLane == DeferredLane::None || forcedDeferredLane == DeferredLane::FullInventory);
+    if (activeWeaponLaneDue) deferredFairness.Served(DeferredLane::ActiveInventory);
+    if (fullInventoryLaneDue) deferredFairness.Served(DeferredLane::FullInventory);
     _inventoryActiveTick = activeWeaponLaneDue;
     _inventoryFullTick = fullInventoryLaneDue;
 

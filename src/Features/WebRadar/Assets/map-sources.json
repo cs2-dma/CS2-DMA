@@ -1,0 +1,421 @@
+{
+  "repository": "https://github.com/MurkyYT/cs2-map-icons",
+  "commit": "55d196b3ac675f84012a343b40bb6cfddba2f943",
+  "pool_source": "https://raw.githubusercontent.com/SteamTracking/GameTracking-CS2/3fc98e763328f7d1627405b389d1b6b69c5b0e38/game/csgo/pak01_dir/gamemodes.txt",
+  "pool_maps": [
+    "ar_baggage",
+    "ar_pool_day",
+    "ar_shoots",
+    "ar_shoots_night",
+    "cs_italy",
+    "cs_office",
+    "cs_shelter",
+    "de_ancient",
+    "de_ancient_night",
+    "de_anubis",
+    "de_boulder",
+    "de_cache",
+    "de_debris",
+    "de_dust2",
+    "de_eldorado",
+    "de_fachwerk",
+    "de_inferno",
+    "de_mirage",
+    "de_nuke",
+    "de_overpass",
+    "de_poseidon",
+    "de_train",
+    "de_vertigo",
+    "rush_001"
+  ],
+  "missing_overviews": [
+    "ar_pool_day"
+  ],
+  "ownership": "Map assets and overview data belong to Valve Corporation.",
+  "maps": {
+    "de_mirage": {
+      "overview": "data/radar_info/de_mirage.txt",
+      "radar": "https://raw.githubusercontent.com/MurkyYT/cs2-map-icons/55d196b3ac675f84012a343b40bb6cfddba2f943/images/radars/de_mirage_radar_psd.png",
+      "pixels": [
+        1024,
+        1024
+      ]
+    },
+    "de_inferno": {
+      "overview": "data/radar_info/de_inferno.txt",
+      "radar": "https://raw.githubusercontent.com/MurkyYT/cs2-map-icons/55d196b3ac675f84012a343b40bb6cfddba2f943/images/radars/de_inferno_radar_psd.png",
+      "pixels": [
+        1024,
+        1024
+      ]
+    },
+    "de_dust2": {
+      "overview": "data/radar_info/de_dust2.txt",
+      "radar": "https://raw.githubusercontent.com/MurkyYT/cs2-map-icons/55d196b3ac675f84012a343b40bb6cfddba2f943/images/radars/de_dust2_radar_psd.png",
+      "pixels": [
+        1024,
+        1024
+      ]
+    },
+    "de_cache": {
+      "overview": "data/radar_info/de_cache.txt",
+      "radar": "https://raw.githubusercontent.com/MurkyYT/cs2-map-icons/55d196b3ac675f84012a343b40bb6cfddba2f943/images/radars/de_cache_radar_psd.png",
+      "pixels": [
+        1024,
+        1024
+      ]
+    },
+    "de_nuke": {
+      "overview": "data/radar_info/de_nuke.txt",
+      "radar": "https://raw.githubusercontent.com/MurkyYT/cs2-map-icons/55d196b3ac675f84012a343b40bb6cfddba2f943/images/radars/de_nuke_radar_psd.png",
+      "pixels": [
+        1024,
+        1024
+      ]
+    },
+    "de_nuke_lower": {
+      "overview": "data/radar_info/de_nuke.txt",
+      "radar": "https://raw.githubusercontent.com/MurkyYT/cs2-map-icons/55d196b3ac675f84012a343b40bb6cfddba2f943/images/radars/de_nuke_lower_radar_psd.png",
+      "pixels": [
+        1024,
+        1024
+      ]
+    },
+    "de_overpass": {
+      "overview": "data/radar_info/de_overpass.txt",
+      "radar": "https://raw.githubusercontent.com/MurkyYT/cs2-map-icons/55d196b3ac675f84012a343b40bb6cfddba2f943/images/radars/de_overpass_radar_psd.png",
+      "pixels": [
+        1024,
+        1024
+      ]
+    },
+    "de_train": {
+      "overview": "data/radar_info/de_train.txt",
+      "radar": "https://raw.githubusercontent.com/MurkyYT/cs2-map-icons/55d196b3ac675f84012a343b40bb6cfddba2f943/images/radars/de_train_radar_psd.png",
+      "pixels": [
+        1024,
+        1024
+      ]
+    },
+    "de_train_lower": {
+      "overview": "data/radar_info/de_train.txt",
+      "radar": "https://raw.githubusercontent.com/MurkyYT/cs2-map-icons/55d196b3ac675f84012a343b40bb6cfddba2f943/images/radars/de_train_lower_radar_psd.png",
+      "pixels": [
+        1024,
+        1024
+      ]
+    },
+    "ar_baggage": {
+      "overview": "data/radar_info/ar_baggage.txt",
+      "radar": "https://raw.githubusercontent.com/MurkyYT/cs2-map-icons/55d196b3ac675f84012a343b40bb6cfddba2f943/images/radars/ar_baggage_radar_psd.png",
+      "pixels": [
+        1024,
+        1024
+      ]
+    },
+    "ar_baggage_lower": {
+      "overview": "data/radar_info/ar_baggage.txt",
+      "radar": "https://raw.githubusercontent.com/MurkyYT/cs2-map-icons/55d196b3ac675f84012a343b40bb6cfddba2f943/images/radars/ar_baggage_lower_radar_psd.png",
+      "pixels": [
+        1024,
+        1024
+      ]
+    },
+    "ar_shoots": {
+      "overview": "data/radar_info/ar_shoots.txt",
+      "radar": "https://raw.githubusercontent.com/MurkyYT/cs2-map-icons/55d196b3ac675f84012a343b40bb6cfddba2f943/images/radars/ar_shoots_radar_psd.png",
+      "pixels": [
+        1024,
+        1024
+      ]
+    },
+    "ar_shoots_night": {
+      "overview": "data/radar_info/ar_shoots_night.txt",
+      "radar": "https://raw.githubusercontent.com/MurkyYT/cs2-map-icons/55d196b3ac675f84012a343b40bb6cfddba2f943/images/radars/ar_shoots_night_radar_psd.png",
+      "pixels": [
+        1024,
+        1024
+      ]
+    },
+    "de_ancient": {
+      "overview": "data/radar_info/de_ancient.txt",
+      "radar": "https://raw.githubusercontent.com/MurkyYT/cs2-map-icons/55d196b3ac675f84012a343b40bb6cfddba2f943/images/radars/de_ancient_radar_psd.png",
+      "pixels": [
+        1024,
+        1024
+      ]
+    },
+    "de_ancient_night": {
+      "overview": "data/radar_info/de_ancient_night.txt",
+      "radar": "https://raw.githubusercontent.com/MurkyYT/cs2-map-icons/55d196b3ac675f84012a343b40bb6cfddba2f943/images/radars/de_ancient_night_radar_psd.png",
+      "pixels": [
+        1024,
+        1024
+      ]
+    },
+    "de_anubis": {
+      "overview": "data/radar_info/de_anubis.txt",
+      "radar": "https://raw.githubusercontent.com/MurkyYT/cs2-map-icons/55d196b3ac675f84012a343b40bb6cfddba2f943/images/radars/de_anubis_radar_psd.png",
+      "pixels": [
+        1024,
+        1024
+      ]
+    },
+    "de_vertigo": {
+      "overview": "data/radar_info/de_vertigo.txt",
+      "radar": "https://raw.githubusercontent.com/MurkyYT/cs2-map-icons/55d196b3ac675f84012a343b40bb6cfddba2f943/images/radars/de_vertigo_radar_psd.png",
+      "pixels": [
+        1024,
+        1024
+      ]
+    },
+    "de_vertigo_lower": {
+      "overview": "data/radar_info/de_vertigo.txt",
+      "radar": "https://raw.githubusercontent.com/MurkyYT/cs2-map-icons/55d196b3ac675f84012a343b40bb6cfddba2f943/images/radars/de_vertigo_lower_radar_psd.png",
+      "pixels": [
+        1024,
+        1024
+      ]
+    },
+    "cs_office": {
+      "overview": "data/radar_info/cs_office.txt",
+      "radar": "https://raw.githubusercontent.com/MurkyYT/cs2-map-icons/55d196b3ac675f84012a343b40bb6cfddba2f943/images/radars/cs_office_radar_psd.png",
+      "pixels": [
+        1024,
+        1024
+      ]
+    },
+    "cs_italy": {
+      "overview": "data/radar_info/cs_italy.txt",
+      "radar": "https://raw.githubusercontent.com/MurkyYT/cs2-map-icons/55d196b3ac675f84012a343b40bb6cfddba2f943/images/radars/cs_italy_radar_psd.png",
+      "pixels": [
+        1024,
+        1024
+      ]
+    },
+    "rush_001": {
+      "overview": "data/radar_info/rush_001.txt",
+      "radar": "https://raw.githubusercontent.com/MurkyYT/cs2-map-icons/55d196b3ac675f84012a343b40bb6cfddba2f943/images/radars/rush_001_radar_tga.png",
+      "pixels": [
+        1024,
+        1024
+      ]
+    },
+    "rush_001_room104": {
+      "overview": "data/radar_info/rush_001.txt",
+      "radar": "https://raw.githubusercontent.com/MurkyYT/cs2-map-icons/55d196b3ac675f84012a343b40bb6cfddba2f943/images/radars/rush_001_room104_radar_tga.png",
+      "pixels": [
+        1024,
+        1024
+      ]
+    },
+    "rush_001_room101": {
+      "overview": "data/radar_info/rush_001.txt",
+      "radar": "https://raw.githubusercontent.com/MurkyYT/cs2-map-icons/55d196b3ac675f84012a343b40bb6cfddba2f943/images/radars/rush_001_room101_radar_tga.png",
+      "pixels": [
+        1024,
+        1024
+      ]
+    },
+    "rush_001_room102": {
+      "overview": "data/radar_info/rush_001.txt",
+      "radar": "https://raw.githubusercontent.com/MurkyYT/cs2-map-icons/55d196b3ac675f84012a343b40bb6cfddba2f943/images/radars/rush_001_room102_radar_tga.png",
+      "pixels": [
+        1024,
+        1024
+      ]
+    },
+    "rush_001_room103": {
+      "overview": "data/radar_info/rush_001.txt",
+      "radar": "https://raw.githubusercontent.com/MurkyYT/cs2-map-icons/55d196b3ac675f84012a343b40bb6cfddba2f943/images/radars/rush_001_room103_radar_tga.png",
+      "pixels": [
+        1024,
+        1024
+      ]
+    },
+    "rush_001_room201": {
+      "overview": "data/radar_info/rush_001.txt",
+      "radar": "https://raw.githubusercontent.com/MurkyYT/cs2-map-icons/55d196b3ac675f84012a343b40bb6cfddba2f943/images/radars/rush_001_room201_radar_tga.png",
+      "pixels": [
+        1024,
+        1024
+      ]
+    },
+    "rush_001_room202": {
+      "overview": "data/radar_info/rush_001.txt",
+      "radar": "https://raw.githubusercontent.com/MurkyYT/cs2-map-icons/55d196b3ac675f84012a343b40bb6cfddba2f943/images/radars/rush_001_room202_radar_tga.png",
+      "pixels": [
+        1024,
+        1024
+      ]
+    },
+    "rush_001_room204": {
+      "overview": "data/radar_info/rush_001.txt",
+      "radar": "https://raw.githubusercontent.com/MurkyYT/cs2-map-icons/55d196b3ac675f84012a343b40bb6cfddba2f943/images/radars/rush_001_room204_radar_tga.png",
+      "pixels": [
+        1024,
+        1024
+      ]
+    },
+    "rush_001_room205": {
+      "overview": "data/radar_info/rush_001.txt",
+      "radar": "https://raw.githubusercontent.com/MurkyYT/cs2-map-icons/55d196b3ac675f84012a343b40bb6cfddba2f943/images/radars/rush_001_room205_radar_tga.png",
+      "pixels": [
+        1024,
+        1024
+      ]
+    },
+    "rush_001_room206": {
+      "overview": "data/radar_info/rush_001.txt",
+      "radar": "https://raw.githubusercontent.com/MurkyYT/cs2-map-icons/55d196b3ac675f84012a343b40bb6cfddba2f943/images/radars/rush_001_room206_radar_tga.png",
+      "pixels": [
+        1024,
+        1024
+      ]
+    },
+    "rush_001_room207": {
+      "overview": "data/radar_info/rush_001.txt",
+      "radar": "https://raw.githubusercontent.com/MurkyYT/cs2-map-icons/55d196b3ac675f84012a343b40bb6cfddba2f943/images/radars/rush_001_room207_radar_tga.png",
+      "pixels": [
+        1024,
+        1024
+      ]
+    },
+    "rush_001_room208": {
+      "overview": "data/radar_info/rush_001.txt",
+      "radar": "https://raw.githubusercontent.com/MurkyYT/cs2-map-icons/55d196b3ac675f84012a343b40bb6cfddba2f943/images/radars/rush_001_room208_radar_tga.png",
+      "pixels": [
+        1024,
+        1024
+      ]
+    },
+    "rush_001_room209": {
+      "overview": "data/radar_info/rush_001.txt",
+      "radar": "https://raw.githubusercontent.com/MurkyYT/cs2-map-icons/55d196b3ac675f84012a343b40bb6cfddba2f943/images/radars/rush_001_room209_radar_tga.png",
+      "pixels": [
+        1024,
+        1024
+      ]
+    },
+    "rush_001_room203": {
+      "overview": "data/radar_info/rush_001.txt",
+      "radar": "https://raw.githubusercontent.com/MurkyYT/cs2-map-icons/55d196b3ac675f84012a343b40bb6cfddba2f943/images/radars/rush_001_room203_radar_tga.png",
+      "pixels": [
+        1024,
+        1024
+      ]
+    },
+    "rush_001_room211": {
+      "overview": "data/radar_info/rush_001.txt",
+      "radar": "https://raw.githubusercontent.com/MurkyYT/cs2-map-icons/55d196b3ac675f84012a343b40bb6cfddba2f943/images/radars/rush_001_room211_radar_tga.png",
+      "pixels": [
+        1024,
+        1024
+      ]
+    },
+    "rush_001_room212": {
+      "overview": "data/radar_info/rush_001.txt",
+      "radar": "https://raw.githubusercontent.com/MurkyYT/cs2-map-icons/55d196b3ac675f84012a343b40bb6cfddba2f943/images/radars/rush_001_room212_radar_tga.png",
+      "pixels": [
+        1024,
+        1024
+      ]
+    },
+    "rush_001_room210": {
+      "overview": "data/radar_info/rush_001.txt",
+      "radar": "https://raw.githubusercontent.com/MurkyYT/cs2-map-icons/55d196b3ac675f84012a343b40bb6cfddba2f943/images/radars/rush_001_room210_radar_tga.png",
+      "pixels": [
+        1024,
+        1024
+      ]
+    },
+    "rush_001_room401": {
+      "overview": "data/radar_info/rush_001.txt",
+      "radar": "https://raw.githubusercontent.com/MurkyYT/cs2-map-icons/55d196b3ac675f84012a343b40bb6cfddba2f943/images/radars/rush_001_room401_radar_tga.png",
+      "pixels": [
+        1024,
+        1025
+      ]
+    },
+    "rush_001_room301": {
+      "overview": "data/radar_info/rush_001.txt",
+      "radar": "https://raw.githubusercontent.com/MurkyYT/cs2-map-icons/55d196b3ac675f84012a343b40bb6cfddba2f943/images/radars/rush_001_room301_radar_tga.png",
+      "pixels": [
+        1024,
+        1024
+      ]
+    },
+    "rush_001_roomparty": {
+      "overview": "data/radar_info/rush_001.txt",
+      "radar": "https://raw.githubusercontent.com/MurkyYT/cs2-map-icons/55d196b3ac675f84012a343b40bb6cfddba2f943/images/radars/rush_001_roomparty_radar_tga.png",
+      "pixels": [
+        1024,
+        1024
+      ]
+    },
+    "rush_001_convoy": {
+      "overview": "data/radar_info/rush_001.txt",
+      "radar": "https://raw.githubusercontent.com/MurkyYT/cs2-map-icons/55d196b3ac675f84012a343b40bb6cfddba2f943/images/radars/rush_001_convoy_radar_tga.png",
+      "pixels": [
+        1024,
+        1024
+      ]
+    },
+    "cs_shelter": {
+      "overview": "data/radar_info/cs_shelter.txt",
+      "radar": "https://raw.githubusercontent.com/MurkyYT/cs2-map-icons/55d196b3ac675f84012a343b40bb6cfddba2f943/images/radars/cs_shelter_radar_tga.png",
+      "pixels": [
+        2048,
+        2048
+      ]
+    },
+    "de_boulder": {
+      "overview": "data/radar_info/de_boulder.txt",
+      "radar": "https://raw.githubusercontent.com/MurkyYT/cs2-map-icons/55d196b3ac675f84012a343b40bb6cfddba2f943/images/radars/de_boulder_radar_tga.png",
+      "pixels": [
+        2048,
+        2048
+      ]
+    },
+    "de_boulder_higher1": {
+      "overview": "data/radar_info/de_boulder.txt",
+      "radar": "https://raw.githubusercontent.com/MurkyYT/cs2-map-icons/55d196b3ac675f84012a343b40bb6cfddba2f943/images/radars/de_boulder_higher1_radar_tga.png",
+      "pixels": [
+        2048,
+        2048
+      ]
+    },
+    "de_debris": {
+      "overview": "data/radar_info/de_debris.txt",
+      "radar": "https://raw.githubusercontent.com/MurkyYT/cs2-map-icons/55d196b3ac675f84012a343b40bb6cfddba2f943/images/radars/de_debris_radar_tga.png",
+      "pixels": [
+        2048,
+        2048
+      ]
+    },
+    "de_eldorado": {
+      "overview": "data/radar_info/de_eldorado.txt",
+      "radar": "https://raw.githubusercontent.com/MurkyYT/cs2-map-icons/55d196b3ac675f84012a343b40bb6cfddba2f943/images/radars/de_eldorado_radar_tga.png",
+      "pixels": [
+        2048,
+        2048
+      ]
+    },
+    "de_fachwerk": {
+      "overview": "data/radar_info/de_fachwerk.txt",
+      "radar": "https://raw.githubusercontent.com/MurkyYT/cs2-map-icons/55d196b3ac675f84012a343b40bb6cfddba2f943/images/radars/de_fachwerk_radar_tga.png",
+      "pixels": [
+        2048,
+        2048
+      ]
+    },
+    "de_poseidon": {
+      "overview": "data/radar_info/de_poseidon.txt",
+      "radar": "https://raw.githubusercontent.com/MurkyYT/cs2-map-icons/55d196b3ac675f84012a343b40bb6cfddba2f943/images/radars/de_poseidon_radar_tga.png",
+      "pixels": [
+        1024,
+        1024
+      ]
+    }
+  }
+}

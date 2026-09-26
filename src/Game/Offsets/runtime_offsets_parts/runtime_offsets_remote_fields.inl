@@ -44,6 +44,9 @@
     };
 
     const std::vector<RemoteField> kOptionalRemoteFields = {
+        RemoteField{"cs2_dumper::schemas::client_dll::C_BasePlayerWeapon::m_pReserveAmmo", "client_dll.hpp", &runtime_offsets::Values::C_BasePlayerWeapon_m_pReserveAmmo},
+        RemoteField{"cs2_dumper::schemas::client_dll::CBasePlayerWeaponVData::m_iMaxClip1", "client_dll.hpp", &runtime_offsets::Values::CBasePlayerWeaponVData_m_iMaxClip1},
+        RemoteField{"cs2_dumper::schemas::client_dll::CBasePlayerWeaponVData::m_bReserveAmmoAsClips", "client_dll.hpp", &runtime_offsets::Values::CBasePlayerWeaponVData_m_bReserveAmmoAsClips},
         RemoteField{"cs2_dumper::offsets::client_dll::dwGameEntitySystem_highestEntityIndex", "offsets.hpp", &runtime_offsets::Values::dwGameEntitySystem_highestEntityIndex},
         RemoteField{"cs2_dumper::offsets::client_dll::dwGlobalVars", "offsets.hpp", &runtime_offsets::Values::dwGlobalVars},
         RemoteField{"cs2_dumper::offsets::client_dll::dwLocalPlayerController", "offsets.hpp", &runtime_offsets::Values::dwLocalPlayerController},
@@ -62,6 +65,9 @@
         RemoteField{"cs2_dumper::schemas::client_dll::CCSPlayerController_InGameMoneyServices::m_iAccount", "client_dll.hpp", &runtime_offsets::Values::CCSPlayerController_InGameMoneyServices_m_iAccount},
         RemoteField{"cs2_dumper::schemas::client_dll::C_BasePlayerPawn::m_hController", "client_dll.hpp", &runtime_offsets::Values::C_BasePlayerPawn_m_hController},
         RemoteField{"cs2_dumper::schemas::client_dll::C_BaseModelEntity::m_vecViewOffset", "client_dll.hpp", &runtime_offsets::Values::C_BaseModelEntity_m_vecViewOffset},
+        RemoteField{"cs2_dumper::schemas::client_dll::CNetworkViewOffsetVector::m_vecX", "client_dll.hpp", &runtime_offsets::Values::CNetworkViewOffsetVector_m_vecX},
+        RemoteField{"cs2_dumper::schemas::client_dll::CNetworkViewOffsetVector::m_vecY", "client_dll.hpp", &runtime_offsets::Values::CNetworkViewOffsetVector_m_vecY},
+        RemoteField{"cs2_dumper::schemas::client_dll::CNetworkViewOffsetVector::m_vecZ", "client_dll.hpp", &runtime_offsets::Values::CNetworkViewOffsetVector_m_vecZ},
         RemoteField{"cs2_dumper::schemas::client_dll::C_BasePlayerPawn::m_flFOVSensitivityAdjust", "client_dll.hpp", &runtime_offsets::Values::C_BasePlayerPawn_m_flFOVSensitivityAdjust},
         RemoteField{"cs2_dumper::schemas::client_dll::CBasePlayerController::m_hPawn", "client_dll.hpp", &runtime_offsets::Values::CBasePlayerController_m_hPawn},
         RemoteField{"cs2_dumper::schemas::client_dll::CCSPlayerController::m_hObserverPawn", "client_dll.hpp", &runtime_offsets::Values::CCSPlayerController_m_hObserverPawn},

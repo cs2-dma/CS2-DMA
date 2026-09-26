@@ -102,7 +102,7 @@ private:
 
     static uint64_t UnixNowMs();
     static std::string BuildPlayerSteamId(int slot);
-    static std::string ResolveMapName(const esp::WebRadarSnapshot& snapshot);
+    static std::string ResolveMapName(const esp::WebRadarSnapshot& snapshot, const std::string& previousMap);
     static std::string NormalizeMapName(const std::string& rawName);
 
 private:

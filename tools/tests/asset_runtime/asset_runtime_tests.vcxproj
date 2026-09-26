@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup Label="ProjectConfigurations"><ProjectConfiguration Include="Release|x64"><Configuration>Release</Configuration><Platform>x64</Platform></ProjectConfiguration></ItemGroup>
+  <PropertyGroup Label="Globals"><VCProjectVersion>18.0</VCProjectVersion><ProjectGuid>{8EAC766D-A7B3-4A57-AF17-A541286453E8}</ProjectGuid><WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion></PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+  <PropertyGroup Label="Configuration"><ConfigurationType>Application</ConfigurationType><PlatformToolset>v145</PlatformToolset><UseDebugLibraries>false</UseDebugLibraries><CharacterSet>Unicode</CharacterSet></PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+  <PropertyGroup><OutDir>$(LOCALAPPDATA)\KevqDMA\Build\tests\$(Configuration)\</OutDir><IntDir>$(LOCALAPPDATA)\KevqDMA\Build\obj\tests\asset_runtime\$(Configuration)\</IntDir></PropertyGroup>
+  <ItemDefinitionGroup>
+    <ClCompile><WarningLevel>Level4</WarningLevel><TreatWarningAsError>true</TreatWarningAsError><LanguageStandard>stdcpp20</LanguageStandard><AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions><AdditionalIncludeDirectories>$(ProjectDir)..\..\..\include;$(ProjectDir)..\..\..\src;$(ProjectDir)..\..\..\src\vendor;$(ProjectDir)..\..\..\src\vendor\imgui;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories><PreprocessorDefinitions>NDEBUG;WIN32_LEAN_AND_MEAN;NOMINMAX;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions><RuntimeLibrary>MultiThreaded</RuntimeLibrary></ClCompile>
+    <Link><SubSystem>Console</SubSystem><AdditionalDependencies>d3d11.lib;bcrypt.lib;%(AdditionalDependencies)</AdditionalDependencies></Link>
+  </ItemDefinitionGroup>
+  <ItemGroup>
+    <ClCompile Include="asset_runtime_tests.cpp" />
+    <ClCompile Include="..\..\..\src\Features\WebRadar\Runtime\embedded_assets.cpp" />
+    <ClCompile Include="..\..\..\src\Features\ESP\weapon_catalog.cpp" />
+    <ClCompile Include="..\..\..\src\vendor\imgui\imgui.cpp" />
+    <ClCompile Include="..\..\..\src\vendor\imgui\imgui_draw.cpp" />
+    <ClCompile Include="..\..\..\src\vendor\imgui\imgui_tables.cpp" />
+    <ClCompile Include="..\..\..\src\vendor\imgui\imgui_widgets.cpp" />
+    <ResourceCompile Include="asset_runtime_resources.rc" />
+  </ItemGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+</Project>

@@ -220,7 +220,7 @@ function loadLanguageCatalog(languageCode) {
     return LANGUAGE_LOADS.get(code);
   }
 
-  const pending = fetch(apiUrl("./locales/" + encodeURIComponent(code) + ".json"), {
+  const pending = fetch(apiUrl("./locales/" + encodeURIComponent(code.toLowerCase()) + ".json"), {
     cache: "no-store"
   }).then(response => {
     if (!response.ok) throw new Error("locale catalog unavailable");
@@ -632,7 +632,7 @@ function getRadarPosition(mapData, entityCoords) {
   if (!entityCoords || !Number.isFinite(entityCoords.x) || !Number.isFinite(entityCoords.y)) {
     return { x: 0, y: 0, invalid: true };
   }
-  if (!mapData || !Number.isFinite(mapData.x) || !Number.isFinite(mapData.y) || !Number.isFinite(mapData.scale)) {
+  if (!mapData || !Number.isFinite(mapData.x) || !Number.isFinite(mapData.y) || !Number.isFinite(mapData.scale) || mapData.scale <= 0) {
     return { x: 0, y: 0, invalid: true };
   }
 
@@ -669,12 +669,14 @@ async function ensureMapData(mapName) {
     const response = await fetch("./data/" + mapName + "/data.json", { cache: "force-cache" });
     if (response.ok) {
       const data = await response.json();
+      if (S.mapDataCache.has(mapName)) return S.mapDataCache.get(mapName);
       const normalized = {
         x: Number(data.x),
         y: Number(data.y),
         scale: Number(data.scale),
         name: mapName
       };
+      if (![normalized.x, normalized.y, normalized.scale].every(Number.isFinite) || normalized.scale <= 0) return null;
       S.mapDataCache.set(mapName, normalized);
       return normalized;
     }
@@ -682,8 +684,9 @@ async function ensureMapData(mapName) {
   }
 
   const mapsIndex = await ensureMapsIndex();
+  if (S.mapDataCache.has(mapName)) return S.mapDataCache.get(mapName);
   const map = mapsIndex && mapsIndex.get(mapName);
-  if (!map) return null;
+  if (!map || map.dynamic) return null;
 
   const normalized = {
     x: Number(map.origin?.x),
@@ -738,7 +741,8 @@ function updateMapAssets(mapName) {
     clearMapAssets("unknown");
     return;
   }
-  const radarPath = "./data/" + mapName + "/radar.webp";
+  const imageMap = mapName === "aim_botz" || mapName.startsWith("dynamic_") ? "aim_custom" : mapName;
+  const radarPath = "./data/" + imageMap + "/radar.webp";
   const mapLabel = normalizeMapLabel(mapName);
 
   if (S.currentMap !== mapName) {
@@ -751,7 +755,7 @@ function updateMapAssets(mapName) {
     if (S.bombMarker) {
       S.bombMarker.state.active = false;
     }
-    if (!el.mapImage.src.endsWith("/data/" + mapName + "/radar.webp")) {
+    if (!el.mapImage.src.endsWith("/data/" + imageMap + "/radar.webp")) {
       el.mapImage.src = radarPath;
     }
     el.mapBackground.removeAttribute("src");
@@ -911,6 +915,7 @@ function normalizePayloadV2(payload) {
     m_capture_time: ts,
     m_language: normalizeLanguageCode(payload.lang),
     m_map: String(payload.map || "unknown"),
+    m_overview: payload.ov,
     m_local_team: localTeam,
     m_updated_at: Date.now(),
     m_players: players
@@ -949,7 +954,7 @@ function normalizePayloadV2(payload) {
           m_velocity: compactVec2(row[13]),
           m_model_name: team === TEAM_CT ? "ctm_sas" : "tm_phoenix",
           m_seq: seq,
-          m_ts: ts,
+          m_ts: Number.isFinite(row[14]) && row[14] > 0 ? row[14] : ts,
           m_steam_id: steamId,
           steamid: steamId,
           m_is_local: (flags & PLAYER_FLAGS_V2.local) !== 0
@@ -1261,7 +1266,7 @@ function updatePlayerCard(card, player, localTeam) {
   const modelName = resolveModelName(player);
   if (card.modelKey !== modelName) {
     card.modelKey = modelName;
-    card.model.src = "./assets/characters/" + modelName + ".png";
+    card.model.src = "./assets/characters/" + modelName + ".webp";
     card.model.alt = modelName;
   }
 
@@ -2700,6 +2705,17 @@ function flushPendingPayload() {
   // Continuity is resolved per player at the source and per visual marker.
   // Do not discard an entire frame, including bomb/round changes, on a roster gap.
 
+  const overview = payload.m_overview;
+  if (overview && [overview.x, overview.y, overview.scale].every(Number.isFinite) &&
+      overview.scale > 0.01 && overview.scale < 100 &&
+      (payload.m_map === "aim_botz" || payload.m_map === "aim_custom" || payload.m_map.startsWith("dynamic_"))) {
+    const previous = S.mapDataCache.get(payload.m_map);
+    if (previous && (previous.x !== overview.x || previous.y !== overview.y || previous.scale !== overview.scale)) {
+      resetSnapshotTimeline();
+      for (const marker of S.markers.values()) marker.state.active = false;
+    }
+    S.mapDataCache.set(payload.m_map, {x: overview.x, y: overview.y, scale: overview.scale, name: payload.m_map});
+  }
   const hasMapData = S.mapDataCache.has(payload.m_map);
   updateConnection("live");
   S.currentTransport = S.eventSource ? "sse" : (S.socket ? "websocket" : "poll");

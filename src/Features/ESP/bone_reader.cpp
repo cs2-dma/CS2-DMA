@@ -1,5 +1,6 @@
 #include <Windows.h>
 #include "Features/ESP/bone_reader.h"
+#include "Features/ESP/DataReader/deferred_lane_policy.h"
 #include "Features/ESP/DataReader/bone_read_policy.h"
 #include "Features/ESP/Diagnostics/narrow_debug.h"
 #include "Features/ESP/esp_local_state.h"

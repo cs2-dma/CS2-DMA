@@ -1,10 +1,16 @@
 #include <Windows.h>
 #include <timeapi.h>
+#include <shellapi.h>
+#include <objbase.h>
 #pragma comment(lib, "winmm.lib")
+#pragma comment(lib, "ole32.lib")
 #include <DMALibrary/Memory/Memory.h>
 
 #include "app/Bootstrap/crash_handler.h"
 #include "app/Bootstrap/runtime_console.h"
+#include "app/Bootstrap/startup_offsets.h"
+#include "app/Bootstrap/startup_update.h"
+#include "app/Bootstrap/version_update.h"
 #include "app/Config/config.h"
 #include "app/Core/build_info.h"
 #include "app/Core/fallback_log.h"
@@ -25,6 +31,8 @@
 #include <conio.h>
 #include <cstring>
 #include <format>
+#include <iostream>
+#include <optional>
 #include <string>
 #include <thread>
 #include <utility>
@@ -173,7 +181,45 @@ namespace
 
     void PrintCommunityLinks(const bootstrap::RuntimeConsole& console)
     {
-        console.PrintInfoLine("Menu: P | Screen F2 | Telegram: @ne_sravnim");
+        console.PrintInfoLine(app::build_info::VersionTag() + " | " +
+            app::localization::Get("Menu: P | Screen F2 | Telegram: @ne_sravnim | Discord: Corakevq"));
+    }
+
+    std::optional<std::string> ReadStartupReply()
+    {
+        const HANDLE input = GetStdHandle(STD_INPUT_HANDLE);
+        DWORD mode = 0;
+        if (!GetConsoleMode(input, &mode)) return {};
+        struct InputGuard {
+            HANDLE input;
+            DWORD mode;
+            HANDLE output = GetStdHandle(STD_OUTPUT_HANDLE);
+            CONSOLE_CURSOR_INFO cursor{};
+            bool haveCursor = false;
+            ~InputGuard() {
+                SetConsoleMode(input, mode);
+                if (haveCursor) SetConsoleCursorInfo(output, &cursor);
+            }
+        } guard{input, mode};
+        SetConsoleMode(input, mode | ENABLE_LINE_INPUT | ENABLE_ECHO_INPUT | ENABLE_PROCESSED_INPUT);
+        guard.haveCursor = GetConsoleCursorInfo(guard.output, &guard.cursor) != FALSE;
+        if (guard.haveCursor) {
+            auto visibleCursor = guard.cursor;
+            visibleCursor.bVisible = TRUE;
+            SetConsoleCursorInfo(guard.output, &visibleCursor);
+        }
+        std::string reply;
+        if (!std::getline(std::cin, reply)) return {};
+        return reply;
+    }
+
+    bool OpenReleaseUrl(const std::string& url)
+    {
+        const HRESULT initialized = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
+        const std::wstring wideUrl(url.begin(), url.end());
+        const auto result = ShellExecuteW(nullptr, L"open", wideUrl.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+        if (SUCCEEDED(initialized)) CoUninitialize();
+        return reinterpret_cast<INT_PTR>(result) > 32;
     }
 
     std::string BuildCompactOffsetTimestampDisplay(const std::string& canonicalTimestamp)
@@ -258,11 +304,38 @@ int RunApplication(int argc, char* argv[])
     bootstrap::RuntimeConsole console;
     console.Initialize(verboseLogs);
 
+    struct ReleaseCheckGuard {
+        ~ReleaseCheckGuard() { app::updates::Shutdown(); }
+    } releaseCheckGuard;
+
     console.PrintStartupBanner();
     console.PrintInfoLine("KevqDMA");
 
-    console.AnimateForAtLeast("Connection", 360);
-    console.PrintInfoOk("Connection");
+    if (offsetsSelfTest) {
+        console.PrintInfoOk("Connection");
+    } else {
+        const auto release = RunWithPendingAnimation(console, "Connection", [] {
+            app::updates::Start();
+            return app::updates::WaitForInitialCheck();
+        });
+        bootstrap::StartupUpdateHooks hooks;
+        hooks.connectionOk = [&] { console.PrintInfoOk("Connection"); };
+        hooks.connectionQuestion = [&] { console.PrintInfoQuestion("Connection"); };
+        hooks.info = [&](const std::string& text) { console.PrintInfoLine(text); };
+        hooks.readReply = ReadStartupReply;
+        hooks.openUrl = OpenReleaseUrl;
+        hooks.exitCountdown = [&] {
+            app::updates::Shutdown();
+            const auto closesAt = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+            for (int seconds = 5; seconds > 0; --seconds) {
+                console.PrintInfoPending(app::localization::Format("Closing KevqDMA in {} seconds", seconds), 0);
+                std::this_thread::sleep_until(closesAt - std::chrono::seconds(seconds - 1));
+            }
+            console.PrintInfoOk("Update handoff");
+        };
+        if (bootstrap::HandleStartupUpdate(release, hooks) == bootstrap::StartupUpdateResult::Exit)
+            return 0;
+    }
     PrintCommunityLinks(console);
     console.PrintBlankLine();
 
@@ -620,14 +693,119 @@ int RunApplication(int argc, char* argv[])
 
     runtime_offsets::RuntimeResolveReport runtimeResolveReport = {};
     std::string runtimeResolveMessage;
-    const bool runtimeResolved = RunWithPendingAnimation(
+    std::string offsetSanityMessage;
+    bool offsetsSane = false;
+    const DWORD offsetTargetPid = mem.GetAttachedPid();
+    const uintptr_t offsetClientBase = g::clientBase.load(std::memory_order_relaxed);
+    const uintptr_t offsetEngineBase = g::engine2Base.load(std::memory_order_relaxed);
+    const auto offsetTargetCurrent = [&](const runtime_offsets::ResolveControl* control = nullptr) {
+        try {
+            const auto checked = [&](auto&& operation) {
+                return control ? control->Run(operation) : operation();
+            };
+            return mem.vHandle && offsetTargetPid != 0 &&
+                mem.GetAttachedPid() == offsetTargetPid &&
+                checked([&] { return VMMDLL_ConfigSet(mem.vHandle, VMMDLL_OPT_REFRESH_FREQ_MEDIUM, 1); }) &&
+                checked([&] { return mem.GetPidFromName("cs2.exe"); }) == offsetTargetPid &&
+                checked([&] { return mem.GetModuleBase("client.dll"); }) == offsetClientBase &&
+                checked([&] { return mem.GetModuleBase("engine2.dll"); }) == offsetEngineBase;
+        } catch (const runtime_offsets::ResolveInterrupted&) {
+            throw;
+        } catch (...) {
+            return false;
+        }
+    };
+    bootstrap::OffsetRecoveryPlan offsetRecovery;
+    bool resolveCancelled = false;
+    auto nextResolveCancelPoll = std::chrono::steady_clock::time_point{};
+    const auto resolutionCancelled = [&] {
+        const auto now = std::chrono::steady_clock::now();
+        if (!resolveCancelled && now >= nextResolveCancelPoll) {
+            resolveCancelled = (GetAsyncKeyState(VK_END) & 1) != 0;
+            nextResolveCancelPoll = now + std::chrono::milliseconds(10);
+        }
+        return resolveCancelled;
+    };
+    const auto resolveWait = RunWithPendingAnimation(
         console,
         "Runtime offset resolve",
         [&]() {
-            return runtime_offsets::ResolveFromAttachedProcess(
-                &runtimeResolveReport,
-                &runtimeResolveMessage);
+            return bootstrap::WaitForRuntimeOffsets([&](bool force, auto deadline) {
+                offsetsSane = false;
+                runtimeResolveReport = {};
+                const runtime_offsets::ResolveControl control{
+                    (std::min)(deadline, std::chrono::steady_clock::now() + std::chrono::seconds(15)),
+                    resolutionCancelled};
+                try {
+                    control.Check();
+                    if (force && mem.vHandle && mem.GetAttachedPid() == offsetTargetPid) {
+                        const auto action = offsetRecovery.BeforeRetry(std::chrono::steady_clock::now());
+                        const bool recovered = bootstrap::RecoverOffsetReads(action, [&](bootstrap::OffsetCache cache) {
+                            const ULONG64 option = cache == bootstrap::OffsetCache::Memory
+                                ? VMMDLL_OPT_REFRESH_FREQ_MEM
+                                : cache == bootstrap::OffsetCache::Translation
+                                    ? VMMDLL_OPT_REFRESH_FREQ_TLB : VMMDLL_OPT_REFRESH_ALL;
+                            return control.Run([&] { return VMMDLL_ConfigSet(mem.vHandle, option, 1) != FALSE; });
+                        });
+                        if (!recovered) {
+                            runtimeResolveReport.startupPending = true;
+                            runtimeResolveReport.detail = "Startup DMA cache recovery failed.";
+                            return bootstrap::OffsetAttempt::Retry;
+                        }
+                    }
+                    if (!offsetTargetCurrent(&control)) {
+                        runtimeResolveReport.startupPending = true;
+                        runtimeResolveReport.detail = "Attached process or modules are no longer ready.";
+                        return bootstrap::OffsetAttempt::Retry;
+                    }
+                    const bool resolved = runtime_offsets::ResolveFromAttachedProcess(
+                        &runtimeResolveReport, &runtimeResolveMessage, force, &control);
+                    if (runtimeResolveReport.cancelled) resolveCancelled = true;
+                    control.Check();
+                    if (!offsetTargetCurrent(&control)) {
+                        runtimeResolveReport.startupPending = true;
+                        runtimeResolveReport.validationPassed = false;
+                        runtimeResolveReport.detail = "Attached process changed during offset resolution.";
+                        return bootstrap::OffsetAttempt::Retry;
+                    }
+                    if (resolved) {
+                        offsetsSane = runtime_offsets::SanityCheckOffsets(&offsetSanityMessage, &control);
+                        if (offsetsSane) return bootstrap::OffsetAttempt::Ready;
+                        runtimeResolveReport.startupPending = true;
+                        runtimeResolveReport.validationPassed = false;
+                        runtimeResolveReport.detail = offsetSanityMessage;
+                    }
+                    return runtimeResolveReport.startupPending
+                        ? bootstrap::OffsetAttempt::Retry : bootstrap::OffsetAttempt::Failed;
+                } catch (const runtime_offsets::ResolveInterrupted& interrupted) {
+                    if ((!runtimeResolveReport.timedOut && !runtimeResolveReport.cancelled) ||
+                        runtimeResolveReport.detail.empty()) runtimeResolveReport.detail = interrupted.what();
+                    resolveCancelled = resolveCancelled || interrupted.Cancelled();
+                    runtimeResolveReport.startupPending = !resolveCancelled;
+                    runtimeResolveReport.validationPassed = false;
+                    runtimeResolveReport.timedOut = !resolveCancelled;
+                    runtimeResolveReport.cancelled = resolveCancelled;
+                    return bootstrap::OffsetAttempt::Retry;
+                } catch (const std::exception& error) {
+                    runtimeResolveReport.startupPending = true;
+                    runtimeResolveReport.validationPassed = false;
+                    runtimeResolveReport.detail = error.what();
+                    return bootstrap::OffsetAttempt::Retry;
+                }
+            }, [] { return std::chrono::steady_clock::now(); },
+                [](std::chrono::milliseconds delay) { std::this_thread::sleep_for(delay); },
+                resolutionCancelled);
         });
+    if (resolveWait == bootstrap::OffsetWaitResult::Cancelled) {
+        console.PrintErrorLine("Canceled while waiting for cs2.exe");
+        return 1;
+    }
+    if (resolveWait == bootstrap::OffsetWaitResult::TimedOut) {
+        runtimeResolveReport.timedOut = true;
+        runtimeResolveReport.validationPassed = false;
+        runtimeResolveReport.detail += " Startup retry budget exhausted.";
+    }
+    const bool runtimeResolved = resolveWait == bootstrap::OffsetWaitResult::Ready;
     if (runtimeResolved) {
         console.PrintInfoOk("Runtime offset resolve");
     } else {
@@ -680,9 +858,12 @@ int RunApplication(int argc, char* argv[])
         }
     }
 
-    std::string offsetSanityMessage;
-    bool offsetsSane = runtime_offsets::SanityCheckOffsets(
-        &offsetSanityMessage);
+    if (!offsetTargetCurrent()) {
+        console.PrintErrorLine("Runtime resolver requires an attached CS2 process and loaded modules.");
+        WaitForExitAcknowledge(console);
+        return 1;
+    }
+    offsetsSane = runtime_offsets::SanityCheckOffsets(&offsetSanityMessage);
     if (!offsetsSane) {
         std::string fallbackMessage;
         runtime_offsets::AutoUpdateReport fallbackReport = {};
@@ -699,7 +880,7 @@ int RunApplication(int argc, char* argv[])
         if (fallbackUpdated)
             fallbackLoaded = SafeLoadOffsets(&fallbackMessage);
         if (fallbackLoaded) {
-            offsetsSane = runtime_offsets::SanityCheckOffsets(
+            offsetsSane = offsetTargetCurrent() && runtime_offsets::SanityCheckOffsets(
                 &offsetSanityMessage);
         }
         if (offsetsSane) {

@@ -1,4 +1,6 @@
 #include "app/Input/primary_keyboard.h"
+#include "app/Input/primary_keyboard_policy.h"
+#include "Features/ESP/Recovery/dma_read_session.h"
 
 #include <DMALibrary/Memory/Memory.h>
 #include <Windows.h>
@@ -10,15 +12,19 @@
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <chrono>
+#include <condition_variable>
+#include <functional>
 #include <mutex>
 #include <string_view>
+#include <thread>
 #include <vector>
 
 namespace
 {
     constexpr uintptr_t kMinimumKernelAddress = 0x00007FFFFFFFFFFFULL;
     constexpr DWORD kKernelReadFlags =
-        VMMDLL_FLAG_NOCACHE | VMMDLL_FLAG_ZEROPAD_ON_FAIL;
+        VMMDLL_FLAG_NOCACHE;
     constexpr size_t kBitmapBytes = 64;
     constexpr size_t kBitmapWords = kBitmapBytes / sizeof(uint64_t);
     constexpr DWORD kMaximumScannedModuleBytes = 64u * 1024u * 1024u;
@@ -45,6 +51,20 @@ namespace
     std::atomic<DWORD> s_sourcePid{0};
     std::atomic<uint32_t> s_readFailures{0};
     std::atomic<bool> s_ready{false};
+    std::atomic<bool> s_resolving{false};
+    std::atomic<uint64_t> s_resolveAttempts{0};
+    std::atomic<uint64_t> s_unreadablePages{0};
+    std::atomic<uint64_t> s_failedSinceMs{0};
+    std::mutex s_recoveryLifecycleMutex;
+    std::mutex s_recoveryWaitMutex;
+    std::condition_variable_any s_recoveryWake;
+    std::jthread s_recoveryWorker;
+    thread_local const std::function<bool()>* s_cancelResolution = nullptr;
+
+    bool ResolutionCancelled()
+    {
+        return s_cancelResolution && (*s_cancelResolution)();
+    }
 
     bool EqualsIgnoreCase(const char* value, std::string_view expected)
     {
@@ -65,7 +85,7 @@ namespace
     std::vector<ProcessRecord> EnumerateInputProcesses()
     {
         std::vector<ProcessRecord> result;
-        if (!mem.vHandle)
+        if (ResolutionCancelled() || !mem.vHandle)
             return result;
 
         PVMMDLL_PROCESS_INFORMATION processes = nullptr;
@@ -114,8 +134,9 @@ namespace
         DWORD size,
         DWORD* bytesRead = nullptr)
     {
-        if (!mem.vHandle || pid == 0 || address <= kMinimumKernelAddress ||
-            !output || size == 0) {
+        if (bytesRead) *bytesRead = 0;
+        if (ResolutionCancelled() || !mem.vHandle || pid == 0 || address <= kMinimumKernelAddress ||
+            !output || size == 0 || address > UINTPTR_MAX - size) {
             return false;
         }
         DWORD localBytesRead = 0;
@@ -180,32 +201,14 @@ namespace
             return 0;
         }
 
-        std::vector<uint8_t> image(moduleSize, 0);
-        DWORD bytesRead = 0;
-        if (!ReadKernel(
-                pid,
-                moduleBase,
-                image.data(),
-                moduleSize,
-                &bytesRead)) {
-            return 0;
-        }
-
-        for (size_t offset = 0;
-             offset + pattern.size() <= bytesRead;
-             ++offset) {
-            bool match = true;
-            for (size_t i = 0; i < pattern.size(); ++i) {
-                if (!pattern[i].wildcard &&
-                    image[offset + i] != pattern[i].value) {
-                    match = false;
-                    break;
-                }
-            }
-            if (match)
-                return moduleBase + offset;
-        }
-        return 0;
+        uint64_t unreadable = 0;
+        const auto result = app::input::keyboard_policy::ScanReadablePattern(
+            moduleBase, moduleSize, pattern,
+            [&](uintptr_t address, void* output, size_t size) {
+                return ReadKernel(pid, address, output, static_cast<DWORD>(size));
+            }, ResolutionCancelled, &unreadable);
+        s_unreadablePages.fetch_add(unreadable, std::memory_order_relaxed);
+        return result;
     }
 
     bool ModuleRange(
@@ -218,7 +221,7 @@ namespace
             *base = 0;
         if (size)
             *size = 0;
-        if (!mem.vHandle || pid == 0 || !moduleName)
+        if (ResolutionCancelled() || !mem.vHandle || pid == 0 || !moduleName)
             return false;
 
         PVMMDLL_MAP_MODULEENTRY entry = nullptr;
@@ -393,10 +396,17 @@ namespace
 bool app::input::InitializePrimaryKeyboard()
 {
     std::lock_guard<std::mutex> lock(s_initializeMutex);
+    s_resolving.store(true, std::memory_order_release);
+    s_resolveAttempts.fetch_add(1, std::memory_order_relaxed);
+    s_unreadablePages.store(0, std::memory_order_relaxed);
+    struct ResolveGuard {
+        ~ResolveGuard() { s_resolving.store(false, std::memory_order_release); }
+    } resolveGuard;
     s_ready.store(false, std::memory_order_release);
     s_bitmapAddress.store(0, std::memory_order_release);
     s_sourcePid.store(0, std::memory_order_release);
     s_readFailures.store(0, std::memory_order_relaxed);
+    s_failedSinceMs.store(0, std::memory_order_relaxed);
     ClearPublishedBitmap();
     if (!mem.vHandle)
         return false;
@@ -413,6 +423,7 @@ bool app::input::InitializePrimaryKeyboard()
 
     for (const ProcessRecord& winlogon : winlogons) {
         for (const ProcessRecord& csrss : csrssProcesses) {
+            if (ResolutionCancelled()) return false;
             if (winlogon.sessionId != 0 &&
                 csrss.sessionId != winlogon.sessionId) {
                 continue;
@@ -436,6 +447,7 @@ bool app::input::InitializePrimaryKeyboard()
                             &bitmap)) {
                         continue;
                     }
+                    if (ResolutionCancelled()) return false;
                     s_sourcePid.store(winlogon.pid, std::memory_order_release);
                     s_bitmapAddress.store(candidate, std::memory_order_release);
                     PublishBitmap(bitmap);
@@ -448,6 +460,7 @@ bool app::input::InitializePrimaryKeyboard()
 
     // Windows 10 exposes gafAsyncKeyState directly from win32kbase's EAT.
     for (const ProcessRecord& winlogon : winlogons) {
+        if (ResolutionCancelled()) return false;
         PVMMDLL_MAP_EAT eat = nullptr;
         if (!VMMDLL_Map_GetEATU(
                 mem.vHandle,
@@ -472,6 +485,7 @@ bool app::input::InitializePrimaryKeyboard()
             !ValidateBitmapAddress(winlogon.pid, address, &bitmap)) {
             continue;
         }
+        if (ResolutionCancelled()) return false;
         s_sourcePid.store(winlogon.pid, std::memory_order_release);
         s_bitmapAddress.store(address, std::memory_order_release);
         PublishBitmap(bitmap);
@@ -488,22 +502,27 @@ void app::input::ResetPrimaryKeyboard()
     s_bitmapAddress.store(0, std::memory_order_release);
     s_sourcePid.store(0, std::memory_order_release);
     s_readFailures.store(0, std::memory_order_relaxed);
+    s_failedSinceMs.store(0, std::memory_order_relaxed);
     ClearPublishedBitmap();
 }
 
 bool app::input::PollPrimaryKeyboard()
 {
+    std::unique_lock lock(s_initializeMutex, std::try_to_lock);
+    if (!lock.owns_lock()) return false;
     if (!s_ready.load(std::memory_order_acquire))
         return false;
     const DWORD sourcePid = s_sourcePid.load(std::memory_order_acquire);
     const uintptr_t address = s_bitmapAddress.load(std::memory_order_acquire);
     std::array<uint8_t, kBitmapBytes> bitmap = {};
     if (!ValidateBitmapAddress(sourcePid, address, &bitmap)) {
-        s_readFailures.fetch_add(1, std::memory_order_relaxed);
+        if (s_readFailures.fetch_add(1, std::memory_order_relaxed) == 0)
+            s_failedSinceMs.store(GetTickCount64(), std::memory_order_relaxed);
         ClearPublishedBitmap();
         return false;
     }
     s_readFailures.store(0, std::memory_order_relaxed);
+    s_failedSinceMs.store(0, std::memory_order_relaxed);
     PublishBitmap(bitmap);
     return true;
 }
@@ -554,5 +573,58 @@ app::input::PrimaryKeyboardStatus app::input::GetPrimaryKeyboardStatus()
         s_sourcePid.load(std::memory_order_relaxed),
         s_readFailures.load(std::memory_order_relaxed),
         s_sequence.load(std::memory_order_relaxed) / 2u,
+        s_resolving.load(std::memory_order_acquire),
+        s_resolveAttempts.load(std::memory_order_relaxed),
+        s_unreadablePages.load(std::memory_order_relaxed),
     };
+}
+
+void app::input::StartPrimaryKeyboardRecovery()
+{
+    std::lock_guard lock(s_recoveryLifecycleMutex);
+    if (s_recoveryWorker.joinable()) return;
+    s_recoveryWorker = std::jthread([](std::stop_token stop) {
+        SetThreadDescription(GetCurrentThread(), L"KevqDMA Input Recovery");
+        SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_BELOW_NORMAL);
+        uint64_t nextAttemptMs = 0;
+        uint32_t failedAttempts = 0;
+        while (!stop.stop_requested()) {
+            const auto now = GetTickCount64();
+            const bool needsResolution = keyboard_policy::NeedsResolution(
+                s_ready.load(std::memory_order_acquire), s_readFailures.load(std::memory_order_relaxed),
+                s_failedSinceMs.load(std::memory_order_relaxed), now);
+            if (!needsResolution) {
+                failedAttempts = 0;
+                nextAttemptMs = 0;
+            } else if (now >= nextAttemptMs) {
+                esp::recovery::DmaReadSession session;
+                if (session.Valid()) {
+                    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+                    const std::function<bool()> cancelled = [&] {
+                        return stop.stop_requested() || !session.Valid() ||
+                            std::chrono::steady_clock::now() >= deadline;
+                    };
+                    struct CancellationGuard {
+                        ~CancellationGuard() { s_cancelResolution = nullptr; }
+                    } cancellationGuard;
+                    s_cancelResolution = &cancelled;
+                    bool resolved = false;
+                    try { resolved = InitializePrimaryKeyboard(); } catch (...) {}
+                    if (!session.Valid() || stop.stop_requested()) ResetPrimaryKeyboard();
+                    failedAttempts = resolved ? 0 : (std::min)(failedAttempts + 1, 3u);
+                    nextAttemptMs = GetTickCount64() + keyboard_policy::RetryDelayMs(failedAttempts);
+                }
+            }
+            std::unique_lock waitLock(s_recoveryWaitMutex);
+            s_recoveryWake.wait_for(waitLock, stop, std::chrono::milliseconds(250), [] { return false; });
+        }
+    });
+}
+
+void app::input::StopPrimaryKeyboardRecovery()
+{
+    std::lock_guard lock(s_recoveryLifecycleMutex);
+    s_recoveryWorker.request_stop();
+    s_recoveryWake.notify_all();
+    if (s_recoveryWorker.joinable()) s_recoveryWorker.join();
 }

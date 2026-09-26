@@ -191,8 +191,8 @@ foreach ($callout in $translatedCallouts) {
 
 $buildInfoText = Get-Content -LiteralPath $buildInfoPath -Raw
 foreach ($versionDeclaration in @(
-        '#define KEVQDMA_VERSION_NUMERIC 1,0,6,0'
-        '#define KEVQDMA_VERSION_STRING "1.0.6"'
+        '#define KEVQDMA_VERSION_NUMERIC 1,0,7,0'
+        '#define KEVQDMA_VERSION_STRING "1.0.7"'
         '#define KEVQDMA_VERSION_TAG "v" KEVQDMA_VERSION_STRING'
         'inline constexpr std::string_view kVersionTag = KEVQDMA_VERSION_TAG;')) {
     if (-not $buildInfoText.Contains($versionDeclaration)) {

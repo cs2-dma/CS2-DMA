@@ -7,22 +7,27 @@ bool esp::GetWebRadarSnapshot(WebRadarSnapshot* outSnapshot)
     if (!ReadCurrentSnapshot(snap))
         return false;
 
-    Vector3 effectiveLocalPos = snap.localPos;
-    if (!std::isfinite(effectiveLocalPos.x) ||
-        !std::isfinite(effectiveLocalPos.y) ||
-        !std::isfinite(effectiveLocalPos.z) ||
-        (std::fabs(effectiveLocalPos.x) + std::fabs(effectiveLocalPos.y) + std::fabs(effectiveLocalPos.z) <= 1.0f)) {
+    const uint64_t localNowUs = TickNowUs();
+    const bool currentScene = snap.sceneSerial == s_sceneResetSerial.load(std::memory_order_relaxed);
+    uint64_t localSampleUs = snap.localPosUpdatedAtUs;
+    bool localFresh = currentScene && state::ShouldApplyCameraLocalPosition(
+        snap.sceneSerial, snap.sceneSerial, snap.localPawn, snap.localPawn,
+        snap.localPosValid, localSampleUs, localNowUs, kLiveCameraFreshnessUs);
+    Vector3 effectiveLocalPos = localFresh ? snap.localPos : Vector3{NAN, NAN, NAN};
+    {
         CameraFrame cameraFrame = {};
         const bool hasCameraFrame = ReadCameraFrame(cameraFrame);
-        const uint64_t nowUs = TickNowUs();
         const bool liveLocalPosFresh =
-            hasCameraFrame && state::ShouldApplyCameraLocalPosition(
+            currentScene && hasCameraFrame && state::ShouldApplyCameraLocalPosition(
                 cameraFrame.sceneSerial, snap.sceneSerial,
                 cameraFrame.localPosPawn, snap.localPawn,
                 cameraFrame.localPosValid, cameraFrame.localPosUpdatedUs,
-                nowUs, kLiveCameraFreshnessUs);
-        if (liveLocalPosFresh)
+                localNowUs, kLiveCameraFreshnessUs);
+        if (liveLocalPosFresh && (!localFresh || cameraFrame.localPosUpdatedUs > localSampleUs)) {
             effectiveLocalPos = cameraFrame.localPos;
+            localSampleUs = cameraFrame.localPosUpdatedUs;
+            localFresh = true;
+        }
     }
     const bool hasEffectiveLocalPos =
         std::isfinite(effectiveLocalPos.x) &&
@@ -74,6 +79,7 @@ bool esp::GetWebRadarSnapshot(WebRadarSnapshot* outSnapshot)
     std::copy(std::begin(snap.localName), std::end(snap.localName), std::begin(snapshot.localName));
     std::copy(std::begin(snap.activeMapKey), std::end(snap.activeMapKey), std::begin(snapshot.mapKey));
     snapshot.localPos = effectiveLocalPos;
+    snapshot.localPosUpdatedAtUs = hasEffectiveLocalPos && localFresh ? localSampleUs : 0;
     snapshot.localIsDead = snap.localIsDead;
     snapshot.localHealth = snap.localHealth;
     snapshot.localArmor = snap.localArmor;

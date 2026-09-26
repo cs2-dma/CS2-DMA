@@ -1,141 +1,1056 @@
-﻿{
+{
   "maps": [
     {
       "name": "de_mirage",
       "display_name": "Mirage",
-      "origin": { "x": -3230.0, "y": 1713.0 },
+      "origin": {
+        "x": -3230.0,
+        "y": 1713.0
+      },
       "scale": 5.0,
-      "bounds": { "min_x": -3230.0, "max_x": 1890.0, "min_y": -3407.0, "max_y": 1713.0 },
-      "images": { "radar": "/data/de_mirage/radar.webp", "background": "/data/de_mirage/radar.webp" }
+      "bounds": {
+        "min_x": -3230.0,
+        "max_x": 1890.0,
+        "min_y": -3407.0,
+        "max_y": 1713.0
+      },
+      "images": {
+        "radar": "/data/de_mirage/radar.webp",
+        "background": "/data/de_mirage/radar.webp"
+      }
     },
     {
       "name": "de_inferno",
       "display_name": "Inferno",
-      "origin": { "x": -2087.0, "y": 3870.0 },
+      "origin": {
+        "x": -2087.0,
+        "y": 3870.0
+      },
       "scale": 4.9,
-      "bounds": { "min_x": -2087.0, "max_x": 2930.6, "min_y": -1147.6, "max_y": 3870.0 },
-      "images": { "radar": "/data/de_inferno/radar.webp", "background": "/data/de_inferno/radar.webp" }
+      "bounds": {
+        "min_x": -2087.0,
+        "max_x": 2930.6000000000004,
+        "min_y": -1147.6000000000004,
+        "max_y": 3870.0
+      },
+      "images": {
+        "radar": "/data/de_inferno/radar.webp",
+        "background": "/data/de_inferno/radar.webp"
+      }
     },
     {
       "name": "de_dust2",
       "display_name": "Dust II",
-      "origin": { "x": -2476.0, "y": 3239.0 },
+      "origin": {
+        "x": -2476.0,
+        "y": 3239.0
+      },
       "scale": 4.4,
-      "bounds": { "min_x": -2476.0, "max_x": 2029.6, "min_y": -1266.6, "max_y": 3239.0 },
-      "images": { "radar": "/data/de_dust2/radar.webp", "background": "/data/de_dust2/radar.webp" }
+      "bounds": {
+        "min_x": -2476.0,
+        "max_x": 2029.6000000000004,
+        "min_y": -1266.6000000000004,
+        "max_y": 3239.0
+      },
+      "images": {
+        "radar": "/data/de_dust2/radar.webp",
+        "background": "/data/de_dust2/radar.webp"
+      }
     },
     {
       "name": "de_cache",
       "display_name": "Cache",
-      "origin": { "x": -2000.0, "y": 3250.0 },
+      "origin": {
+        "x": -2000.0,
+        "y": 3250.0
+      },
       "scale": 5.5,
-      "bounds": { "min_x": -2000.0, "max_x": 3632.0, "min_y": -2382.0, "max_y": 3250.0 },
-      "images": { "radar": "/data/de_cache/radar.webp", "background": "/data/de_cache/radar.webp" }
+      "bounds": {
+        "min_x": -2000.0,
+        "max_x": 3632.0,
+        "min_y": -2382.0,
+        "max_y": 3250.0
+      },
+      "images": {
+        "radar": "/data/de_cache/radar.webp",
+        "background": "/data/de_cache/radar.webp"
+      }
     },
     {
       "name": "de_nuke",
       "display_name": "Nuke",
-      "origin": { "x": -3453.0, "y": 2887.0 },
+      "origin": {
+        "x": -3453.0,
+        "y": 2887.0
+      },
       "scale": 7.0,
-      "bounds": { "min_x": -3453.0, "max_x": 3715.0, "min_y": -4281.0, "max_y": 2887.0 },
-      "images": { "radar": "/data/de_nuke/radar.webp", "background": "/data/de_nuke/radar.webp" }
+      "bounds": {
+        "min_x": -3453.0,
+        "max_x": 3715.0,
+        "min_y": -4281.0,
+        "max_y": 2887.0
+      },
+      "images": {
+        "radar": "/data/de_nuke/radar.webp",
+        "background": "/data/de_nuke/radar.webp"
+      },
+      "section": "default",
+      "altitude": {
+        "min": -495.0,
+        "max": 10000.0
+      }
     },
     {
       "name": "de_overpass",
       "display_name": "Overpass",
-      "origin": { "x": -4831.0, "y": 1781.0 },
+      "origin": {
+        "x": -4831.0,
+        "y": 1781.0
+      },
       "scale": 5.2,
-      "bounds": { "min_x": -4831.0, "max_x": 493.8, "min_y": -3543.8, "max_y": 1781.0 },
-      "images": { "radar": "/data/de_overpass/radar.webp", "background": "/data/de_overpass/radar.webp" }
+      "bounds": {
+        "min_x": -4831.0,
+        "max_x": 493.8000000000002,
+        "min_y": -3543.8,
+        "max_y": 1781.0
+      },
+      "images": {
+        "radar": "/data/de_overpass/radar.webp",
+        "background": "/data/de_overpass/radar.webp"
+      }
     },
     {
       "name": "de_train",
       "display_name": "Train",
-      "origin": { "x": -2308.0, "y": 2078.0 },
+      "origin": {
+        "x": -2308.0,
+        "y": 2078.0
+      },
       "scale": 4.082077,
-      "bounds": { "min_x": -2308.0, "max_x": 1872.046848, "min_y": -2102.046848, "max_y": 2078.0 },
-      "images": { "radar": "/data/de_train/radar.webp", "background": "/data/de_train/radar.webp" }
+      "bounds": {
+        "min_x": -2308.0,
+        "max_x": 1872.046848,
+        "min_y": -2102.046848,
+        "max_y": 2078.0
+      },
+      "images": {
+        "radar": "/data/de_train/radar.webp",
+        "background": "/data/de_train/radar.webp"
+      },
+      "section": "default",
+      "altitude": {
+        "min": -50.0,
+        "max": 20000.0
+      }
     },
     {
       "name": "ar_baggage",
       "display_name": "Baggage",
-      "origin": { "x": -1838.0, "y": 1858.0 },
-      "scale": 4.1,
-      "bounds": { "min_x": -1838.0, "max_x": 2360.4, "min_y": -2340.4, "max_y": 1858.0 },
-      "images": { "radar": "/data/ar_baggage/radar.webp", "background": "/data/ar_baggage/radar.webp" }
+      "origin": {
+        "x": -1316.0,
+        "y": 1288.0
+      },
+      "scale": 2.539062,
+      "bounds": {
+        "min_x": -1316.0,
+        "max_x": 1283.999488,
+        "min_y": -1311.999488,
+        "max_y": 1288.0
+      },
+      "images": {
+        "radar": "/data/ar_baggage/radar.webp",
+        "background": "/data/ar_baggage/radar.webp"
+      },
+      "section": "default",
+      "altitude": {
+        "min": -5.0,
+        "max": 10000.0
+      }
     },
     {
       "name": "ar_shoots",
-      "display_name": "Shoots",
-      "origin": { "x": -2953.0, "y": 2164.0 },
-      "scale": 5.0,
-      "bounds": { "min_x": -2953.0, "max_x": 2167.0, "min_y": -2956.0, "max_y": 2164.0 },
-      "images": { "radar": "/data/ar_shoots/radar.webp", "background": "/data/ar_shoots/radar.webp" }
+      "display_name": "Shoots (Day)",
+      "origin": {
+        "x": -1368.0,
+        "y": 1952.0
+      },
+      "scale": 2.6875,
+      "bounds": {
+        "min_x": -1368.0,
+        "max_x": 1384.0,
+        "min_y": -800.0,
+        "max_y": 1952.0
+      },
+      "images": {
+        "radar": "/data/ar_shoots/radar.webp",
+        "background": "/data/ar_shoots/radar.webp"
+      }
     },
     {
       "name": "ar_shoots_night",
       "display_name": "Shoots (Night)",
-      "origin": { "x": -2953.0, "y": 2164.0 },
-      "scale": 5.0,
-      "bounds": { "min_x": -2953.0, "max_x": 2167.0, "min_y": -2956.0, "max_y": 2164.0 },
-      "images": { "radar": "/data/ar_shoots_night/radar.webp", "background": "/data/ar_shoots_night/radar.webp" }
+      "origin": {
+        "x": -1368.0,
+        "y": 1952.0
+      },
+      "scale": 2.6875,
+      "bounds": {
+        "min_x": -1368.0,
+        "max_x": 1384.0,
+        "min_y": -800.0,
+        "max_y": 1952.0
+      },
+      "images": {
+        "radar": "/data/ar_shoots_night/radar.webp",
+        "background": "/data/ar_shoots_night/radar.webp"
+      }
     },
     {
       "name": "de_ancient",
       "display_name": "Ancient",
-      "origin": { "x": -2953.0, "y": 2164.0 },
+      "origin": {
+        "x": -2953.0,
+        "y": 2164.0
+      },
       "scale": 5.0,
-      "bounds": { "min_x": -2953.0, "max_x": 2167.0, "min_y": -2956.0, "max_y": 2164.0 },
-      "images": { "radar": "/data/de_ancient/radar.webp", "background": "/data/de_ancient/radar.webp" }
+      "bounds": {
+        "min_x": -2953.0,
+        "max_x": 2167.0,
+        "min_y": -2956.0,
+        "max_y": 2164.0
+      },
+      "images": {
+        "radar": "/data/de_ancient/radar.webp",
+        "background": "/data/de_ancient/radar.webp"
+      }
     },
     {
       "name": "de_ancient_night",
-      "display_name": "Ancient (Night)",
-      "origin": { "x": -2953.0, "y": 2164.0 },
+      "display_name": "Ancient",
+      "origin": {
+        "x": -2953.0,
+        "y": 2164.0
+      },
       "scale": 5.0,
-      "bounds": { "min_x": -2953.0, "max_x": 2167.0, "min_y": -2956.0, "max_y": 2164.0 },
-      "images": { "radar": "/data/de_ancient_night/radar.webp", "background": "/data/de_ancient_night/radar.webp" }
+      "bounds": {
+        "min_x": -2953.0,
+        "max_x": 2167.0,
+        "min_y": -2956.0,
+        "max_y": 2164.0
+      },
+      "images": {
+        "radar": "/data/de_ancient_night/radar.webp",
+        "background": "/data/de_ancient_night/radar.webp"
+      }
     },
     {
       "name": "de_anubis",
       "display_name": "Anubis",
-      "origin": { "x": -2796.0, "y": 3328.0 },
+      "origin": {
+        "x": -2796.0,
+        "y": 3328.0
+      },
       "scale": 5.22,
-      "bounds": { "min_x": -2796.0, "max_x": 2549.28, "min_y": -2017.28, "max_y": 3328.0 },
-      "images": { "radar": "/data/de_anubis/radar.webp", "background": "/data/de_anubis/radar.webp" }
+      "bounds": {
+        "min_x": -2796.0,
+        "max_x": 2549.2799999999997,
+        "min_y": -2017.2799999999997,
+        "max_y": 3328.0
+      },
+      "images": {
+        "radar": "/data/de_anubis/radar.webp",
+        "background": "/data/de_anubis/radar.webp"
+      }
     },
     {
       "name": "de_vertigo",
       "display_name": "Vertigo",
-      "origin": { "x": -3168.0, "y": 1762.0 },
+      "origin": {
+        "x": -3168.0,
+        "y": 1762.0
+      },
       "scale": 4.0,
-      "bounds": { "min_x": -3168.0, "max_x": 928.0, "min_y": -2334.0, "max_y": 1762.0 },
-      "images": { "radar": "/data/de_vertigo/radar.webp", "background": "/data/de_vertigo/radar.webp" }
+      "bounds": {
+        "min_x": -3168.0,
+        "max_x": 928.0,
+        "min_y": -2334.0,
+        "max_y": 1762.0
+      },
+      "images": {
+        "radar": "/data/de_vertigo/radar.webp",
+        "background": "/data/de_vertigo/radar.webp"
+      },
+      "section": "default",
+      "altitude": {
+        "min": 11700.0,
+        "max": 20000.0
+      }
     },
     {
       "name": "cs_office",
       "display_name": "Office",
-      "origin": { "x": -1838.0, "y": 1858.0 },
+      "origin": {
+        "x": -1838.0,
+        "y": 1858.0
+      },
       "scale": 4.1,
-      "bounds": { "min_x": -1838.0, "max_x": 2360.4, "min_y": -2340.4, "max_y": 1858.0 },
-      "images": { "radar": "/data/cs_office/radar.webp", "background": "/data/cs_office/radar.webp" }
+      "bounds": {
+        "min_x": -1838.0,
+        "max_x": 2360.3999999999996,
+        "min_y": -2340.3999999999996,
+        "max_y": 1858.0
+      },
+      "images": {
+        "radar": "/data/cs_office/radar.webp",
+        "background": "/data/cs_office/radar.webp"
+      }
     },
     {
       "name": "cs_italy",
       "display_name": "Italy",
-      "origin": { "x": -2647.0, "y": 2592.0 },
+      "origin": {
+        "x": -2647.0,
+        "y": 2592.0
+      },
       "scale": 4.6,
-      "bounds": { "min_x": -2647.0, "max_x": 2063.4, "min_y": -2118.4, "max_y": 2592.0 },
-      "images": { "radar": "/data/cs_italy/radar.webp", "background": "/data/cs_italy/radar.webp" }
+      "bounds": {
+        "min_x": -2647.0,
+        "max_x": 2063.3999999999996,
+        "min_y": -2118.3999999999996,
+        "max_y": 2592.0
+      },
+      "images": {
+        "radar": "/data/cs_italy/radar.webp",
+        "background": "/data/cs_italy/radar.webp"
+      }
     },
     {
       "name": "aim_custom",
       "display_name": "Aim / Workshop (Dynamic)",
-      "origin": { "x": 0.0, "y": 0.0 },
+      "origin": {
+        "x": 0.0,
+        "y": 0.0
+      },
       "scale": 1.0,
       "dynamic": true,
-      "bounds": { "min_x": -1024.0, "max_x": 1024.0, "min_y": -1024.0, "max_y": 1024.0 },
-      "images": { "radar": "/data/aim_custom/radar.webp", "background": "/data/aim_custom/radar.webp" }
+      "bounds": {
+        "min_x": -1024.0,
+        "max_x": 1024.0,
+        "min_y": -1024.0,
+        "max_y": 1024.0
+      },
+      "images": {
+        "radar": "/data/aim_custom/radar.webp",
+        "background": "/data/aim_custom/radar.webp"
+      }
+    },
+    {
+      "name": "rush_001",
+      "display_name": "Complex",
+      "origin": {
+        "x": -11240.0,
+        "y": 9944.0
+      },
+      "scale": 18.910156,
+      "bounds": {
+        "min_x": -11240.0,
+        "max_x": 8123.999744000001,
+        "min_y": -9419.999744,
+        "max_y": 9944.0
+      },
+      "images": {
+        "radar": "/data/rush_001/radar.webp",
+        "background": "/data/rush_001/radar.webp"
+      }
+    },
+    {
+      "name": "rush_001_room104",
+      "display_name": "Complex / room104",
+      "origin": {
+        "x": 1744.0,
+        "y": 7836.0
+      },
+      "scale": 2.484375,
+      "bounds": {
+        "min_x": 1744.0,
+        "max_x": 4288.0,
+        "min_y": 5292.0,
+        "max_y": 7836.0
+      },
+      "images": {
+        "radar": "/data/rush_001_room104/radar.webp",
+        "background": "/data/rush_001_room104/radar.webp"
+      },
+      "parent": "rush_001"
+    },
+    {
+      "name": "rush_001_room101",
+      "display_name": "Complex / room101",
+      "origin": {
+        "x": 1376.0,
+        "y": 3520.0
+      },
+      "scale": 1.78125,
+      "bounds": {
+        "min_x": 1376.0,
+        "max_x": 3200.0,
+        "min_y": 1696.0,
+        "max_y": 3520.0
+      },
+      "images": {
+        "radar": "/data/rush_001_room101/radar.webp",
+        "background": "/data/rush_001_room101/radar.webp"
+      },
+      "parent": "rush_001"
+    },
+    {
+      "name": "rush_001_room102",
+      "display_name": "Complex / room102",
+      "origin": {
+        "x": 1263.0,
+        "y": -841.0
+      },
+      "scale": 1.974121,
+      "bounds": {
+        "min_x": 1263.0,
+        "max_x": 3284.4999040000002,
+        "min_y": -2862.4999040000002,
+        "max_y": -841.0
+      },
+      "images": {
+        "radar": "/data/rush_001_room102/radar.webp",
+        "background": "/data/rush_001_room102/radar.webp"
+      },
+      "parent": "rush_001"
+    },
+    {
+      "name": "rush_001_room103",
+      "display_name": "Complex / room103",
+      "origin": {
+        "x": 1263.0,
+        "y": -3837.0
+      },
+      "scale": 2.369141,
+      "bounds": {
+        "min_x": 1263.0,
+        "max_x": 3689.000384,
+        "min_y": -6263.000384,
+        "max_y": -3837.0
+      },
+      "images": {
+        "radar": "/data/rush_001_room103/radar.webp",
+        "background": "/data/rush_001_room103/radar.webp"
+      },
+      "parent": "rush_001"
+    },
+    {
+      "name": "rush_001_room201",
+      "display_name": "Complex / room201",
+      "origin": {
+        "x": -1748.0,
+        "y": -3808.0
+      },
+      "scale": 2.15625,
+      "bounds": {
+        "min_x": -1748.0,
+        "max_x": 460.0,
+        "min_y": -6016.0,
+        "max_y": -3808.0
+      },
+      "images": {
+        "radar": "/data/rush_001_room201/radar.webp",
+        "background": "/data/rush_001_room201/radar.webp"
+      },
+      "parent": "rush_001"
+    },
+    {
+      "name": "rush_001_room202",
+      "display_name": "Complex / room202",
+      "origin": {
+        "x": -4656.0,
+        "y": -3968.0
+      },
+      "scale": 1.59375,
+      "bounds": {
+        "min_x": -4656.0,
+        "max_x": -3024.0,
+        "min_y": -5600.0,
+        "max_y": -3968.0
+      },
+      "images": {
+        "radar": "/data/rush_001_room202/radar.webp",
+        "background": "/data/rush_001_room202/radar.webp"
+      },
+      "parent": "rush_001"
+    },
+    {
+      "name": "rush_001_room204",
+      "display_name": "Complex / room204",
+      "origin": {
+        "x": -10880.0,
+        "y": -3136.0
+      },
+      "scale": 2.90625,
+      "bounds": {
+        "min_x": -10880.0,
+        "max_x": -7904.0,
+        "min_y": -6112.0,
+        "max_y": -3136.0
+      },
+      "images": {
+        "radar": "/data/rush_001_room204/radar.webp",
+        "background": "/data/rush_001_room204/radar.webp"
+      },
+      "parent": "rush_001"
+    },
+    {
+      "name": "rush_001_room205",
+      "display_name": "Complex / room205",
+      "origin": {
+        "x": -2336.0,
+        "y": -304.0
+      },
+      "scale": 2.375,
+      "bounds": {
+        "min_x": -2336.0,
+        "max_x": 96.0,
+        "min_y": -2736.0,
+        "max_y": -304.0
+      },
+      "images": {
+        "radar": "/data/rush_001_room205/radar.webp",
+        "background": "/data/rush_001_room205/radar.webp"
+      },
+      "parent": "rush_001"
+    },
+    {
+      "name": "rush_001_room206",
+      "display_name": "Complex / room206",
+      "origin": {
+        "x": -6008.0,
+        "y": 8.0
+      },
+      "scale": 2.90625,
+      "bounds": {
+        "min_x": -6008.0,
+        "max_x": -3032.0,
+        "min_y": -2968.0,
+        "max_y": 8.0
+      },
+      "images": {
+        "radar": "/data/rush_001_room206/radar.webp",
+        "background": "/data/rush_001_room206/radar.webp"
+      },
+      "parent": "rush_001"
+    },
+    {
+      "name": "rush_001_room207",
+      "display_name": "Complex / room207",
+      "origin": {
+        "x": -10560.0,
+        "y": -224.0
+      },
+      "scale": 3.15625,
+      "bounds": {
+        "min_x": -10560.0,
+        "max_x": -7328.0,
+        "min_y": -3456.0,
+        "max_y": -224.0
+      },
+      "images": {
+        "radar": "/data/rush_001_room207/radar.webp",
+        "background": "/data/rush_001_room207/radar.webp"
+      },
+      "parent": "rush_001"
+    },
+    {
+      "name": "rush_001_room208",
+      "display_name": "Complex / room208",
+      "origin": {
+        "x": -2464.0,
+        "y": 3604.0
+      },
+      "scale": 2.453125,
+      "bounds": {
+        "min_x": -2464.0,
+        "max_x": 48.0,
+        "min_y": 1092.0,
+        "max_y": 3604.0
+      },
+      "images": {
+        "radar": "/data/rush_001_room208/radar.webp",
+        "background": "/data/rush_001_room208/radar.webp"
+      },
+      "parent": "rush_001"
+    },
+    {
+      "name": "rush_001_room209",
+      "display_name": "Complex / room209",
+      "origin": {
+        "x": -5504.0,
+        "y": 3296.0
+      },
+      "scale": 1.59375,
+      "bounds": {
+        "min_x": -5504.0,
+        "max_x": -3872.0,
+        "min_y": 1664.0,
+        "max_y": 3296.0
+      },
+      "images": {
+        "radar": "/data/rush_001_room209/radar.webp",
+        "background": "/data/rush_001_room209/radar.webp"
+      },
+      "parent": "rush_001"
+    },
+    {
+      "name": "rush_001_room203",
+      "display_name": "Complex / room203",
+      "origin": {
+        "x": -9400.0,
+        "y": 3879.0
+      },
+      "scale": 2.647462,
+      "bounds": {
+        "min_x": -9400.0,
+        "max_x": -6688.998912,
+        "min_y": 1167.998912,
+        "max_y": 3879.0
+      },
+      "images": {
+        "radar": "/data/rush_001_room203/radar.webp",
+        "background": "/data/rush_001_room203/radar.webp"
+      },
+      "parent": "rush_001"
+    },
+    {
+      "name": "rush_001_room211",
+      "display_name": "Complex / room211",
+      "origin": {
+        "x": -3104.0,
+        "y": 7088.0
+      },
+      "scale": 2.40625,
+      "bounds": {
+        "min_x": -3104.0,
+        "max_x": -640.0,
+        "min_y": 4624.0,
+        "max_y": 7088.0
+      },
+      "images": {
+        "radar": "/data/rush_001_room211/radar.webp",
+        "background": "/data/rush_001_room211/radar.webp"
+      },
+      "parent": "rush_001"
+    },
+    {
+      "name": "rush_001_room212",
+      "display_name": "Complex / room212",
+      "origin": {
+        "x": -6176.0,
+        "y": 7596.0
+      },
+      "scale": 2.297851,
+      "bounds": {
+        "min_x": -6176.0,
+        "max_x": -3823.000576,
+        "min_y": 5243.000576,
+        "max_y": 7596.0
+      },
+      "images": {
+        "radar": "/data/rush_001_room212/radar.webp",
+        "background": "/data/rush_001_room212/radar.webp"
+      },
+      "parent": "rush_001"
+    },
+    {
+      "name": "rush_001_room210",
+      "display_name": "Complex / room210",
+      "origin": {
+        "x": -10088.0,
+        "y": 7424.0
+      },
+      "scale": 3.859375,
+      "bounds": {
+        "min_x": -10088.0,
+        "max_x": -6136.0,
+        "min_y": 3472.0,
+        "max_y": 7424.0
+      },
+      "images": {
+        "radar": "/data/rush_001_room210/radar.webp",
+        "background": "/data/rush_001_room210/radar.webp"
+      },
+      "parent": "rush_001"
+    },
+    {
+      "name": "rush_001_room401",
+      "display_name": "Complex / room401",
+      "origin": {
+        "x": 4544.0,
+        "y": -528.0
+      },
+      "scale": 2.5,
+      "bounds": {
+        "min_x": 4544.0,
+        "max_x": 7104.0,
+        "min_y": -3088.0,
+        "max_y": -528.0
+      },
+      "images": {
+        "radar": "/data/rush_001_room401/radar.webp",
+        "background": "/data/rush_001_room401/radar.webp"
+      },
+      "parent": "rush_001"
+    },
+    {
+      "name": "rush_001_room301",
+      "display_name": "Complex / room301",
+      "origin": {
+        "x": 4608.0,
+        "y": 5696.0
+      },
+      "scale": 2.59375,
+      "bounds": {
+        "min_x": 4608.0,
+        "max_x": 7264.0,
+        "min_y": 3040.0,
+        "max_y": 5696.0
+      },
+      "images": {
+        "radar": "/data/rush_001_room301/radar.webp",
+        "background": "/data/rush_001_room301/radar.webp"
+      },
+      "parent": "rush_001"
+    },
+    {
+      "name": "rush_001_roomparty",
+      "display_name": "Complex / roomparty",
+      "origin": {
+        "x": 454.0,
+        "y": 1184.0
+      },
+      "scale": 1.585938,
+      "bounds": {
+        "min_x": 454.0,
+        "max_x": 2078.000512,
+        "min_y": -440.00051200000007,
+        "max_y": 1184.0
+      },
+      "images": {
+        "radar": "/data/rush_001_roomparty/radar.webp",
+        "background": "/data/rush_001_roomparty/radar.webp"
+      },
+      "parent": "rush_001"
+    },
+    {
+      "name": "rush_001_convoy",
+      "display_name": "Complex / convoy",
+      "origin": {
+        "x": -6720.0,
+        "y": -5952.0
+      },
+      "scale": 4.562499,
+      "bounds": {
+        "min_x": -6720.0,
+        "max_x": -2048.001024,
+        "min_y": -10623.998975999999,
+        "max_y": -5952.0
+      },
+      "images": {
+        "radar": "/data/rush_001_convoy/radar.webp",
+        "background": "/data/rush_001_convoy/radar.webp"
+      },
+      "parent": "rush_001"
+    },
+    {
+      "name": "aim_botz",
+      "display_name": "Aim Botz (Workshop)",
+      "origin": {
+        "x": 0.0,
+        "y": 0.0
+      },
+      "scale": 1.0,
+      "dynamic": true,
+      "bounds": {
+        "min_x": -1024.0,
+        "max_x": 1024.0,
+        "min_y": -1024.0,
+        "max_y": 1024.0
+      },
+      "images": {
+        "radar": "/data/aim_custom/radar.webp",
+        "background": "/data/aim_custom/radar.webp"
+      }
+    },
+    {
+      "name": "de_nuke_lower",
+      "display_name": "Nuke / lower",
+      "origin": {
+        "x": -3453.0,
+        "y": 2887.0
+      },
+      "scale": 7.0,
+      "bounds": {
+        "min_x": -3453.0,
+        "max_x": 3715.0,
+        "min_y": -4281.0,
+        "max_y": 2887.0
+      },
+      "images": {
+        "radar": "/data/de_nuke_lower/radar.webp",
+        "background": "/data/de_nuke_lower/radar.webp"
+      },
+      "parent": "de_nuke",
+      "section": "lower",
+      "altitude": {
+        "min": -10000.0,
+        "max": -495.0
+      }
+    },
+    {
+      "name": "de_train_lower",
+      "display_name": "Train / lower",
+      "origin": {
+        "x": -2308.0,
+        "y": 2078.0
+      },
+      "scale": 4.082077,
+      "bounds": {
+        "min_x": -2308.0,
+        "max_x": 1872.046848,
+        "min_y": -2102.046848,
+        "max_y": 2078.0
+      },
+      "images": {
+        "radar": "/data/de_train_lower/radar.webp",
+        "background": "/data/de_train_lower/radar.webp"
+      },
+      "parent": "de_train",
+      "section": "lower",
+      "altitude": {
+        "min": -5000.0,
+        "max": -50.0
+      }
+    },
+    {
+      "name": "ar_baggage_lower",
+      "display_name": "Baggage / lower",
+      "origin": {
+        "x": -1316.0,
+        "y": 1288.0
+      },
+      "scale": 2.539062,
+      "bounds": {
+        "min_x": -1316.0,
+        "max_x": 1283.999488,
+        "min_y": -1311.999488,
+        "max_y": 1288.0
+      },
+      "images": {
+        "radar": "/data/ar_baggage_lower/radar.webp",
+        "background": "/data/ar_baggage_lower/radar.webp"
+      },
+      "parent": "ar_baggage",
+      "section": "lower",
+      "altitude": {
+        "min": -10000.0,
+        "max": -5.0
+      }
+    },
+    {
+      "name": "de_vertigo_lower",
+      "display_name": "Vertigo / lower",
+      "origin": {
+        "x": -3168.0,
+        "y": 1762.0
+      },
+      "scale": 4.0,
+      "bounds": {
+        "min_x": -3168.0,
+        "max_x": 928.0,
+        "min_y": -2334.0,
+        "max_y": 1762.0
+      },
+      "images": {
+        "radar": "/data/de_vertigo_lower/radar.webp",
+        "background": "/data/de_vertigo_lower/radar.webp"
+      },
+      "parent": "de_vertigo",
+      "section": "lower",
+      "altitude": {
+        "min": -10000.0,
+        "max": 11700.0
+      }
+    },
+    {
+      "name": "cs_shelter",
+      "display_name": "Shelter",
+      "origin": {
+        "x": -3448.7712,
+        "y": 3805.3228
+      },
+      "scale": 3.311857,
+      "bounds": {
+        "min_x": -3448.7712,
+        "max_x": -57.42963200000031,
+        "min_y": 413.9812320000001,
+        "max_y": 3805.3228
+      },
+      "images": {
+        "radar": "/data/cs_shelter/radar.webp",
+        "background": "/data/cs_shelter/radar.webp"
+      },
+      "section": "default",
+      "altitude": {
+        "min": -16384.0,
+        "max": 16384.0
+      }
+    },
+    {
+      "name": "de_boulder",
+      "display_name": "Boulder",
+      "origin": {
+        "x": -3273.4917,
+        "y": 2930.2207
+      },
+      "scale": 2.8491137,
+      "bounds": {
+        "min_x": -3273.4917,
+        "max_x": -355.99927119999984,
+        "min_y": 12.728271199999654,
+        "max_y": 2930.2207
+      },
+      "images": {
+        "radar": "/data/de_boulder/radar.webp",
+        "background": "/data/de_boulder/radar.webp"
+      },
+      "section": "default",
+      "altitude": {
+        "min": 62.757324,
+        "max": 16384.0
+      }
+    },
+    {
+      "name": "de_boulder_higher1",
+      "display_name": "Boulder / higher1",
+      "origin": {
+        "x": -3273.4917,
+        "y": 2930.2207
+      },
+      "scale": 2.8491137,
+      "bounds": {
+        "min_x": -3273.4917,
+        "max_x": -355.99927119999984,
+        "min_y": 12.728271199999654,
+        "max_y": 2930.2207
+      },
+      "images": {
+        "radar": "/data/de_boulder_higher1/radar.webp",
+        "background": "/data/de_boulder_higher1/radar.webp"
+      },
+      "parent": "de_boulder",
+      "section": "higher1",
+      "altitude": {
+        "min": -16384.0,
+        "max": 62.757324
+      }
+    },
+    {
+      "name": "de_debris",
+      "display_name": "Debris",
+      "origin": {
+        "x": -3015.2393,
+        "y": 2919.2393
+      },
+      "scale": 1.9445695,
+      "bounds": {
+        "min_x": -3015.2393,
+        "max_x": -1024.0001320000001,
+        "min_y": 928.0001320000001,
+        "max_y": 2919.2393
+      },
+      "images": {
+        "radar": "/data/de_debris/radar.webp",
+        "background": "/data/de_debris/radar.webp"
+      },
+      "section": "default",
+      "altitude": {
+        "min": -16384.0,
+        "max": 16384.0
+      }
+    },
+    {
+      "name": "de_eldorado",
+      "display_name": "El Dorado",
+      "origin": {
+        "x": -3548.6814,
+        "y": 2571.1816
+      },
+      "scale": 2.0656068,
+      "bounds": {
+        "min_x": -3548.6814,
+        "max_x": -1433.5000368,
+        "min_y": 456.00023680000004,
+        "max_y": 2571.1816
+      },
+      "images": {
+        "radar": "/data/de_eldorado/radar.webp",
+        "background": "/data/de_eldorado/radar.webp"
+      },
+      "section": "default",
+      "altitude": {
+        "min": -16384.0,
+        "max": 16384.0
+      }
+    },
+    {
+      "name": "de_fachwerk",
+      "display_name": "Fachwerk",
+      "origin": {
+        "x": -2311.0767,
+        "y": 2874.6204
+      },
+      "scale": 2.5537856,
+      "bounds": {
+        "min_x": -2311.0767,
+        "max_x": 303.9997543999998,
+        "min_y": 259.5439455999999,
+        "max_y": 2874.6204
+      },
+      "images": {
+        "radar": "/data/de_fachwerk/radar.webp",
+        "background": "/data/de_fachwerk/radar.webp"
+      },
+      "section": "default",
+      "altitude": {
+        "min": -16384.0,
+        "max": 16384.0
+      }
+    },
+    {
+      "name": "de_poseidon",
+      "display_name": "Poseidon",
+      "origin": {
+        "x": -1046.3943,
+        "y": 1166.3942
+      },
+      "scale": 3.0124886,
+      "bounds": {
+        "min_x": -1046.3943,
+        "max_x": 2038.3940264000003,
+        "min_y": -1918.3941264000002,
+        "max_y": 1166.3942
+      },
+      "images": {
+        "radar": "/data/de_poseidon/radar.webp",
+        "background": "/data/de_poseidon/radar.webp"
+      },
+      "section": "default",
+      "altitude": {
+        "min": -16384.0,
+        "max": 16384.0
+      }
     }
   ]
 }

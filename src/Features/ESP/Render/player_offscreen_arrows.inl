@@ -1,11 +1,11 @@
-if (g::espOffscreenArrows && IsFiniteVec(renderLocalPos) && std::isfinite(yawRad)) {
+if (g::espOffscreenArrows && IsFiniteVec(renderLocalPos)) {
     const float dx = renderPlayerPos.x - renderLocalPos.x;
     const float dy = renderPlayerPos.y - renderLocalPos.y;
-    const float enemyYaw = atan2f(dy, dx);
-    const float relativeAngle = enemyYaw - yawRad;
-
-    const float dirX = sinf(relativeAngle);
-    const float dirY = -cosf(relativeAngle);
+    const auto direction = esp::render::ResolveOffscreenDirection(
+        dx, dy, viewMatrix[0][0], viewMatrix[0][1]);
+    if (!direction.valid) continue;
+    const float dirX = direction.x;
+    const float dirY = direction.y;
 
     const float arrowSize = std::clamp(g::espOffscreenSize, 6.0f, 36.0f);
     const float radius = std::max(0.0f, (std::min(screenW, screenH) * 0.47f) - arrowSize * 2.5f);
@@ -24,8 +24,10 @@ if (g::espOffscreenArrows && IsFiniteVec(renderLocalPos) && std::isfinite(yawRad
         base.y - dirY * arrowSize * 0.35f - perpY * arrowSize * 0.50f);
 
     const float* baseColor = g::espOffscreenColor;
-    if (g::espVisibilityColoring)
-        baseColor = p.visible ? g::espVisibleColor : g::espHiddenColor;
+    if (g::espVisibilityColoring && g::espSettings.presentation.visibilityArrows) {
+        const int state=esp::render::VisibilityState(p.visible,p.visibilityUpdatedAtUs,nowUs);
+        baseColor=state==1 ? g::espVisibleColor : state==0 ? g::espHiddenColor : g::espSettings.presentation.unknownColor;
+    }
 
     const float time = static_cast<float>(ImGui::GetTime());
     const float pulse = 0.8f + 0.2f * sinf(time * 6.0f);

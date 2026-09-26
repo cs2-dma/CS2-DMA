@@ -3,6 +3,36 @@
 
         json& esp = EnsureSection(root, "ESP");
         esp["Enabled"] = g::espEnabled;
+        esp["Presentation_healthSide"] = g::espSettings.presentation.healthSide;
+        esp["Presentation_armorSide"] = g::espSettings.presentation.armorSide;
+        esp["Presentation_healthValueMode"] = g::espSettings.presentation.healthValueMode;
+        esp["Presentation_armorValueMode"] = g::espSettings.presentation.armorValueMode;
+        esp["Presentation_armorStyle"] = g::espSettings.presentation.armorStyle;
+        esp["Presentation_nameSide"] = g::espSettings.presentation.nameSide;
+        esp["Presentation_flagsSide"] = g::espSettings.presentation.flagsSide;
+        esp["Presentation_flagsStyle"] = g::espSettings.presentation.flagsStyle;
+        esp["Presentation_flagsLimit"] = g::espSettings.presentation.flagsLimit;
+        esp["Presentation_snapOrigin"] = g::espSettings.presentation.snapOrigin;
+        esp["Presentation_snapEndpoint"] = g::espSettings.presentation.snapEndpoint;
+        esp["Presentation_snapLimit"] = g::espSettings.presentation.snapLimit;
+        esp["Presentation_healthTrail"] = g::espSettings.presentation.healthTrail;
+        esp["Presentation_visibilityBox"] = g::espSettings.presentation.visibilityBox;
+        esp["Presentation_visibilitySkeleton"] = g::espSettings.presentation.visibilitySkeleton;
+        esp["Presentation_visibilityArrows"] = g::espSettings.presentation.visibilityArrows;
+        esp["Presentation_flagReload"] = g::espSettings.presentation.flagReload;
+        esp["Presentation_flagBomb"] = g::espSettings.presentation.flagBomb;
+        esp["Presentation_compactMoney"] = g::espSettings.presentation.compactMoney;
+        esp["Presentation_distanceHeight"] = g::espSettings.presentation.distanceHeight;
+        esp["Presentation_snapNearest"] = g::espSettings.presentation.snapNearest;
+        esp["Presentation_healthWidth"] = g::espSettings.presentation.healthWidth;
+        esp["Presentation_armorWidth"] = g::espSettings.presentation.armorWidth;
+        esp["Presentation_nameMaxWidth"] = g::espSettings.presentation.nameMaxWidth;
+        esp["Presentation_snapThickness"] = g::espSettings.presentation.snapThickness;
+        esp["Presentation_snapOpacity"] = g::espSettings.presentation.snapOpacity;
+        esp["Presentation_snapMaxDistance"] = g::espSettings.presentation.snapMaxDistance;
+        SaveColor(esp, "UnknownVisibilityColor", g::espSettings.presentation.unknownColor);
+        for (int i = 0; i < 8; ++i)
+            esp["FlagOrder" + std::to_string(i)] = g::espSettings.presentation.flagsOrder[i];
         esp["Box"] = g::espBox;
         esp["Health"] = g::espHealth;
         esp["HealthText"] = g::espHealthText;
@@ -25,6 +55,8 @@
         esp["DistanceSize"] = g::espDistanceSize;
         esp["Skeleton"] = g::espSkeleton;
         esp["SkeletonDots"] = g::espSkeletonDots;
+        esp["SkeletonHeadCircle"] = g::espSkeletonHeadCircle;
+        esp["SkeletonHeadScale"] = g::espSkeletonHeadScale;
         esp["Snaplines"] = g::espSnaplines;
         esp["SnapFromTop"] = g::espSnaplineFromTop;
         esp["VisibilityColoring"] = g::espVisibilityColoring;
@@ -124,20 +156,20 @@
         target["AimKey"] = g::targetAimKey;
         target["AimActivationMode"] = g::targetAimActivationMode;
         target["AimBone"] = g::targetAimBone;
-        target["AimSmoothing"] = g::targetAimSmoothing;
         target["AimVisibleOnly"] = g::targetAimVisibleOnly;
         target["AimPredictive"] = g::targetAimPredictive;
         target["AimRecoilControl"] = g::targetAimRecoilControl;
         target["AimHumanization"] = g::targetAimHumanization;
+        target["AimTargetLock"] = g::targetAimTargetLock;
         target["TriggerbotEnabled"] = g::targetTriggerbotEnabled;
         target["TriggerKey"] = g::targetTriggerKey;
         target["TriggerActivationMode"] = g::targetTriggerActivationMode;
         target["TriggerAimAssist"] = g::targetTriggerAimAssist;
         target["TriggerAimBone"] = g::targetTriggerAimBone;
-        target["TriggerAimSmoothing"] = g::targetTriggerAimSmoothing;
         target["TriggerAimPredictive"] = g::targetTriggerAimPredictive;
         target["TriggerAimRecoilControl"] = g::targetTriggerAimRecoilControl;
         target["TriggerAimHumanization"] = g::targetTriggerAimHumanization;
+        target["TriggerTargetLock"] = g::targetTriggerTargetLock;
         target["TriggerDelayMs"] = g::targetTriggerDelayMs;
         target["TriggerVisibleOnly"] = g::targetTriggerVisibleOnly;
         target["TriggerAutoShot"] = g::targetTriggerAutoShot;
@@ -148,10 +180,26 @@
                 {"AimSmoothing", profile.aimSmoothing},
                 {"AimMinimumDamage", profile.aimMinimumDamage},
                 {"AimAutowall", profile.aimAutowall},
+                {"AimDamageCheck", profile.aimDamageCheck},
+                {"AimSoftAssist", profile.aimSoftAssist},
+                {"AimMotionStyle", profile.aimMotionStyle},
+                {"AimReactionMs", profile.aimReactionMs},
+                {"TriggerForceCenter", profile.triggerForceCenter},
+                {"AimAssistStrength", profile.aimAssistStrength},
+                {"AimAssistMaxSpeed", profile.aimAssistMaxSpeed},
+                {"AimAssistDeadzone", profile.aimAssistDeadzone},
+                {"AimRecoilStrength", profile.aimRecoilStrength},
                 {"TriggerSmoothing", profile.triggerSmoothing},
                 {"TriggerHitchance", profile.hitchance},
                 {"TriggerHitchanceEnabled", profile.hitchanceEnabled},
                 {"TriggerSeedWindowEnabled", profile.seedWindowEnabled},
+                {"AimAdaptiveSmoothing", profile.aimAdaptiveSmoothing},
+                {"AimWindMouse", profile.aimWindMouse},
+                {"AimWindGravity", profile.aimWindGravity},
+                {"AimWindFluctuation", profile.aimWindFluctuation},
+                {"AimWindMaxStep", profile.aimWindMaxStep},
+                {"AimWindDistance", profile.aimWindDistance},
+                {"TriggerAdaptiveSmoothing", profile.triggerAdaptiveSmoothing},
                 {"TriggerMinimumDamage", profile.minimumDamage},
                 {"TriggerAutowall", profile.autowall},
             });

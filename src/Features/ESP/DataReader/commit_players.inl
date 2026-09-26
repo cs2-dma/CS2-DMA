@@ -334,6 +334,7 @@
                 p.hasDefuser = false;
                 p.flashed = false;
                 p.flashDuration = 0.0f;
+                p.flashUpdatedUs = p.scopedUpdatedUs = p.defusingUpdatedUs = 0;
                 p.eyeYaw = 0.0f;
                 memset(p.name, 0, sizeof(p.name));
                 p.weaponId = 0;

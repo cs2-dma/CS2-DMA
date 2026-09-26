@@ -235,13 +235,8 @@
         s_localPosUpdatedAtUs = 0;
     }
     const bool localViewOffsetValid = localViewOffsetReadValid &&
-        std::isfinite(localViewOffset.x) &&
-        std::isfinite(localViewOffset.y) &&
-        std::isfinite(localViewOffset.z) &&
-        std::fabs(localViewOffset.x) <= 32.0f &&
-        std::fabs(localViewOffset.y) <= 32.0f &&
-        localViewOffset.z >= 8.0f &&
-        localViewOffset.z <= 96.0f;
+        localViewOffsetSample.pawn == localPawnResolved &&
+        esp::data::IsValidViewOffset(localViewOffset);
     if (localViewOffsetValid) {
         s_localViewOffset = localViewOffset;
         s_localViewOffsetValid = true;
@@ -265,27 +260,9 @@
         s_localShotsFiredValid = false;
     }
 
-    if (localPawnChanged || !wantsTargetRecoil ||
-        (s_localShotsFiredValid && s_localShotsFired <= 0)) {
-        s_localAimPunch = {};
-        s_localAimPunchValid = false;
-        s_localAimPunchUpdatedAtUs = 0;
-    } else if (localAimPunchValid && localShotsFired > 0) {
-        s_localAimPunch = localAimPunch;
-        s_localShotsFired = localShotsFired;
-        s_localAimPunchValid = true;
-        s_localAimPunchUpdatedAtUs = nowUs;
-    } else if (s_localAimPunchValid &&
-               s_localAimPunchUpdatedAtUs != 0 &&
-               nowUs >= s_localAimPunchUpdatedAtUs &&
-               (nowUs - s_localAimPunchUpdatedAtUs) <= kLocalAimPunchHoldUs) {
-        if (localShotsFiredValid)
-            s_localShotsFired = localShotsFired;
-    } else {
-        s_localAimPunch = {};
-        s_localAimPunchValid = false;
-        s_localAimPunchUpdatedAtUs = 0;
-    }
+    esp::data::CommitRecoilSample(s_localAimPunch, s_localAimPunchValid,
+        s_localAimPunchUpdatedAtUs, localAimPunch, localAimPunchValid,
+        localPawnChanged || !wantsTargetRecoil, nowUs);
     if (std::isfinite(localFovSensitivityAdjust) &&
         localFovSensitivityAdjust >= 0.05f &&
         localFovSensitivityAdjust <= 2.0f) {

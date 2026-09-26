@@ -87,8 +87,8 @@ static void DrawStyledBox(
     using esp::render::BoxStyle;
     switch (esp::render::NormalizeBoxStyle(styleValue)) {
     case BoxStyle::Full:
-        dl->AddRect(ImVec2(x, y), ImVec2(x + w, y + h), outline, 0.0f, 0, thickness + 2.0f);
-        dl->AddRect(ImVec2(x, y), ImVec2(x + w, y + h), color, 0.0f, 0, thickness);
+        dl->AddRect(ImVec2(x, y), ImVec2(x + w, y + h), outline, 0.0f, thickness + 2.0f, 0);
+        dl->AddRect(ImVec2(x, y), ImVec2(x + w, y + h), color, 0.0f, thickness, 0);
         break;
     case BoxStyle::Dashed: {
         const float shortSide = std::max(1.0f, std::min(w, h));

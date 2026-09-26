@@ -8,10 +8,17 @@
   <PropertyGroup Label="Configuration"><ConfigurationType>Application</ConfigurationType><PlatformToolset>v145</PlatformToolset><UseDebugLibraries>false</UseDebugLibraries><WholeProgramOptimization>true</WholeProgramOptimization><CharacterSet>Unicode</CharacterSet></PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
   <PropertyGroup><OutDir>$(LOCALAPPDATA)\KevqDMA\Build\tests\$(Configuration)\</OutDir><IntDir>$(LOCALAPPDATA)\KevqDMA\Build\obj\tests\target_runtime\$(Configuration)\</IntDir><TargetName>target_runtime_tests</TargetName></PropertyGroup>
+  <PropertyGroup Condition="'$(TargetInputIntegration)'=='true'"><IntDir>$(LOCALAPPDATA)\KevqDMA\Build\obj\tests\target_input\$(Configuration)\</IntDir><TargetName>target_input_tests</TargetName></PropertyGroup>
+  <PropertyGroup><InputDeviceImplementation Condition="'$(InputDeviceImplementation)'==''">$(ProjectDir)..\..\..\src\app\Input\input_device.cpp</InputDeviceImplementation></PropertyGroup>
   <ItemDefinitionGroup>
     <ClCompile><WarningLevel>Level3</WarningLevel><TreatWarningAsError>true</TreatWarningAsError><SDLCheck>true</SDLCheck><LanguageStandard>stdcpp20</LanguageStandard><AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions><AdditionalIncludeDirectories>$(ProjectDir)..\..\..\include;$(ProjectDir)..\..\..\src;$(ProjectDir)..\..\..\src\vendor;$(ProjectDir)..\..\..\src\vendor\imgui;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories><PreprocessorDefinitions>NDEBUG;WIN32_LEAN_AND_MEAN;NOMINMAX;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions><RuntimeLibrary>MultiThreaded</RuntimeLibrary><Optimization>MaxSpeed</Optimization></ClCompile>
     <Link><SubSystem>Console</SubSystem><StackReserveSize>4194304</StackReserveSize></Link>
   </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(TargetInputIntegration)'=='true'">
+    <ClCompile><PreprocessorDefinitions>KEVQ_TARGET_INPUT_INTEGRATION;%(PreprocessorDefinitions)</PreprocessorDefinitions></ClCompile>
+    <Link><AdditionalDependencies>setupapi.lib;ws2_32.lib;%(AdditionalDependencies)</AdditionalDependencies></Link>
+  </ItemDefinitionGroup>
+  <ItemGroup Condition="'$(TargetInputIntegration)'=='true'"><ClCompile Include="$(InputDeviceImplementation)" /></ItemGroup>
   <ItemGroup>
     <ClCompile Include="target_runtime_tests.cpp" />
     <ClCompile Include="..\..\..\src\Features\Target\target_ballistics.cpp" />

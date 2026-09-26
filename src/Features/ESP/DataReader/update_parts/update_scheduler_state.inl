@@ -64,3 +64,12 @@
     bool _inventoryActiveTick = false;
     bool _inventoryFullTick = false;
     bool _boneReadsActiveTick = false;
+    static thread_local esp::data::DeferredLaneFairness deferredFairness;
+    static thread_local uint64_t fairnessScene = 0;
+    const uint64_t currentFairnessScene = s_sceneResetSerial.load(std::memory_order_relaxed);
+    if (fairnessScene != currentFairnessScene) {
+        deferredFairness = {};
+        fairnessScene = currentFairnessScene;
+    }
+    using DeferredLane = esp::data::DeferredLane;
+    const auto forcedDeferredLane = deferredFairness.Select(budgetNowUs);

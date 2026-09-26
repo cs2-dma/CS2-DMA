@@ -11,7 +11,10 @@ bool FindEmbeddedAsset(const std::string& urlPath, EmbeddedAsset* out)
 
     
     const HMODULE hModule = GetModuleHandleA(nullptr);
-    const HRSRC hRes = FindResourceA(hModule, urlPath.c_str(), MAKEINTRESOURCEA(10));
+    const std::string resourceName = '"' + urlPath + '"';
+    HRSRC hRes = FindResourceA(hModule, resourceName.c_str(), MAKEINTRESOURCEA(10));
+    if (!hRes)
+        hRes = FindResourceA(hModule, urlPath.c_str(), MAKEINTRESOURCEA(10));
     if (!hRes)
         return false;
 

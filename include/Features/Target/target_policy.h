@@ -7,14 +7,14 @@
 
 namespace target::policy
 {
-    inline constexpr float kDefaultFovRadius = 150.0f;
+    inline constexpr float kDefaultFovRadius = 80.0f;
     inline constexpr float kMinimumFovRadius = 5.0f;
     inline constexpr float kMaximumFovRadius = 800.0f;
     inline constexpr float kMinimumSmoothing = 1.0f;
     inline constexpr float kMaximumSmoothing = 50.0f;
     inline constexpr float kMouseYawDegrees = 0.022f;
     inline constexpr int kMaximumMouseStep = 127;
-    inline constexpr float kTargetLockRadiusScale = 1.12f;
+    inline constexpr float kTargetLockRadiusScale = 1.0f;
     inline constexpr float kMaximumPredictionSeconds = 0.10f;
     inline constexpr uint64_t kMaximumPlayerCoreAgeUs = 150000u;
     inline constexpr uint64_t kMaximumPlayerBoneAgeUs = 150000u;
@@ -24,6 +24,7 @@ namespace target::policy
     inline constexpr uint64_t kMaximumTriggerTargetAgeUs = 35000u;
     inline constexpr uint64_t kMaximumTriggerTargetSkewUs = 25000u;
     inline constexpr uint64_t kMaximumRecoilSampleAgeUs = 35000u;
+    inline constexpr uint64_t kMaximumMotionFeedbackAgeUs = 100000u;
     inline constexpr uint64_t kMaximumRecoilViewSkewUs = 20000u;
     inline constexpr uint64_t kMaximumWeaponStateAgeUs = 50000u;
     inline constexpr uint64_t kMaximumWeaponStateSkewUs = 25000u;
@@ -34,11 +35,18 @@ namespace target::policy
     inline constexpr float kMaximumHeadAimCorrection = 1.5f;
     inline constexpr uint8_t kRequiredPostShotAliveSamples = 2u;
     inline constexpr uint8_t kRequiredPostShotRecoilSamples = 2u;
+    inline uint64_t RemainingSampleLifetimeUs(uint64_t sampleUs, uint64_t nowUs,
+        uint64_t maximumAgeUs) noexcept
+    {
+        if (sampleUs == 0 || sampleUs > nowUs) return 0;
+        const uint64_t ageUs = nowUs - sampleUs;
+        return ageUs < maximumAgeUs ? maximumAgeUs - ageUs : 0;
+    }
     // A successful device ACK without an ammo/shots/lastShot transition is
     // ambiguous: the game may have fired while one telemetry publication was
     // lost. Blindly retrying the same continuous target is therefore less safe
     // than requiring a crosshair/key cycle. This is intentionally zero.
-    inline constexpr uint8_t kMaximumUnobservedClickRetries = 0u;
+    inline constexpr uint8_t kMaximumUnobservedClickRetries = 1u;
 
     enum class TriggerTargetOutcome : uint8_t
     {
@@ -86,6 +94,99 @@ namespace target::policy
         bool wasDown = false;
         bool toggled = false;
     };
+
+    struct RecoilDeltaState
+    {
+        float pitch = 0.0f;
+        float yaw = 0.0f;
+        float strength = 0.0f;
+        uint64_t updatedAtUs = 0;
+    };
+
+    inline float BoundedSetting(float value, float fallback, float low, float high) noexcept
+    {
+        return std::isfinite(value) ? std::clamp(value, low, high) : fallback;
+    }
+
+    inline AimAngleDelta AdvanceRecoilDelta(RecoilDeltaState& state,
+        float pitch, float yaw, uint64_t sampleUs, uint64_t nowUs,
+        bool available, float strength, float variation, float noise) noexcept
+    {
+        strength = BoundedSetting(strength, 100.0f, 0.0f, 100.0f) * 0.01f;
+        if (!available || sampleUs == 0 || sampleUs > nowUs ||
+            nowUs - sampleUs > kMaximumRecoilSampleAgeUs ||
+            !std::isfinite(pitch) || !std::isfinite(yaw) ||
+            std::fabs(pitch) > 90.0f || std::fabs(yaw) > 90.0f || strength == 0.0f) {
+            state = {};
+            return {0.0f, 0.0f, false};
+        }
+        AimAngleDelta result{0.0f, 0.0f, true};
+        if (sampleUs < state.updatedAtUs) return result;
+        if (state.updatedAtUs != 0 && sampleUs > state.updatedAtUs &&
+            sampleUs - state.updatedAtUs <= kMaximumMotionFeedbackAgeUs &&
+            state.strength == strength) {
+            const float gain = strength * (1.0f +
+                BoundedSetting(variation, 0.0f, 0.0f, 5.0f) * 0.01f *
+                BoundedSetting(noise, 0.0f, -1.0f, 1.0f));
+            const float pitchChange = pitch - state.pitch;
+            const float yawChange = yaw - state.yaw;
+            if (std::hypot(pitchChange, yawChange) <= 12.0f)
+                result = {-pitchChange * gain, -yawChange * gain, true};
+        }
+        if (sampleUs != state.updatedAtUs || state.strength != strength)
+            state = {pitch, yaw, strength, sampleUs};
+        return result;
+    }
+
+    inline AimAngleDelta ConstrainCurvedAimStep(AimAngleDelta step, AimAngleDelta error) noexcept
+    {
+        const float distance = std::hypot(error.pitch, error.yaw);
+        const float length = std::hypot(step.pitch, step.yaw);
+        if (!step.valid || !error.valid || !std::isfinite(distance) || !std::isfinite(length) ||
+            distance <= 0.00001f || length <= 0.00001f)
+            return {0.0f, 0.0f, true};
+        const float px = error.pitch / distance;
+        const float py = error.yaw / distance;
+        const float along = std::clamp(step.pitch * px + step.yaw * py, 0.0f, distance);
+        const float envelope = std::clamp((distance - 0.12f) / 0.70f, 0.0f, 1.0f);
+        const float sideLimit = along * 0.20f * envelope;
+        const float side = std::clamp(-step.pitch * py + step.yaw * px, -sideLimit, sideLimit);
+        const float proposedLength = std::hypot(along, side);
+        const float scale = proposedLength > length ? length / proposedLength : 1.0f;
+        return {(px * along - py * side) * scale, (py * along + px * side) * scale, true};
+    }
+
+    inline AimAngleDelta RemoveAimDeadzone(AimAngleDelta error, float deadzone) noexcept
+    {
+        const float length = std::hypot(error.pitch, error.yaw);
+        if (!error.valid || !std::isfinite(length)) return {};
+        deadzone = BoundedSetting(deadzone, 0.15f, 0.0f, 1.0f);
+        const float scale = length > deadzone ? (length - deadzone) / length : 0.0f;
+        return {error.pitch * scale, error.yaw * scale, true};
+    }
+
+    inline float PointConvergenceGain(float errorDegrees) noexcept
+    {
+        if (!std::isfinite(errorDegrees) || errorDegrees <= 0.0f) return 1.0f;
+        const float proximity = std::clamp(1.0f - errorDegrees / 0.35f, 0.0f, 1.0f);
+        return 1.0f + 0.65f * proximity * proximity * (3.0f - 2.0f * proximity);
+    }
+
+    inline void LimitAimVelocity(float& pitch, float& yaw,
+        float maximumDegreesPerSecond, float elapsedSeconds) noexcept
+    {
+        const float length = std::hypot(pitch, yaw);
+        if (!std::isfinite(length) || !std::isfinite(elapsedSeconds) || elapsedSeconds <= 0.0f) {
+            pitch = yaw = 0.0f;
+            return;
+        }
+        const float limit = BoundedSetting(maximumDegreesPerSecond, 35.0f, 1.0f, 180.0f) *
+            std::min(elapsedSeconds, 0.03125f);
+        if (length > limit) {
+            pitch *= limit / length;
+            yaw *= limit / length;
+        }
+    }
 
     inline float SanitizeFovRadius(
         float radius,
@@ -142,7 +243,20 @@ namespace target::policy
 
     inline int SanitizeAimBone(int value, int fallback = 0) noexcept
     {
-        return value >= 0 && value <= 4 ? value : fallback;
+        return value >= 0 && value <= 5 ? value : fallback;
+    }
+
+    inline float ResolveSmoothingFraction(float angularError, float smoothing,
+        bool adaptive) noexcept
+    {
+        if (!std::isfinite(angularError) || angularError < 0.0f) return 0.0f;
+        const float safeSmoothing = SanitizeSmoothing(smoothing);
+        if (adaptive) {
+            const float t = std::clamp(angularError / 2.0f, 0.0f, 1.0f);
+            return (0.45f + 0.55f * t * t * (3.0f - 2.0f * t)) / safeSmoothing;
+        }
+        const float t = std::clamp(angularError / 10.0f, 0.0f, 1.0f);
+        return safeSmoothing <= 1.0f ? 1.0f : (1.0f - 0.7f * t * t) / safeSmoothing;
     }
 
     inline int SanitizeDelayMs(int value, int fallback = 10) noexcept
@@ -168,8 +282,11 @@ namespace target::policy
         return {toggled, down, toggled};
     }
 
-    // User intent outlives a target lock or telemetry packet. Unknown input
-    // is not a release. In a menu, allow turning OFF but never turning ON.
+    inline bool IsInputCaptureActive(bool menuOpen, uint64_t untilMs, uint64_t nowMs) noexcept
+    {
+        return menuOpen && nowMs < untilMs;
+    }
+
     inline bool UpdateActivation(ActivationState& state, bool enabled,
         int key, int mode, bool down, bool available, bool paused) noexcept
     {
@@ -372,8 +489,8 @@ namespace target::policy
     {
         (void)triggerVisibleOnly;
         (void)triggerAutoShot;
-        return targetEnabled &&
-            ((aimbotEnabled && aimVisibleOnly) || triggerbotEnabled);
+        (void)aimVisibleOnly;
+        return targetEnabled && (aimbotEnabled || triggerbotEnabled);
     }
 
     inline constexpr bool IsFreshSample(
@@ -427,22 +544,6 @@ namespace target::policy
         };
     }
 
-    inline float ResolveHeadAimCoordinate(
-        float head,
-        float lowerBone,
-        float blend = kHeadAimLowerBlend,
-        float maximumCorrection = kMaximumHeadAimCorrection) noexcept
-    {
-        if (!std::isfinite(head) || !std::isfinite(lowerBone))
-            return std::isfinite(head) ? head : 0.0f;
-        const float safeBlend = std::clamp(blend, 0.0f, 1.0f);
-        const float safeMaximum = std::max(0.0f, std::fabs(maximumCorrection));
-        const float correction = std::clamp(
-            (lowerBone - head) * safeBlend,
-            -safeMaximum,
-            safeMaximum);
-        return head + correction;
-    }
 
     inline float ClampAimStepToTarget(float step, float targetDelta) noexcept
     {
@@ -721,19 +822,6 @@ namespace target::policy
             stableRecoilSamples >= kRequiredPostShotRecoilSamples;
     }
 
-    inline constexpr bool ShouldRetryUnobservedClick(
-        bool observationWindowElapsed,
-        bool clickPulseActive,
-        bool postClickWeaponEvidenceFresh,
-        bool weaponReady,
-        bool targetIdentityAlive,
-        uint8_t retryCount) noexcept
-    {
-        return observationWindowElapsed && !clickPulseActive &&
-            postClickWeaponEvidenceFresh && weaponReady &&
-            targetIdentityAlive &&
-            retryCount < kMaximumUnobservedClickRetries;
-    }
 
     inline bool ShouldHoldCapsuleAim(
         bool rayInsideSelectedCapsule,
@@ -752,23 +840,6 @@ namespace target::policy
             requiredHitchancePercent;
     }
 
-    inline bool IsMarginalSeedWindowReady(
-        float currentHitchancePercent,
-        float requiredHitchancePercent,
-        int testedSeeds,
-        int hitSeeds,
-        float marginPercent = 5.0f) noexcept
-    {
-        if (!std::isfinite(currentHitchancePercent) ||
-            !std::isfinite(requiredHitchancePercent) ||
-            !std::isfinite(marginPercent) ||
-            requiredHitchancePercent <= 0.0f || marginPercent < 0.0f ||
-            testedSeeds != 3 || hitSeeds < 2 || hitSeeds > testedSeeds) {
-            return false;
-        }
-        return currentHitchancePercent + marginPercent + 0.001f >=
-            requiredHitchancePercent;
-    }
 
     inline bool IsBetterPlannedHitboxChoice(
         int requestedHitgroup,

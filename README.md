@@ -48,7 +48,7 @@ An open-source software framework designed for the research and implementation o
     <b>Русская локализация</b>
   </a>
   &nbsp;&nbsp;&nbsp;&nbsp;|&nbsp;&nbsp;&nbsp;&nbsp;
-  <a href="https://github.com/KEV0143/Direct-memory-access-CS2-DMA/blob/main/README.md" style="text-decoration: none;">
+  <a href="https://github.com/cs2-dma/CS2-DMA/blob/main/README.md" style="text-decoration: none;">
     <b>English Localization</b>
   </a>
   &nbsp;&nbsp;&nbsp;&nbsp;|&nbsp;&nbsp;&nbsp;&nbsp;
@@ -69,7 +69,7 @@ An open-source software framework designed for the research and implementation o
  from the minimum visual layer to the radar on a separate screen. </code></p>
 
 <img width="1895" height="902" alt="image" src="https://github.com/user-attachments/assets/3cb596a5-0b32-4bc3-9aad-304cc4cdc613" />
-<p><code> See how it works on the <a href="https://cs2-dma.github.io/CS2-DMA/?lang=en" target="_blank"> WebSite </code></p>
+<p><code> See how it works on the <a href="https://cs2-dma.github.io/CS2-DMA/?lang=en" target="_blank" rel="noopener noreferrer"> WebSite </a></code></p>
 
 <img width="1893" height="897" alt="image" src="https://github.com/user-attachments/assets/330a6503-dc98-4ea3-8567-da03c4e938b5" />
 <p><code> Dual-worker pipeline – Camera at 300 Hz 

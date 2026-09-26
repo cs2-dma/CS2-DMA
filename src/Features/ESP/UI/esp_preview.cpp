@@ -3,6 +3,9 @@
 #include "Features/ESP/esp.h"
 #include "Features/ESP/weapon_catalog.h"
 #include "Features/ESP/Render/weapon_icon_atlas.h"
+#include "Features/ESP/Render/draw_policy.h"
+#include "Features/ESP/Render/bar_labels.h"
+#include "Features/ESP/Render/player_labels.h"
 
 #include <algorithm>
 #include <charconv>
@@ -27,34 +30,6 @@ namespace
             static_cast<int>(c[3] * 255));
     }
 
-    ImU32 BarColorU32(const esp::render::BarColor& color)
-    {
-        return IM_COL32(
-            static_cast<int>(color.r * 255.0f),
-            static_cast<int>(color.g * 255.0f),
-            static_cast<int>(color.b * 255.0f),
-            static_cast<int>(color.a * 255.0f));
-    }
-
-    std::pair<ImU32, ImU32> PreviewBarColors(
-        int mode,
-        float fraction,
-        const float* primary,
-        const float* low,
-        bool armor)
-    {
-        const ImU32 resolved = BarColorU32(
-            armor
-                ? esp::render::ResolveArmorBarColor(mode, fraction, primary, low)
-                : esp::render::ResolveBarColor(mode, fraction, primary, low));
-        if (esp::render::NormalizeBarColorMode(mode) != esp::render::BarColorMode::Gradient)
-            return { resolved, resolved };
-        return {
-            BarColorU32(esp::render::ReadBarColor(primary)),
-            BarColorU32(esp::render::ReadBarColor(low))
-        };
-    }
-
     void TextShadow(ImDrawList* dl, const ImVec2& pos, ImU32 color, const char* text)
     {
         dl->AddText(ImVec2(pos.x + 1, pos.y + 1), IM_COL32(0, 0, 0, 220), text);
@@ -69,23 +44,6 @@ namespace
         const int sa = a < 220 ? (220 * a / 255) : 220;
         dl->AddText(font, size, ImVec2(pos.x + 1, pos.y + 1), IM_COL32(0, 0, 0, sa), text);
         dl->AddText(font, size, pos, color, text);
-    }
-
-    void PrvSideBar(ImDrawList* dl, float x, float top, float height,
-                    float barW, float fraction, ImU32 topCol, ImU32 bottomCol)
-    {
-        const float visualBarW = 2.0f;
-        const float barInset = std::max(0.0f, (barW - visualBarW) * 0.5f);
-        const float barLeft = x + barInset;
-        const float barH = height * fraction;
-        if (fraction > 0.0f) {
-            const ImVec2 fillMin(barLeft, top + height - barH);
-            const ImVec2 fillMax(barLeft + visualBarW, top + height);
-            if (topCol == bottomCol)
-                dl->AddRectFilled(fillMin, fillMax, topCol, 1.0f);
-            else
-                dl->AddRectFilledMultiColor(fillMin, fillMax, topCol, topCol, bottomCol, bottomCol);
-        }
     }
 
     struct Vec2 { float x, y; };
@@ -171,31 +129,22 @@ namespace
                               ImU32 entityCol, bool showBottomLabels,
                               float areaBottom, bool useVisColors = true)
     {
-        struct PreviewBarLabel {
-            bool active = false;
-            char text[8] = {};
-            ImVec2 textPos = {};
-            ImVec2 bgMin = {};
-            ImVec2 bgMax = {};
-            ImU32 textColor = 0;
-            ImU32 accentColor = 0;
-        };
-
         const float boxLeft = cx - boxW * 0.5f;
         const int mockHp = 72;
         const int mockArmor = 45;
-        const float hpFrac = mockHp / 100.0f;
-        const float apFrac = mockArmor / 100.0f;
-        const float sideBarW = 3.0f;
-        const float sideBarGap = 4.0f;
-
+        
         
         if (g::espSnaplines && showBottomLabels) {
-            float fromY = g::espSnaplineFromTop ? (boxTop - 30) : areaBottom;
-            dl->AddLine(ImVec2(cx, fromY), ImVec2(cx, boxTop + boxH),
-                        IM_COL32(0, 0, 0, 180), 2.5f);
-            dl->AddLine(ImVec2(cx, fromY), ImVec2(cx, boxTop + boxH),
-                        Col4(g::espSnaplineColor), 1.0f);
+            const auto& options=g::espSettings.presentation;
+            const int origin=options.snapOrigin<0 ? (g::espSnaplineFromTop ? 0 : 1) : options.snapOrigin;
+            float fromY=origin==0 ? boxTop-30 : origin==1 ? areaBottom : (boxTop+areaBottom)*0.5f;
+            const float thickness=std::clamp(options.snapThickness,0.5f,4.0f);
+            const float opacity=std::clamp(options.snapOpacity,0.0f,1.0f);
+            const ImVec2 to(cx,boxTop+boxH*(options.snapEndpoint==1 ? 0.5f : 1.0f));
+            const auto* color=g::espSnaplineColor;
+            dl->AddLine(ImVec2(cx,fromY),to,IM_COL32(0,0,0,static_cast<int>(140*opacity)),thickness+1.5f);
+            dl->AddLine(ImVec2(cx,fromY),to,ImGui::ColorConvertFloat4ToU32(
+                ImVec4(color[0],color[1],color[2],color[3]*opacity)),thickness);
         }
 
         
@@ -206,134 +155,36 @@ namespace
                 boxTop,
                 boxW,
                 boxH,
-                entityCol,
+                g::espSettings.presentation.visibilityBox ? entityCol : Col4(g::espBoxColor),
                 IM_COL32(0, 0, 0, 220),
                 g::espBoxStyle,
                 g::espBoxCornerPercent,
                 std::clamp(g::espBoxThickness, 0.5f, 4.0f));
 
         
-        const float healthBarLeft = boxLeft - sideBarW - sideBarGap;
-        const float armorBarLeft = g::espHealth
-            ? (healthBarLeft - sideBarW - sideBarGap) : healthBarLeft;
-        const float visualBarWidth = 2.0f;
-        const float barInset = std::max(0.0f, (sideBarW - visualBarWidth) * 0.5f);
-        const float centeredHealthBarLeft = healthBarLeft + barInset;
-        const float centeredArmorBarLeft = armorBarLeft + barInset;
-
-        ImFont* barValueFont = ImGui::GetFont();
-        const float barValueFontSize =
-            barValueFont ? std::max(7.5f, ImGui::GetFontSize() - 4.5f) : 0.0f;
-        auto calcBarValueSize = [&](const char* text) -> ImVec2 {
-            if (barValueFont && barValueFontSize > 0.0f)
-                return barValueFont->CalcTextSizeA(barValueFontSize, FLT_MAX, 0.0f, text, nullptr);
-            return ImGui::CalcTextSize(text);
-        };
-        auto makeBarLabel = [&](PreviewBarLabel& label, int value, float barLeft, ImU32 textColor, ImU32 accentColor) {
-            const auto result = std::to_chars(label.text, label.text + sizeof(label.text) - 1, value);
-            *result.ptr = '\0';
-            const ImVec2 textSize = calcBarValueSize(label.text);
-            const float padX = 2.5f;
-            const float padY = 1.0f;
-            const float labelWidth = textSize.x + padX * 2.0f;
-            const float labelHeight = textSize.y + padY * 2.0f;
-            float bgX = (barLeft + visualBarWidth * 0.5f) - labelWidth * 0.5f;
-            float bgY = boxTop - labelHeight - 3.0f;
-            label.active = true;
-            label.textPos = ImVec2(bgX + padX, bgY + padY - 0.25f);
-            label.bgMin = ImVec2(bgX, bgY);
-            label.bgMax = ImVec2(bgX + labelWidth, bgY + labelHeight);
-            label.textColor = textColor;
-            label.accentColor = accentColor;
-        };
-        auto shiftLabelX = [&](PreviewBarLabel& label, float deltaX) {
-            label.bgMin.x += deltaX;
-            label.bgMax.x += deltaX;
-            label.textPos.x += deltaX;
-        };
-        auto shiftLabelY = [&](PreviewBarLabel& label, float deltaY) {
-            label.bgMin.y += deltaY;
-            label.bgMax.y += deltaY;
-            label.textPos.y += deltaY;
-        };
-        auto setLabelX = [&](PreviewBarLabel& label, float bgX) {
-            shiftLabelX(label, bgX - label.bgMin.x);
-        };
-        auto setLabelY = [&](PreviewBarLabel& label, float bgY) {
-            shiftLabelY(label, bgY - label.bgMin.y);
-        };
-        auto labelWidth = [](const PreviewBarLabel& label) -> float {
-            return label.bgMax.x - label.bgMin.x;
-        };
-        auto drawBarLabel = [&](const PreviewBarLabel& label) {
-            if (!label.active || label.text[0] == '\0')
-                return;
-            dl->AddRectFilled(label.bgMin, label.bgMax, IM_COL32(8, 8, 8, 205), 2.5f);
-            dl->AddRect(label.bgMin, label.bgMax, IM_COL32(0, 0, 0, 150), 2.5f, 1.0f, 0);
-            dl->AddRectFilled(
-                ImVec2(label.bgMin.x + 1.0f, label.bgMax.y - 2.0f),
-                ImVec2(label.bgMax.x - 1.0f, label.bgMax.y - 1.0f),
-                label.accentColor,
-                1.0f);
-
-            if (!barValueFont || barValueFontSize <= 0.0f) {
-                dl->AddText(ImVec2(label.textPos.x + 1.0f, label.textPos.y + 1.0f), IM_COL32(0, 0, 0, 210), label.text);
-                dl->AddText(label.textPos, label.textColor, label.text);
-                return;
-            }
-
-            dl->AddText(barValueFont, barValueFontSize,
-                        ImVec2(label.textPos.x + 1.0f, label.textPos.y + 1.0f),
-                        IM_COL32(0, 0, 0, 210), label.text);
-            dl->AddText(barValueFont, barValueFontSize, label.textPos, label.textColor, label.text);
-        };
-        PreviewBarLabel hpLabel = {};
-        PreviewBarLabel apLabel = {};
-
-        if (g::espArmor) {
-            const auto [armorTopCol, armorBottomCol] = PreviewBarColors(
-                g::espArmorColorMode,
-                apFrac,
-                g::espArmorColor,
-                g::espArmorLowColor,
-                true);
-            PrvSideBar(dl, armorBarLeft, boxTop, boxH, sideBarW, apFrac,
-                       armorTopCol, armorBottomCol);
-            if (g::espArmorText && mockArmor < 100)
-                makeBarLabel(apLabel, mockArmor, centeredArmorBarLeft, IM_COL32(225, 245, 255, 255), armorTopCol);
-        }
-        if (g::espHealth) {
-            const auto [healthTopCol, healthBottomCol] = PreviewBarColors(
-                g::espHealthColorMode,
-                hpFrac,
-                g::espHealthColor,
-                g::espHealthLowColor,
-                false);
-            PrvSideBar(dl, healthBarLeft, boxTop, boxH, sideBarW, hpFrac,
-                       healthTopCol, healthBottomCol);
-            if (g::espHealthText && mockHp < 100)
-                makeBarLabel(hpLabel, mockHp, centeredHealthBarLeft, IM_COL32(255, 255, 255, 255), healthTopCol);
-        }
-        if (hpLabel.active && apLabel.active) {
-            const float sharedLabelY = std::min(hpLabel.bgMin.y, apLabel.bgMin.y);
-            setLabelY(hpLabel, sharedLabelY);
-            setLabelY(apLabel, sharedLabelY);
-
-            const float pairGap = 3.0f;
-            const float totalWidth = labelWidth(apLabel) + pairGap + labelWidth(hpLabel);
-            const float pairCenterX =
-                ((centeredArmorBarLeft + visualBarWidth * 0.5f) + (centeredHealthBarLeft + visualBarWidth * 0.5f)) * 0.5f;
-            setLabelX(apLabel, pairCenterX - totalWidth * 0.5f);
-            setLabelX(hpLabel, apLabel.bgMax.x + pairGap);
-        }
-        drawBarLabel(hpLabel);
-        drawBarLabel(apLabel);
-
+        auto layout=esp::render::DrawPlayerBars(*dl,g::fontBarValues ? g::fontBarValues : ImGui::GetFont(),
+            g::fontUiIcons,ImVec2(boxLeft,boxTop),ImVec2(boxLeft+boxW,boxTop+boxH),
+            dl->GetClipRectMin(),dl->GetClipRectMax(),mockHp,mockArmor,0.85f,g::espSettings);
+        esp::PlayerData mock;
+        mock.health=mockHp; mock.armor=mockArmor; mock.hasHelmet=true; mock.hasHelmetValid=true;
+        mock.helmetUpdatedAtUs=1000000; mock.weaponPresentationUpdatedUs=1000000;
+        mock.money=4200; mock.moneyKnown=true; mock.flashed=true; mock.scoped=true; mock.flashUpdatedUs=1000000;
+        mock.flashDuration=1.0f; mock.scopedUpdatedUs=1000000; mock.defusingUpdatedUs=1000000;
+        mock.defusing=true; mock.hasDefuser=true; mock.hasBomb=true; mock.team=3;
+        std::snprintf(mock.name,sizeof(mock.name),"%s","KevQ");
         
         if (g::espSkeleton) {
-            ImU32 skelCol = (g::espVisibilityColoring && useVisColors) ? entityCol : Col4(g::espSkeletonColor);
+            ImU32 skelCol = (g::espVisibilityColoring && useVisColors && g::espSettings.presentation.visibilitySkeleton) ? entityCol : Col4(g::espSkeletonColor);
             const float skeletonThickness = std::clamp(g::espSkeletonThickness, 0.5f, 4.0f);
             const float skeletonOutlineThickness = skeletonThickness + 1.4f;
+            if (g::espSkeletonHeadCircle) {
+                const Vec2 head = BonePos2D(esp::HEAD, cx, boxTop, boneScale);
+                const float radius = boxH*(3.5f/72.0f)*std::clamp(g::espSkeletonHeadScale,0.5f,2.0f);
+                if (radius > 0.0f) {
+                    dl->AddCircle(ImVec2(head.x, head.y), radius, IM_COL32(0, 0, 0, 200), 32, skeletonOutlineThickness);
+                    dl->AddCircle(ImVec2(head.x, head.y), radius, skelCol, 32, skeletonThickness);
+                }
+            }
             for (auto& p : kPairs) {
                 Vec2 a = BonePos2D(p.from, cx, boxTop, boneScale);
                 Vec2 b = BonePos2D(p.to, cx, boxTop, boneScale);
@@ -356,19 +207,12 @@ namespace
         }
 
         
-        if (g::espFlags && g::espName) {
-            const char* name = "KevQ";
-            ImFont* font = g::fontEspName ? g::fontEspName : g::fontDefault ? g::fontDefault : ImGui::GetFont();
-            float fontSize = g::espNameFontSize > 4.0f ? g::espNameFontSize : ImGui::GetFontSize();
-            ImVec2 ts = font->CalcTextSizeA(fontSize, FLT_MAX, 0.0f, name);
-            TextShadowFont(dl, font, fontSize,
-                           ImVec2(cx - ts.x * 0.5f, boxTop - ts.y - 4),
-                           Col4(g::espNameColor), name);
-        }
-
+        esp::render::DrawPlayerName(*dl,g::fontEspName ? g::fontEspName : ImGui::GetFont(),
+            mock,ImVec2(boxLeft,boxTop),ImVec2(boxLeft+boxW,boxTop+boxH),
+            dl->GetClipRectMin(),dl->GetClipRectMax(),g::espSettings,layout);
         
         {
-            float bottomY = boxTop + boxH + 4;
+            float bottomY = layout.bottom + 4;
             if (g::espWeapon) {
                 
                 if (g::espWeaponIcon) {
@@ -403,7 +247,7 @@ namespace
                 }
             }
             if (g::espWeapon && g::espWeaponAmmo) {
-                const char* ammo = "25 / 30";
+                const char* ammo = "25 | 5 mags";
                 ImFont* af = g::fontOverlayText ? g::fontOverlayText : ImGui::GetFont();
                 float afs = g::espWeaponAmmoSize > 0.0f ? g::espWeaponAmmoSize : ImGui::GetFontSize();
                 ImVec2 ts = af->CalcTextSizeA(afs, FLT_MAX, 0.0f, ammo);
@@ -414,23 +258,9 @@ namespace
 
 
         
-        if (g::espFlags) {
-            float flagY = boxTop;
-            float flagX = boxLeft + boxW + 6;
-            const auto flag = [&](bool enabled, const char* text, const float* color, float size) {
-                if (!enabled) return;
-                const float fontSize = size > 0.0f ? size : ImGui::GetFontSize();
-                TextShadowFont(dl, g::fontOverlayText ? g::fontOverlayText : ImGui::GetFont(),
-                    fontSize, ImVec2(flagX, flagY), Col4(color), text);
-                flagY += fontSize + 1.0f;
-            };
-            flag(g::espFlagBlind, KEVQ_TR("Blind"), g::espFlagBlindColor, g::espFlagBlindSize);
-            flag(g::espFlagScoped, KEVQ_TR("Scoped"), g::espFlagScopedColor, g::espFlagScopedSize);
-            flag(g::espFlagDefusing, KEVQ_TR("Defusing"), g::espFlagDefusingColor, g::espFlagDefusingSize);
-            flag(g::espFlagKit, KEVQ_TR("Kit"), g::espFlagKitColor, g::espFlagKitSize);
-            flag(g::espFlagMoney, "$4200", g::espFlagMoneyColor, g::espFlagMoneySize);
-            flag(g::espDistance, "42m", g::espDistanceColor, g::espDistanceSize);
-        }
+        esp::render::DrawPlayerFlags(*dl,g::fontOverlayText ? g::fontOverlayText : ImGui::GetFont(),
+            g::fontUiIcons,mock,Vector3(1653.5f,0,0),Vector3(),4.5f,1000000,
+            ImVec2(boxLeft,boxTop),dl->GetClipRectMin(),dl->GetClipRectMax(),g::espSettings,layout);
     }
 }
 

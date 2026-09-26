@@ -194,6 +194,8 @@
     static uint32_t s_cachedPlayerPings[64] = {};
     static uintptr_t s_cachedIdentityControllers[64] = {};
     static uintptr_t s_cachedMoneyControllers[64] = {};
+    static uint64_t s_moneySampleUs[64] = {};
+    DWORD moneyBytesRead[64] = {};
     static uintptr_t s_cachedMoneyServices[64] = {};
     static int s_cachedPlayerMoneys[64] = {};
     static uintptr_t s_cachedDynamicPawns[64] = {};
@@ -213,6 +215,7 @@
             memset(s_cachedPlayerPings, 0, sizeof(s_cachedPlayerPings));
             memset(s_cachedIdentityControllers, 0, sizeof(s_cachedIdentityControllers));
             memset(s_cachedMoneyControllers, 0, sizeof(s_cachedMoneyControllers));
+            memset(s_moneySampleUs, 0, sizeof(s_moneySampleUs));
             memset(s_cachedMoneyServices, 0, sizeof(s_cachedMoneyServices));
             memset(s_cachedPlayerMoneys, 0, sizeof(s_cachedPlayerMoneys));
             memset(s_cachedDynamicPawns, 0, sizeof(s_cachedDynamicPawns));
@@ -271,6 +274,7 @@
             pings[i] = 0;
         }
         if (controllers[i] != s_cachedMoneyControllers[i]) {
+            s_moneySampleUs[i] = 0;
             moneyServices[i] = 0;
             moneys[i] = 0;
         }
@@ -344,14 +348,24 @@
     int plausibleCoreCount = 0;
     uint64_t incompleteCoreMask = 0;
     uint64_t invalidCoreMask = 0;
+    static uint64_t lastCoreRejectTraceUs[64] = {};
     for (int resolvedIdx = 0; resolvedIdx < playerResolvedSlotCount; ++resolvedIdx) {
         const int slot = playerResolvedSlots[resolvedIdx];
         if (coreReadPlausible[slot])
             ++plausibleCoreCount;
         else if (!coreReadCompleted(slot))
             incompleteCoreMask |= uint64_t{1} << slot;
-        else
+        else {
             invalidCoreMask |= uint64_t{1} << slot;
+            const uint64_t rejectNowUs = TickNowUs();
+            if (lastCoreRejectTraceUs[slot] == 0 || rejectNowUs < lastCoreRejectTraceUs[slot] ||
+                rejectNowUs - lastCoreRejectTraceUs[slot] >= 1000000u) {
+                lastCoreRejectTraceUs[slot] = rejectNowUs;
+                RecordEspEvent({EspEventType::CoreRejected, static_cast<uint8_t>(slot),
+                    static_cast<uint16_t>(esp::data::ResolveCoreRejectionReason(teamLooksValid(teams[slot]),
+                        healths[slot], armors[slot], lifeStates[slot], isValidWorldPos(positions[slot])))});
+            }
+        }
     }
     s_playerCoreIncompleteMask.store(incompleteCoreMask, std::memory_order_relaxed);
     s_playerCoreInvalidMask.store(invalidCoreMask, std::memory_order_relaxed);

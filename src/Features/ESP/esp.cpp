@@ -7,6 +7,7 @@
 #include "Features/ESP/Worker/worker_policy.h"
 #include "Features/World/grenade_helper.h"
 #include "app/Core/fallback_log.h"
+#include "app/Input/primary_keyboard.h"
 #include <DMALibrary/Memory/Memory.h>
 #include <Windows.h>
 #include <atomic>
@@ -174,6 +175,7 @@ namespace esp {
         ResetCameraSnapshot();
 
         try {
+            app::input::StartPrimaryKeyboardRecovery();
             s_dataWorker = std::jthread([](const std::stop_token& stopToken) noexcept {
                 RunRestartableWorker(stopToken, [&] {
                     ApplyWorkerThreadTuning(L"KevqDMA Data");
@@ -215,6 +217,7 @@ namespace esp {
                 });
             });
         } catch (...) {
+            app::input::StopPrimaryKeyboardRecovery();
             s_cameraWorker.request_stop();
             s_dataWorker.request_stop();
             if (s_cameraWorker.joinable())
@@ -232,6 +235,7 @@ namespace esp {
     {
         std::scoped_lock lifecycleLock(s_workerLifecycleMutex);
         s_dataWorkerStopRequested.store(true, std::memory_order_relaxed);
+        app::input::StopPrimaryKeyboardRecovery();
         s_cameraWorker.request_stop();
         s_dataWorker.request_stop();
         if (s_cameraWorker.joinable())

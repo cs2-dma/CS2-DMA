@@ -133,25 +133,44 @@ namespace esp::data
                (!read.teamReadRequired || read.teamBytes == sizeof(PlayerTeamSample));
     }
 
-    inline bool IsPlayerCoreStatePlausible(
+    enum class CoreRejectionReason : uint16_t { None, Team, Health, Armor, LifeState, Position };
+
+    inline const char* CoreRejectionReasonName(CoreRejectionReason reason) noexcept
+    {
+        switch (reason) {
+        case CoreRejectionReason::Team: return "core_invalid_team";
+        case CoreRejectionReason::Health: return "core_invalid_health";
+        case CoreRejectionReason::Armor: return "core_invalid_armor";
+        case CoreRejectionReason::LifeState: return "core_invalid_life_state";
+        case CoreRejectionReason::Position: return "core_invalid_position";
+        default: return "core_invalid_unknown";
+        }
+    }
+
+    inline CoreRejectionReason ResolveCoreRejectionReason(
         bool teamValid,
         int health,
         int armor,
         uint8_t lifeState,
         bool positionValid) noexcept
     {
-        const bool valuesInRange =
-            health >= 0 && health <= 500 &&
-            armor >= 0 && armor <= 500 &&
-            lifeState <= 2;
-        if (!teamValid || !valuesInRange)
-            return false;
+        if (!teamValid) return CoreRejectionReason::Team;
+        if (health < 0 || health > 500) return CoreRejectionReason::Health;
+        if (armor < 0 || armor > 500) return CoreRejectionReason::Armor;
+        if (lifeState > 2) return CoreRejectionReason::LifeState;
 
         // Dead and observer pawns may legitimately publish a zero origin. Their
         // completed health/life-state record is still coherent and must not
         // make the entire roster batch look unreadable.
         const bool alive = health > 0 && lifeState == 0;
-        return !alive || positionValid;
+        return alive && !positionValid ? CoreRejectionReason::Position : CoreRejectionReason::None;
+    }
+
+    inline bool IsPlayerCoreStatePlausible(bool teamValid, int health, int armor,
+        uint8_t lifeState, bool positionValid) noexcept
+    {
+        return ResolveCoreRejectionReason(teamValid, health, armor, lifeState, positionValid) ==
+            CoreRejectionReason::None;
     }
 
     inline uint64_t ElapsedSinceOrZero(uint64_t nowUs, uint64_t sinceUs)

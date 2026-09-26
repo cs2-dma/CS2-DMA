@@ -10,6 +10,8 @@
     uint64_t earliestPublishMs = 0;
     uint64_t lastEntityPayloadMs = 0;
     std::string lastEntityPayloadMap;
+    std::string dynamicOverviewMap;
+    nlohmann::json cachedDynamicOverview;
     constexpr uint32_t kPlayerFlagDead = 1u << 0;
     constexpr uint32_t kPlayerFlagScoped = 1u << 1;
     constexpr uint32_t kPlayerFlagFlashed = 1u << 2;
@@ -40,7 +42,8 @@
         const uint16_t* grenadeIds,
         int grenadeCount,
         float velocityX,
-        float velocityY) {
+        float velocityY,
+        uint64_t sampleTimeMs) {
         if (!first)
             out.push_back(',');
         first = false;
@@ -80,6 +83,8 @@
         out.push_back(']');
         out.push_back(',');
         AppendJsonVec2(out, velocityX, velocityY);
+        out.push_back(',');
+        AppendJsonInt(out, sampleTimeMs);
         out.push_back(']');
     };
     auto broadcastPayloadIfChanged = [&](uint64_t payloadVersion,
@@ -165,7 +170,12 @@
 
         std::string mapName = settings.mapOverride;
         if (mapName.empty() && hasSnapshot)
-            mapName = ResolveMapName(snapshot);
+            mapName = ResolveMapName(snapshot, stickyMapName);
+        else if (!mapName.empty() && hasSnapshot) {
+            if (const auto* layer = radar::FindMapForPosition(mapName, snapshot.localPos.x,
+                    snapshot.localPos.y, snapshot.localPos.z, stickyMapName))
+                mapName = layer->name;
+        }
         if (!mapName.empty() && mapName != "unknown") {
             stickyMapName = mapName;
             stickyMapStampMs = nowMs;
@@ -279,6 +289,44 @@
         const bool buildLegacyPayload = hasLegacyConsumers;
         nlohmann::json live;
         const uint64_t captureTimeMs = snapshot.captureTickMs > 0 ? snapshot.captureTickMs : nowMs;
+        nlohmann::json dynamicOverview;
+        if (dynamicOverviewMap != mapName || !snapshotHasLiveEntities) {
+            dynamicOverviewMap = mapName;
+            cachedDynamicOverview = nullptr;
+        }
+        if (const auto* definition = radar::FindMapByName(mapName);
+                (definition && definition->dynamic) || mapName.starts_with("dynamic_")) {
+            float minX = snapshot.minimapMins.x, maxX = snapshot.minimapMaxs.x;
+            float minY = snapshot.minimapMins.y, maxY = snapshot.minimapMaxs.y;
+            if (!snapshot.hasMinimapBounds) {
+                minX = minY = std::numeric_limits<float>::infinity();
+                maxX = maxY = -std::numeric_limits<float>::infinity();
+                const auto include = [&](const Vector3& pos) {
+                    if (!IsFiniteVec(pos)) return;
+                    minX = std::min(minX, pos.x); maxX = std::max(maxX, pos.x);
+                    minY = std::min(minY, pos.y); maxY = std::max(maxY, pos.y);
+                };
+                include(snapshot.localPos);
+                for (const auto& player : snapshot.players) if (player.valid) include(player.position);
+                minX = std::floor((minX - 256.0f) / 512.0f) * 512.0f;
+                minY = std::floor((minY - 256.0f) / 512.0f) * 512.0f;
+                maxX = std::ceil((maxX + 256.0f) / 512.0f) * 512.0f;
+                maxY = std::ceil((maxY + 256.0f) / 512.0f) * 512.0f;
+                if (cachedDynamicOverview.is_object()) {
+                    const float previousX = cachedDynamicOverview["x"].get<float>();
+                    const float previousY = cachedDynamicOverview["y"].get<float>();
+                    const float previousSpan = cachedDynamicOverview["scale"].get<float>() * 1024.0f;
+                    minX = std::min(minX, previousX); maxX = std::max(maxX, previousX + previousSpan);
+                    minY = std::min(minY, previousY - previousSpan); maxY = std::max(maxY, previousY);
+                }
+            }
+            const float span = std::max({maxX-minX, maxY-minY, 2048.0f});
+            if (std::isfinite(minX) && std::isfinite(maxX) && std::isfinite(minY) && std::isfinite(maxY) &&
+                span > 128.0f && span < 65536.0f)
+                cachedDynamicOverview = {{"x", (minX+maxX-span)*0.5f},
+                    {"y", (minY+maxY+span)*0.5f}, {"scale", span/1024.0f}};
+            dynamicOverview = cachedDynamicOverview;
+        }
 
         if (buildLegacyPayload) {
             const double serverTimeMs = static_cast<double>(captureTimeMs);
@@ -288,6 +336,7 @@
             live["m_capture_time"] = captureTimeMs;
             live["m_language"] = languageCode;
             live["m_map"] = mapName;
+            if (!dynamicOverview.is_null()) live["m_overview"] = dynamicOverview;
             live["m_local_team"] = snapshot.localTeam;
             live["m_updated_at"] = nowMs;
             live["m_players"] = nlohmann::json::array();
@@ -445,7 +494,7 @@
                 }
                 me["m_model_name"] = TeamDefaultModelName(snapshot.localTeam);
                 me["m_seq"] = frameSeq;
-                me["m_ts"] = captureTimeMs;
+                me["m_ts"] = snapshot.localPosUpdatedAtUs / 1000;
                 me["m_steam_id"] = "local";
                 me["steamid"] = "local";
                 me["m_is_local"] = true;
@@ -476,7 +525,8 @@
                 snapshot.localGrenadeIds,
                 snapshot.localGrenadeCount,
                 0.0f,
-                0.0f);
+                0.0f,
+                snapshot.localPosUpdatedAtUs / 1000);
             ++entityCount;
         }
 
@@ -523,7 +573,7 @@
                 };
                 row["m_model_name"] = TeamDefaultModelName(player.team);
                 row["m_seq"] = frameSeq;
-                row["m_ts"] = captureTimeMs;
+                row["m_ts"] = player.coreUpdatedAtUs / 1000;
                 row["m_steam_id"] = BuildPlayerSteamId(static_cast<int>(slot));
                 row["steamid"] = row["m_steam_id"];
                 row["m_is_local"] = false;
@@ -560,7 +610,8 @@
                 player.grenadeIds,
                 player.grenadeCount,
                 player.velocity.x,
-                player.velocity.y);
+                player.velocity.y,
+                player.coreUpdatedAtUs / 1000);
             ++entityCount;
         }
 
@@ -575,6 +626,7 @@
         AppendJsonString(payloadJsonV2, languageCode);
         payloadJsonV2 += ",\"map\":";
         AppendJsonString(payloadJsonV2, mapName);
+        if (!dynamicOverview.is_null()) payloadJsonV2 += ",\"ov\":" + dynamicOverview.dump();
         payloadJsonV2 += ",\"lt\":";
         AppendJsonInt(payloadJsonV2, snapshot.localTeam);
         payloadJsonV2 += ",\"p\":[";

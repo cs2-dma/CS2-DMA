@@ -37,7 +37,7 @@ namespace
     constexpr size_t kMaxSpotsPerMap = 4096u;
     constexpr size_t kMaxAimPointsPerSpot = 32u;
 
-    enum class GrenadeType : uint8_t { Smoke, Molotov, He, Flash };
+    using world::grenade_helper::GrenadeType;
 
     struct AimPoint {
         std::string label;
@@ -367,6 +367,7 @@ namespace
             const Vector3& localPosition,
             const Vector3& viewAngles,
             const char* mapKey,
+            uint16_t heldItemId,
             float screenWidth,
             float screenHeight)
         {
@@ -374,6 +375,7 @@ namespace
             currentMap_ = mapKey && IsMapKeySafe(mapKey) ? mapKey : std::string();
             currentPosition_ = localPosition;
             currentAngles_ = viewAngles;
+            heldItemId_ = heldItemId;
             HandleHotkeys();
 
             if (!g::grenadeHelperEnabled || !g::grenadeHelperVisible ||
@@ -766,6 +768,8 @@ namespace
 
         bool AimPassesFilter(const AimPoint& aim) const
         {
+            if (!world::grenade_helper::MatchesHeldGrenade(aim.type, heldItemId_))
+                return false;
             switch (aim.type) {
             case GrenadeType::Smoke: return g::grenadeHelperSmoke;
             case GrenadeType::Molotov: return g::grenadeHelperMolotov;
@@ -1213,6 +1217,7 @@ namespace
         bool loaded_ = false;
         std::vector<MapSpots> maps_;
         std::string currentMap_;
+        uint16_t heldItemId_ = 0;
         std::string lineupListMap_;
         std::string lineupListObservedMap_;
         std::array<char, 128> lineupSearchBuffer_ = {};
@@ -1256,10 +1261,11 @@ void world::grenade_helper::DrawOverlay(
     const Vector3& localPosition,
     const Vector3& viewAngles,
     const char* mapKey,
+    uint16_t heldItemId,
     float screenWidth,
     float screenHeight)
 {
-    Service().Draw(viewMatrix, localPosition, viewAngles, mapKey, screenWidth, screenHeight);
+    Service().Draw(viewMatrix, localPosition, viewAngles, mapKey, heldItemId, screenWidth, screenHeight);
 }
 
 void world::grenade_helper::RenderSettings(ui::IStatusSink& statusSink)

@@ -5,6 +5,8 @@
 void esp::EspRenderer::Draw()
 {
     static esp::render::BombPositionInterpolator bombInterpolator;
+    static std::array<esp::render::HealthTrail,64> healthTrails;
+    static std::array<esp::render::DistanceReadout,64> distanceReadouts;
     // A background menu camera can still produce a valid projection matrix.
     // Do not project the last gameplay frame through that unrelated camera.
     if (!s_engineStatusResolved.load(std::memory_order_relaxed) ||
@@ -43,6 +45,7 @@ void esp::EspRenderer::Draw()
             if (snap.players[i].pawn != 0 &&
                 snap.players[i].pawn == visibilityFrame.players[i].pawn) {
                 snap.players[i].visible = visibilityFrame.players[i].visible;
+                snap.players[i].visibilityUpdatedAtUs = visibilityFrame.players[i].updatedAtUs;
             }
         }
     }
@@ -200,8 +203,6 @@ void esp::EspRenderer::Draw()
     const float yawCos = cosf(yawRad);
 
     ImU32 boxCol = ColorToImU32(g::espBoxColor);
-    ImU32 nameCol = ColorToImU32(g::espNameColor);
-    ImU32 distanceCol = ColorToImU32(g::espDistanceColor);
     ImU32 visibleCol = ColorToImU32(g::espVisibleColor);
     ImU32 hiddenCol = ColorToImU32(g::espHiddenColor);
     ImU32 skelCol = ColorToImU32(g::espSkeletonColor);
@@ -243,6 +244,28 @@ void esp::EspRenderer::Draw()
         return -1;
     };
 
+    std::array<bool,64> snaplineSlots{};
+    if (g::espEnabled && g::espSnaplines && usableViewMatrix) {
+        std::array<std::pair<float,int>,64> candidates{};
+        int count=0;
+        const auto& options=g::espSettings.presentation;
+        const float maxMeters=std::isfinite(options.snapMaxDistance) ? std::clamp(options.snapMaxDistance,1.0f,500.0f) : 150;
+        for (int slot=0;slot<64;++slot) {
+            const auto& candidate=players[slot];
+            if (!candidate.valid || candidate.health<=0 || !candidate.pawn ||
+                candidate.pawn==snap.localPawn || !IsFiniteVec(candidate.position) ||
+                (!g::espShowTeammates && candidate.team==localTeam)) continue;
+            const float meters=(candidate.position-renderLocalPos).Length()/39.37f;
+            if (!std::isfinite(meters) || meters>maxMeters) continue;
+            const ScreenPos point=WorldToScreen(candidate.position,viewMatrix,screenW,screenH);
+            if (!point.onScreen) continue;
+            candidates[count++]={meters,slot};
+        }
+        std::sort(candidates.begin(),candidates.begin()+count);
+        const int limit=options.snapNearest ? 1 : std::clamp(options.snapLimit,1,64);
+        for (int index=0;index<std::min(count,limit);++index) snaplineSlots[candidates[index].second]=true;
+    }
+
     if (g::espEnabled && usableViewMatrix) {
         static uint64_t s_lastDrawInvalidPosEventUs[64] = {};
         static uint64_t s_lastDrawDeathHoldEventUs[64] = {};
@@ -253,10 +276,6 @@ void esp::EspRenderer::Draw()
         
         static uint64_t s_lastValidAliveUs[64] = {};
         static uintptr_t s_lastValidPawn[64] = {};
-        static Vector3 s_lastValidBonePos[64][esp::kPlayerStoredBoneCount] = {};
-        static uint64_t s_lastValidBoneUs[64][esp::kPlayerStoredBoneCount] = {};
-        static uint64_t s_lastValidBonePawn[64] = {};
-        static uint32_t s_lastValidBoneHandle[64] = {};
         static uint64_t s_playerRenderCacheSceneSerial = 0;
         if (s_playerRenderCacheSceneSerial != snap.sceneSerial) {
             s_playerRenderCacheSceneSerial = snap.sceneSerial;
@@ -265,10 +284,6 @@ void esp::EspRenderer::Draw()
             memset(s_lastDrawValidHoldEventUs, 0, sizeof(s_lastDrawValidHoldEventUs));
             memset(s_lastValidAliveUs, 0, sizeof(s_lastValidAliveUs));
             memset(s_lastValidPawn, 0, sizeof(s_lastValidPawn));
-            memset(s_lastValidBonePos, 0, sizeof(s_lastValidBonePos));
-            memset(s_lastValidBoneUs, 0, sizeof(s_lastValidBoneUs));
-            memset(s_lastValidBonePawn, 0, sizeof(s_lastValidBonePawn));
-            memset(s_lastValidBoneHandle, 0, sizeof(s_lastValidBoneHandle));
         }
         
         
@@ -278,10 +293,6 @@ void esp::EspRenderer::Draw()
             const esp::PlayerData& current = players[i];
             const esp::PlayerData& prevP = prevPlayers[i];
 
-            if (!current.valid || current.health <= 0 || !current.hasBones) {
-                s_lastValidBonePawn[i] = 0;
-                s_lastValidBoneHandle[i] = 0;
-            }
 
             const bool currentValid =
                 current.valid && current.pawn != 0 && current.health > 0 &&
@@ -432,8 +443,6 @@ void esp::EspRenderer::Draw()
             const Vector3 renderPlayerPos = motion.renderPosition;
             if (!isValidWorldPos(renderPlayerPos))
                 continue;
-            const Vector3 positionOffset = motion.interpolationOffset;
-            const Vector3 velocityOffset = motion.extrapolationOffset;
             const Vector3 fallbackFeetPos = renderPlayerPos;
             Vector3 fallbackHeadPos = renderPlayerPos;
             fallbackHeadPos.z += esp::render::kFallbackStandingHeight;
@@ -442,6 +451,9 @@ void esp::EspRenderer::Draw()
             Vector3 feetPos;
             Vector3 headPos;
             ScreenPos boneScreen[esp::kSkeletonScreenBoneCapacity] = {};
+            Vector3 boneWorld[esp::kSkeletonScreenBoneCapacity] = {};
+            bool boneWorldValid[esp::kSkeletonScreenBoneCapacity] = {};
+            Vector3 poseRenderOffset = motion.interpolationOffset + motion.extrapolationOffset;
             bool boneScreenValid[esp::kSkeletonScreenBoneCapacity] = {};
             int validBoneSegmentCount = 0;
             bool renderHasReliableBones = false;
@@ -457,9 +469,8 @@ void esp::EspRenderer::Draw()
                 rightToeBoneId = selectToeBoneId(p, false);
                 const Vector3 headBone = getPlayerBone(p, esp::HEAD);
                 const Vector3 pelvisBone = getPlayerBone(p, esp::PELVIS);
-                const bool canBlendBones = canBlendSnapshots && prevP.hasBones &&
-                    prevP.pawnHandle == p.pawnHandle &&
-                    (headBone - getPlayerBone(prevP, esp::HEAD)).Length() < 128.0f;
+                poseRenderOffset = esp::render::PoseRenderOffset(p.boneAnchorPosition,p.boneAnchorValid,
+                    effectivePos,renderPlayerPos,p.bonesUpdatedAtUs,p.coreUpdatedAtUs);
                 const Vector3 chestBone = getPlayerBone(p, esp::CHEST);
                 const Vector3 leftHeelBone = getPlayerBone(p, esp::FOOT_HEEL_L);
                 const Vector3 rightHeelBone = getPlayerBone(p, esp::FOOT_HEEL_R);
@@ -532,34 +543,13 @@ void esp::EspRenderer::Draw()
                     plausibleBoneHeight;
 
                 if (renderHasReliableBones) {
-                    headPos = headBone;
-                    if (canBlendBones)
-                        headPos = lerpVec3(getPlayerBone(prevP, esp::HEAD), headBone);
-                    else
-                        headPos = headPos + positionOffset;
-                    if (extrapolationSec > 0.0f)
-                        headPos = headPos + velocityOffset;
+                    headPos = headBone + poseRenderOffset;
                     headPos.z += esp::render::kFallbackHeadPadding;
 
                     Vector3 leftFoot = leftHeelBone;
                     Vector3 rightFoot = rightHeelBone;
-                    if (canBlendBones) {
-                        const Vector3 prevLeftFoot = getPlayerBone(prevP, esp::FOOT_HEEL_L);
-                        const Vector3 prevRightFoot = getPlayerBone(prevP, esp::FOOT_HEEL_R);
-                        if (IsFiniteVec(prevLeftFoot) &&
-                            !(prevLeftFoot.x == 0.0f && prevLeftFoot.y == 0.0f && prevLeftFoot.z == 0.0f))
-                            leftFoot = lerpVec3(prevLeftFoot, leftFoot);
-                        if (IsFiniteVec(prevRightFoot) &&
-                            !(prevRightFoot.x == 0.0f && prevRightFoot.y == 0.0f && prevRightFoot.z == 0.0f))
-                            rightFoot = lerpVec3(prevRightFoot, rightFoot);
-                    } else {
-                        leftFoot = leftFoot + positionOffset;
-                        rightFoot = rightFoot + positionOffset;
-                    }
-                    if (extrapolationSec > 0.0f) {
-                        leftFoot = leftFoot + velocityOffset;
-                        rightFoot = rightFoot + velocityOffset;
-                    }
+                    leftFoot = leftFoot + poseRenderOffset;
+                    rightFoot = rightFoot + poseRenderOffset;
 
                     const bool hasLeft = hasLeftFootBone;
                     const bool hasRight = hasRightFootBone;
@@ -570,50 +560,30 @@ void esp::EspRenderer::Draw()
                     else if (hasRight)
                         feetPos = rightFoot;
                     else
-                        feetPos = poseAnchor + positionOffset + velocityOffset;
+                        feetPos = poseAnchor + poseRenderOffset;
                     feetPos.z -= esp::render::kFallbackFeetPadding;
 
-                    if (s_lastValidBonePawn[i] != p.pawn || s_lastValidBoneHandle[i] != p.pawnHandle ||
-                        (headBone - s_lastValidBonePos[i][esp::PlayerStoredBoneIndex(esp::HEAD)]).Length() >= 128.0f) {
-                        for (int rb = 0; rb < esp::kPlayerStoredBoneCount; ++rb) {
-                            s_lastValidBonePos[i][rb] = {};
-                            s_lastValidBoneUs[i][rb] = 0;
-                        }
-                        s_lastValidBonePawn[i] = p.pawn;
-                        s_lastValidBoneHandle[i] = p.pawnHandle;
-                    }
                     for (int bIdx = 0; bIdx < esp::kPlayerStoredBoneCount; ++bIdx) {
                         const int b = esp::kPlayerStoredBoneIds[bIdx];
                         Vector3 bonePos = getPlayerBone(p, b);
                         const bool bonePosValid =
                             hasUsableBone(p, b);
-                        if (bonePosValid) {
-                            s_lastValidBonePos[i][bIdx] = bonePos;
-                            s_lastValidBoneUs[i][bIdx] = p.bonesUpdatedAtUs;
-                        } else if (esp::render::ShouldReusePersistedBone(
-                                       s_lastValidBoneUs[i][bIdx],
-                                       nowUs)) {
-                            bonePos = s_lastValidBonePos[i][bIdx];
-                        } else {
+                        if (!bonePosValid) {
                             boneScreenValid[b] = false;
                             continue;
                         }
-                        if (canBlendBones) {
-                            const Vector3 prevBone = getPlayerBone(prevP, b);
-                            if (!(prevBone.x == 0.0f && prevBone.y == 0.0f && prevBone.z == 0.0f))
-                                bonePos = lerpVec3(prevBone, bonePos);
-                        } else {
-                            bonePos = bonePos + positionOffset;
-                        }
-                        if (extrapolationSec > 0.0f)
-                            bonePos = bonePos + velocityOffset;
+                        bonePos = bonePos + poseRenderOffset;
+                        boneWorld[b] = bonePos;
+                        boneWorldValid[b] = true;
                         boneScreen[b] = WorldToScreen(bonePos, viewMatrix, screenW, screenH);
                         boneScreenValid[b] = boneScreen[b].onScreen;
                     }
                     for (int pairIdx = 0; pairIdx < skeletonPairCount; ++pairIdx) {
                         const BonePair& pair = skeletonPairs[pairIdx];
-                        if (boneScreenValid[pair.from] && boneScreenValid[pair.to])
-                            ++validBoneSegmentCount;
+                        ScreenPos a{}, b{};
+                        if (boneWorldValid[pair.from] && boneWorldValid[pair.to] &&
+                            esp::render::ClipProjectedSegment(boneWorld[pair.from],boneWorld[pair.to],
+                                viewMatrix,screenW,screenH,a,b)) ++validBoneSegmentCount;
                     }
                     if (boneScreenValid[esp::FOOT_HEEL_L] && hasLeftToeBone && boneScreenValid[leftToeBoneId])
                         ++validBoneSegmentCount;
@@ -650,8 +620,16 @@ void esp::EspRenderer::Draw()
                 onScreen = true;
                 usingFallbackBox = true;
             }
+            const int visibilityState = esp::render::VisibilityState(p.visible,p.visibilityUpdatedAtUs,nowUs);
+            const ImU32 visibilityCol = visibilityState==1 ? visibleCol : visibilityState==0 ? hiddenCol :
+                ColorToImU32(g::espSettings.presentation.unknownColor);
+            const bool canRenderRealSkeleton = esp::render::ShouldDrawSkeleton(renderHasReliableBones, validBoneSegmentCount);
             if (!onScreen) {
+                if (g::espSkeleton && canRenderRealSkeleton) {
+#include "../Render/player_skeleton.inl"
+                } else {
 #include "../Render/player_offscreen_arrows.inl"
+                }
                 continue;
             }
 
@@ -670,18 +648,8 @@ void esp::EspRenderer::Draw()
             float boxLeft = screenHead.x - boxWidth * 0.5f;
             float boxTop = screenHead.y;
             const float boxCenterX = boxLeft + boxWidth * 0.5f;
-            const float sideBarWidth = 3.0f;
-            const float sideBarGap = 4.0f;
-            const float primaryLeftBarX = boxLeft - sideBarWidth - sideBarGap;
-            const esp::render::SkeletonGateResult skeletonGate =
-                esp::render::EvaluateSkeletonGate({
-                    renderHasReliableBones,
-                    validBoneSegmentCount,
-                });
-            const bool canRenderRealSkeleton = esp::render::ShouldDrawSkeleton(skeletonGate);
-
             bool isVisibleNow = p.visible;
-            const ImU32 entityCol = g::espVisibilityColoring ? (isVisibleNow ? visibleCol : hiddenCol) : boxCol;
+            const ImU32 entityCol = g::espVisibilityColoring && g::espSettings.presentation.visibilityBox ? visibilityCol : boxCol;
 
 
 
@@ -689,7 +657,7 @@ void esp::EspRenderer::Draw()
 #include "../Render/player_health_armor.inl"
 #include "../Render/player_name.inl"
 
-            float bottomTextY = boxTop + boxHeight + 2.0f;
+            float bottomTextY = barLayout.bottom + 2.0f;
             auto drawBottomLabel = [&](const char* text, ImU32 color, bool requireVisible, bool strictBounds, ImFont* font, float fontSize) {
                 if (!text || text[0] == '\0')
                     return;
@@ -759,6 +727,8 @@ void esp::EspRenderer::Draw()
             renderLocalPos,
             viewAngles,
             snap.activeMapKey,
+            world::grenade_helper::FreshHeldItem(snap.localWeaponId, !snap.localIsDead,
+                snap.localWeaponHandle, snap.localWeaponEntity, snap.localWeaponUpdatedAtUs, nowUs),
             screenW,
             screenH);
 

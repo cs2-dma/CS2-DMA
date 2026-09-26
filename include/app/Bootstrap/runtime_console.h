@@ -20,6 +20,7 @@ public:
     void PrintInfoOk(const std::string& text) const;
     void PrintInfoOk(const std::string& text, int plusCount) const;
     void PrintInfoFail(const std::string& text) const;
+    void PrintInfoQuestion(const std::string& text) const;
     void PrintInfoLine(const std::string& text) const;
     void PrintInfoMarkedLine(const std::string& text) const;
     void PrintErrorLine(const std::string& text) const;

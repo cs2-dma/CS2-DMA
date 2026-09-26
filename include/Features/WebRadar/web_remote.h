@@ -5,6 +5,7 @@
 #include <functional>
 #include <string>
 #include <string_view>
+#include <json/json.hpp>
 
 namespace webradar::remote {
 
@@ -17,6 +18,35 @@ struct Settings {
     std::string password;
     std::string remotePath = "/opt/kevqdma-webradar";
 };
+
+inline void ParseSettingsJson(const nlohmann::json& root, Settings& settings)
+{
+    if (!root.is_object()) return;
+    const auto text = [&](const char* key, std::string& value) {
+        const auto it = root.find(key);
+        if (it != root.end() && it->is_string() && it->get_ref<const std::string&>().size() <= 4096)
+            value = it->get<std::string>();
+    };
+    const auto port = [&](const char* key, int& value) {
+        const auto it = root.find(key);
+        if (it == root.end() || !it->is_number_integer()) return;
+        if (it->is_number_unsigned()) {
+            const auto candidate = it->get<uint64_t>();
+            if (candidate >= 1 && candidate <= 65535) value = static_cast<int>(candidate);
+        } else {
+            const auto candidate = it->get<int64_t>();
+            if (candidate >= 1 && candidate <= 65535) value = static_cast<int>(candidate);
+        }
+    };
+    if (const auto it = root.find("EnableWeb"); it != root.end() && it->is_boolean())
+        settings.enabled = it->get<bool>();
+    text("Host", settings.host);
+    text("Login", settings.login);
+    text("Password", settings.password);
+    text("RemotePath", settings.remotePath);
+    port("WebPort", settings.webPort);
+    port("SshPort", settings.sshPort);
+}
 
 struct Stats {
     bool enabled = false;
@@ -39,7 +69,7 @@ Stats GetStats();
 bool HasActiveConsumerDemand();
 
 bool LoadSettings(std::string_view profileName);
-bool SaveSettings(std::string_view profileName);
+bool SaveSettings(std::string_view profileName, const Settings& settings);
 
 bool TestPing(const Settings& settings, int* outMs, std::string* outError);
 bool TestHttpStatus(const Settings& settings, std::string* outError);

@@ -22,7 +22,7 @@ void ui::tabs::EspTab::Render(MenuState& state, IStatusSink& statusSink)
     (void)state;
     (void)statusSink;
 
-    ImGui::BeginChild("##espchild", ImVec2(0, 0), ImGuiChildFlags_Borders);
+    if (ImGui::BeginChild("##espchild", ImVec2(0, 0), ImGuiChildFlags_Borders)) {
     ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(10.0f, 0.0f));
     ImGui::PushStyleVar(ImGuiStyleVar_CellPadding, ImVec2(8.0f, 0.0f));
 
@@ -32,6 +32,7 @@ void ui::tabs::EspTab::Render(MenuState& state, IStatusSink& statusSink)
         esp_sections::RenderOptionsGrid();
 
     ImGui::PopStyleVar(2);
+    }
     ImGui::EndChild();
 
     ui::RenderEspPreview();

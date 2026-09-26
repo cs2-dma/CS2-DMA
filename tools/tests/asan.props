@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <PropertyGroup>
+    <EnableASAN>true</EnableASAN>
+    <WholeProgramOptimization>false</WholeProgramOptimization>
+  </PropertyGroup>
+  <ItemDefinitionGroup>
+    <ClCompile><DebugInformationFormat>ProgramDatabase</DebugInformationFormat><Optimization>Disabled</Optimization><WholeProgramOptimization>false</WholeProgramOptimization></ClCompile>
+    <Link><GenerateDebugInformation>true</GenerateDebugInformation><LinkIncremental>false</LinkIncremental><LinkTimeCodeGeneration>Default</LinkTimeCodeGeneration></Link>
+  </ItemDefinitionGroup>
+</Project>

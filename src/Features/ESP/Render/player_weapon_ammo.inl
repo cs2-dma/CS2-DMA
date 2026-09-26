@@ -1,38 +1,11 @@
-if (g::espWeapon && g::espWeaponAmmo && p.weaponId != 0 && p.ammoClip >= 0) {
-    const bool grenadeLike = (p.weaponId >= 43 && p.weaponId <= 48);
-    if (grenadeLike) {
-        drawBottomLabel(
-            KEVQ_TR("GRENADE"),
-            IM_COL32(220, 220, 220, 245),
-            false,
-            true,
-            g::fontOverlayText,
-            0.0f);
-    } else {
-        const int maxClip = std::max(1, WeaponMaxClipFromItemId(p.weaponId));
-        const int clip = std::clamp(p.ammoClip, 0, maxClip);
-        const bool lowAmmo = clip <= std::max(1, maxClip / 5);
-        char ammoText[32] = {};
-        std::snprintf(
-            ammoText,
-            sizeof(ammoText),
-            KEVQ_TR("Ammo %d/%d"),
-            clip,
-            maxClip);
-        drawBottomLabel(
-            ammoText,
-            lowAmmo ? IM_COL32(255, 120, 105, 245) : ColorToImU32(g::espWeaponAmmoColor),
-            false,
-            true,
-            g::fontOverlayText,
-            g::espWeaponAmmoSize);
-        if (lowAmmo)
-            drawBottomLabel(
-                KEVQ_TR("LOW"),
-                IM_COL32(255, 85, 70, 245),
-                false,
-                true,
-                g::fontOverlayText,
-                0.0f);
+if (g::espWeapon && g::espWeaponAmmo && p.weaponIconId!=0 &&
+    p.weaponPresentationUpdatedUs && nowUs>=p.weaponPresentationUpdatedUs &&
+    nowUs-p.weaponPresentationUpdatedUs<=250000u && WeaponMaxClipFromItemId(p.weaponIconId)>0) {
+    const std::string text=esp::render::FormatAmmo(p.displayAmmoClip,p.displayAmmoReserve,
+        p.displayReserveUnitsKnown,p.displayReserveAsClips,p.weaponIconId);
+    if (!text.empty()) {
+        const bool low=p.displayAmmoCapacity>0 && p.displayAmmoClip<=std::max(1,p.displayAmmoCapacity/5);
+        drawBottomLabel(text.c_str(),low ? IM_COL32(255,120,105,245) : ColorToImU32(g::espWeaponAmmoColor),
+            false,true,g::fontOverlayText,g::espWeaponAmmoSize);
     }
 }

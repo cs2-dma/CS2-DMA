@@ -996,6 +996,7 @@ bool Memory::Read(uintptr_t address, void* buffer, size_t size) const
 		size > MAXDWORD)
 		return false;
 
+    dma::ReadPriority::Foreground foreground(READ_PRIORITY);
 	DWORD read_size = 0;
 	if (!VMMDLL_MemReadEx(
 			this->vHandle,
@@ -1031,6 +1032,7 @@ bool Memory::ReadCached(uintptr_t address, void* buffer, size_t size) const
 		size > MAXDWORD)
 		return false;
 
+    dma::ReadPriority::Foreground foreground(READ_PRIORITY);
 	DWORD read_size = 0;
 	if (!VMMDLL_MemReadEx(
 			this->vHandle,
@@ -1047,6 +1049,28 @@ bool Memory::ReadCached(uintptr_t address, void* buffer, size_t size) const
 	DMA_TOTAL_BYTES_READ.fetch_add(read_size, std::memory_order_relaxed);
 	DMA_DIRECT_READ_COUNT.fetch_add(1, std::memory_order_relaxed);
 	return read_size == size;
+}
+
+bool Memory::TryReadBackground(uintptr_t address, void* buffer, size_t size, bool cached, bool& deferred) const
+{
+    deferred = false;
+    if (!vHandle || !current_process.PID || !address || !buffer || !size || size > 8192u)
+        return false;
+    auto admission = READ_PRIORITY.TryBackground();
+    if (!admission.owns_lock()) {
+        deferred = true;
+        DMA_BACKGROUND_DEFERRED_COUNT.fetch_add(1, std::memory_order_relaxed);
+        return false;
+    }
+    DWORD completed = 0;
+    const bool ok = VMMDLL_MemReadEx(vHandle, current_process.PID, address,
+        static_cast<PBYTE>(buffer), static_cast<DWORD>(size), &completed,
+        cached ? 0 : VMMDLL_FLAG_NOCACHE) != FALSE;
+    DMA_BACKGROUND_READ_COUNT.fetch_add(1, std::memory_order_relaxed);
+    DMA_BACKGROUND_BYTES.fetch_add(completed, std::memory_order_relaxed);
+    DMA_TOTAL_BYTES_READ.fetch_add(completed, std::memory_order_relaxed);
+    DMA_DIRECT_READ_COUNT.fetch_add(1, std::memory_order_relaxed);
+    return ok && completed == size;
 }
 
 VMMDLL_SCATTER_HANDLE Memory::CreateScatterHandle() const
@@ -1144,6 +1168,7 @@ bool Memory::ExecuteReadScatter(VMMDLL_SCATTER_HANDLE handle)
 	}
 
 	const auto startTime = std::chrono::steady_clock::now();
+    dma::ReadPriority::Foreground foreground(READ_PRIORITY);
 	// FALSE is a setup/handle failure, not the normal partial-page case.
 	// Do not sleep and replay the entire batch on the latency-critical lane.
 	const bool executed = VMMDLL_Scatter_ExecuteRead(handle) != FALSE;

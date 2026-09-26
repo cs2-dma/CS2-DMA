@@ -508,8 +508,11 @@
             }
             // Skipping a scheduled lane cannot cure a rejected pose.
             bool rejected = false;
-            for (int idx = 0; idx < eligibleBoneSlotCount; ++idx)
-                rejected = rejected || s_poseRejected[eligibleBoneSlots[idx]];
+            for (int idx = 0; idx < eligibleBoneSlotCount; ++idx) {
+                const int slot = eligibleBoneSlots[idx];
+                rejected = rejected || s_poseRejected[slot] ||
+                    esp::data::IsBoneServiceOverdue(boneSampleTimeUs[slot], boneSubsystemNowUs);
+            }
             if (rejected)
                 MarkSubsystemDegraded(RuntimeSubsystem::Bones, boneSubsystemNowUs);
         } else {

@@ -1,16 +1,14 @@
 #pragma once
 
 #include <cstddef>
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 
 namespace esp::data
 {
     inline constexpr uint8_t kInvalidPlayerFlagSample = 0xFFu;
-    inline constexpr uint8_t kPlayerFlagPositiveConfirmSamples = 2u;
     inline constexpr uint64_t kPlayerFlagReadGapHoldUs = 50000u;
-    inline constexpr float kFlashFlagActivateSeconds = 0.20f;
-    inline constexpr float kFlashFlagReleaseSeconds = 0.08f;
     inline constexpr float kFlashDurationMaxSeconds = 10.0f;
     inline constexpr float kFlashGameTimeMaxSeconds = 100000.0f;
     inline constexpr float kFlashFutureTimeToleranceSeconds = 0.50f;
@@ -18,7 +16,6 @@ namespace esp::data
     struct PlayerFlagFilterState
     {
         bool active = false;
-        uint8_t positiveSamples = 0;
         uint64_t lastFreshUs = 0;
     };
 
@@ -52,7 +49,7 @@ namespace esp::data
                currentGameTime >= 1.0f &&
                bangTime <= kFlashGameTimeMaxSeconds &&
                currentGameTime <= kFlashGameTimeMaxSeconds &&
-               bangTime <= currentGameTime + kFlashFutureTimeToleranceSeconds;
+               bangTime <= currentGameTime + kFlashDurationMaxSeconds + kFlashFutureTimeToleranceSeconds;
     }
 
     inline bool IsBlindFlashReadComplete(
@@ -82,27 +79,59 @@ namespace esp::data
     inline BlindFlashSample EvaluateBlindFlashSample(
         float bangTime,
         float duration,
-        float currentGameTime,
-        bool currentlyActive)
+        float currentGameTime)
     {
         if (!IsValidFlashDurationSample(duration) ||
             !IsValidFlashBangTimeSample(bangTime, currentGameTime)) {
             return {};
         }
+        if (duration == 0.0f) return {true, false, 0.0f};
 
-        const float remainingSeconds = bangTime + duration - currentGameTime;
-        if (!std::isfinite(remainingSeconds))
+        const float remainingSeconds = bangTime - currentGameTime;
+        if (!std::isfinite(remainingSeconds) ||
+            remainingSeconds > duration + kFlashFutureTimeToleranceSeconds)
             return {};
 
-        const bool active = currentlyActive
-            ? remainingSeconds > kFlashFlagReleaseSeconds
-            : remainingSeconds >= kFlashFlagActivateSeconds;
+        const bool active = duration > 0.0f && remainingSeconds > 0.0f;
         return {
             true,
             active,
-            active ? remainingSeconds : 0.0f
+            active ? (std::min)(remainingSeconds, duration) : 0.0f
         };
     }
+
+    inline bool IsPlayerFlagFresh(uint64_t sampledAtUs, uint64_t nowUs)
+    {
+        return sampledAtUs != 0 && nowUs >= sampledAtUs &&
+            nowUs - sampledAtUs <= kPlayerFlagReadGapHoldUs;
+    }
+
+    inline float RemainingBlindSeconds(float remaining, uint64_t sampledAtUs, uint64_t nowUs)
+    {
+        if (!IsValidFlashDurationSample(remaining) || !IsPlayerFlagFresh(sampledAtUs, nowUs))
+            return 0.0f;
+        const float result = remaining - static_cast<float>(nowUs - sampledAtUs) / 1000000.0f;
+        return result > 0.0f ? result : 0.0f;
+    }
+
+    struct BlindFlashState
+    {
+        float remainingSeconds = 0.0f;
+        uint64_t sampledAtUs = 0;
+
+        float Update(bool requested, BlindFlashSample sample, uint64_t sampleUs, uint64_t nowUs)
+        {
+            if (!requested) {
+                *this = {};
+                return 0.0f;
+            }
+            if (sample.fresh) {
+                remainingSeconds = sample.active ? sample.remainingSeconds : 0.0f;
+                sampledAtUs = sampleUs;
+            }
+            return RemainingBlindSeconds(remainingSeconds, sampledAtUs, nowUs);
+        }
+    };
 
     inline void ResetPlayerFlagFilter(PlayerFlagFilterState& state)
     {
@@ -122,34 +151,27 @@ namespace esp::data
         }
 
         if (!sampleFresh) {
-            const bool gapWithinHold =
-                (state.active || state.positiveSamples != 0u) &&
-                state.lastFreshUs > 0 &&
-                nowUs >= state.lastFreshUs &&
-                (nowUs - state.lastFreshUs) <= kPlayerFlagReadGapHoldUs;
-            if (!gapWithinHold) {
+            if (!IsPlayerFlagFresh(state.lastFreshUs, nowUs))
                 ResetPlayerFlagFilter(state);
-                return false;
-            }
             return state.active;
         }
-
         state.lastFreshUs = nowUs;
-        if (!sampleActive) {
-            state.active = false;
-            state.positiveSamples = 0;
-            return false;
-        }
-
-        if (state.active)
-            return true;
-
-        if (state.positiveSamples < kPlayerFlagPositiveConfirmSamples)
-            ++state.positiveSamples;
-        if (state.positiveSamples >= kPlayerFlagPositiveConfirmSamples) {
-            state.active = true;
-            state.positiveSamples = kPlayerFlagPositiveConfirmSamples;
-        }
+        state.active = sampleActive;
         return state.active;
+    }
+
+    template <typename Player>
+    inline void CommitPlayerFlags(Player& player, const PlayerFlagFilterState& scoped,
+        const PlayerFlagFilterState& defusing, const BlindFlashState& flash, uint64_t nowUs)
+    {
+        const bool alive = player.valid && player.pawn != 0 && player.health > 0;
+        player.scopedUpdatedUs = alive ? scoped.lastFreshUs : 0;
+        player.defusingUpdatedUs = alive ? defusing.lastFreshUs : 0;
+        player.scoped = alive && scoped.active && IsPlayerFlagFresh(scoped.lastFreshUs, nowUs);
+        player.defusing = alive && defusing.active && IsPlayerFlagFresh(defusing.lastFreshUs, nowUs);
+        player.flashUpdatedUs = alive ? flash.sampledAtUs : 0;
+        player.flashDuration = alive ? flash.remainingSeconds : 0.0f;
+        player.flashed = alive && RemainingBlindSeconds(
+            player.flashDuration, player.flashUpdatedUs, nowUs) > 0.0f;
     }
 }

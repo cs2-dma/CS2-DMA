@@ -304,6 +304,12 @@
     <ClCompile Include="src\app\Bootstrap\runtime_console.cpp">
       <Filter>Source Files\app\Bootstrap</Filter>
     </ClCompile>
+    <ClCompile Include="src\app\Bootstrap\version_update.cpp">
+      <Filter>Source Files\app\Bootstrap</Filter>
+    </ClCompile>
+    <ClCompile Include="src\app\Bootstrap\startup_update.cpp">
+      <Filter>Source Files\app\Bootstrap</Filter>
+    </ClCompile>
     <ClCompile Include="src\app\Config\config.cpp">
       <Filter>Source Files\app\Config</Filter>
     </ClCompile>
@@ -540,6 +546,21 @@
     <ClInclude Include="include\app\Bootstrap\runtime_console.h">
       <Filter>Header Files\app\Bootstrap</Filter>
     </ClInclude>
+    <ClInclude Include="include\app\Bootstrap\version_update.h">
+      <Filter>Header Files\app\Bootstrap</Filter>
+    </ClInclude>
+    <ClInclude Include="include\app\Bootstrap\startup_update.h">
+      <Filter>Header Files\app\Bootstrap</Filter>
+    </ClInclude>
+    <ClInclude Include="include\app\Bootstrap\startup_offsets.h">
+      <Filter>Header Files\app\Bootstrap</Filter>
+    </ClInclude>
+    <ClInclude Include="include\app\Bootstrap\release_policy.h">
+      <Filter>Header Files\app\Bootstrap</Filter>
+    </ClInclude>
+    <ClInclude Include="include\app\UI\MenuShell\version_notice.h">
+      <Filter>Header Files\app\UI\MenuShell</Filter>
+    </ClInclude>
     <ClInclude Include="include\app\Config\config.h">
       <Filter>Header Files\app\Config</Filter>
     </ClInclude>
@@ -550,6 +571,9 @@
       <Filter>Header Files\app\Input</Filter>
     </ClInclude>
     <ClInclude Include="include\app\Input\primary_keyboard.h">
+      <Filter>Header Files\app\Input</Filter>
+    </ClInclude>
+    <ClInclude Include="include\app\Input\primary_keyboard_policy.h">
       <Filter>Header Files\app\Input</Filter>
     </ClInclude>
     <ClInclude Include="include\app\Config\config_parse_utils.h">
@@ -627,10 +651,29 @@
     <ClInclude Include="include\app\Core\memory_address.h">
       <Filter>Header Files\app\Core</Filter>
     </ClInclude>
+    <ClInclude Include="include\app\Core\remote_string.h">
+      <Filter>Header Files\app\Core</Filter>
+    </ClInclude>
+    <ClInclude Include="include\Features\Target\convar_snapshot_worker.h">
+      <Filter>Header Files\Features\Target</Filter>
+    </ClInclude>
+    <ClInclude Include="include\Features\Target\physics_shape_policy.h">
+      <Filter>Header Files\Features\Target</Filter>
+    </ClInclude>
+    <ClInclude Include="include\Features\Target\physics_read_policy.h">
+      <Filter>Header Files\Features\Target</Filter>
+    </ClInclude>
+    <ClInclude Include="src\vendor\DMALibrary\Memory\read_priority.h" />
+    <ClInclude Include="include\Features\ESP\Recovery\dma_read_session.h">
+      <Filter>Header Files\Features\ESP\Recovery</Filter>
+    </ClInclude>
     <ClInclude Include="include\Features\ESP\weapon_catalog.h">
       <Filter>Header Files\Features\ESP</Filter>
     </ClInclude>
     <ClInclude Include="include\Features\ESP\DataReader\base_recovery_policy.h">
+      <Filter>Header Files\Features\ESP\DataReader</Filter>
+    </ClInclude>
+    <ClInclude Include="include\Features\ESP\DataReader\view_offset_sample.h">
       <Filter>Header Files\Features\ESP\DataReader</Filter>
     </ClInclude>
     <ClInclude Include="include\Features\ESP\DataReader\bomb_policy.h">
@@ -702,6 +745,30 @@
     <ClInclude Include="include\Features\ESP\Render\draw_policy.h">
       <Filter>Header Files\Features\ESP\Render</Filter>
     </ClInclude>
+    <ClInclude Include="include\Features\ESP\Render\presentation_policy.h">
+      <Filter>Header Files\Features\ESP\Render</Filter>
+    </ClInclude>
+    <ClInclude Include="include\Features\ESP\Render\player_bars.h">
+      <Filter>Header Files\Features\ESP\Render</Filter>
+    </ClInclude>
+    <ClInclude Include="include\Features\ESP\Render\player_labels.h">
+      <Filter>Header Files\Features\ESP\Render</Filter>
+    </ClInclude>
+    <ClInclude Include="include\Features\ESP\Render\skeleton_projection.h">
+      <Filter>Header Files\Features\ESP\Render</Filter>
+    </ClInclude>
+    <ClInclude Include="src\Features\ESP\DataReader\weapon_presentation.inl">
+      <Filter>Inline Files\Features\ESP\DataReader</Filter>
+    </ClInclude>
+    <ClInclude Include="include\Features\ESP\Render\bar_labels.h">
+      <Filter>Header Files\Features\ESP\Render</Filter>
+    </ClInclude>
+    <ClInclude Include="include\Features\ESP\DataReader\checked_scatter_batch.h">
+      <Filter>Header Files\Features\ESP\DataReader</Filter>
+    </ClInclude>
+    <ClInclude Include="include\Features\ESP\DataReader\recoil_sample.h">
+      <Filter>Header Files\Features\ESP\DataReader</Filter>
+    </ClInclude>
     <ClInclude Include="include\Features\ESP\Render\skeleton_gate.h">
       <Filter>Header Files\Features\ESP\Render</Filter>
     </ClInclude>
@@ -742,6 +809,12 @@
       <Filter>Header Files\Features\Target</Filter>
     </ClInclude>
     <ClInclude Include="include\Features\Target\target_policy.h">
+      <Filter>Header Files\Features\Target</Filter>
+    </ClInclude>
+    <ClInclude Include="include\Features\Target\target_settings_policy.h">
+      <Filter>Header Files\Features\Target</Filter>
+    </ClInclude>
+    <ClInclude Include="include\Features\Target\wind_mouse.h">
       <Filter>Header Files\Features\Target</Filter>
     </ClInclude>
     <ClInclude Include="include\Features\Radar\map_registry.h">
@@ -790,6 +863,9 @@
       <Filter>Header Files\Game\Offsets</Filter>
     </ClInclude>
     <ClInclude Include="include\Game\Offsets\runtime_offset_resolver.h">
+      <Filter>Header Files\Game\Offsets</Filter>
+    </ClInclude>
+    <ClInclude Include="include\Game\Offsets\runtime_resolve_control.h">
       <Filter>Header Files\Game\Offsets</Filter>
     </ClInclude>
     <ClInclude Include="include\Game\Offsets\runtime_resolver_policy.h">
@@ -1081,6 +1157,9 @@
   <ItemGroup>
     <ClInclude Include="src\vendor\DMALibrary\Memory\ScatterReadTracker.h" />
     <None Include="src\vendor\DMALibrary\vendor-lock.json" />
+    <None Include="src\Features\WebRadar\Assets\remote\server.js"><Filter>Resource Files\Features\WebRadar\Assets</Filter></None>
+    <None Include="src\Features\WebRadar\Assets\maps.json"><Filter>Resource Files\Features\WebRadar\Assets</Filter></None>
+    <None Include="src\Features\WebRadar\Assets\map-sources.json"><Filter>Resource Files\Features\WebRadar\Assets</Filter></None>
     <None Include="tools\vendor\check_dma_vendor.ps1" />
   </ItemGroup>
 </Project>

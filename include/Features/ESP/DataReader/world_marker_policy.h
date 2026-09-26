@@ -16,6 +16,12 @@ namespace esp::data
         kMaxUtilityEffectMarkers + kMaxProjectileMarkers + kMaxDroppedBombMarkers;
     inline constexpr uint64_t kWorldMarkerReadGapHoldUs = 350000u;
 
+    inline bool ShouldCountWorldPositionReadMiss(bool readAttempted,
+        bool readComplete, bool positionValid) noexcept
+    {
+        return readAttempted && (!readComplete || !positionValid);
+    }
+
     inline bool IsWorldMarkerSourceFresh(uint64_t sampleUs, uint64_t nowUs) noexcept
     {
         return sampleUs != 0 && nowUs >= sampleUs &&

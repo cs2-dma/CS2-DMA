@@ -245,9 +245,9 @@
 
         
         
-        static thread_local uint8_t s_prefetchedPositionMask[kMaxTrackedWorldEntities + 1];
+        static thread_local uint8_t s_positionReadAttemptedMask[kMaxTrackedWorldEntities + 1];
         static thread_local uint8_t s_identityRefreshMask[kMaxTrackedWorldEntities + 1];
-        std::memset(s_prefetchedPositionMask, 0, sizeof(s_prefetchedPositionMask));
+        std::memset(s_positionReadAttemptedMask, 0, sizeof(s_positionReadAttemptedMask));
         std::memset(s_identityRefreshMask, 0, sizeof(s_identityRefreshMask));
 
         
@@ -362,7 +362,7 @@
                         &worldPositions[idx],
                         sizeof(Vector3),
                         &worldPositionReadBytes[idx]);
-                    s_prefetchedPositionMask[idx] = 1u;
+                    s_positionReadAttemptedMask[idx] = 1u;
                 }
                 // Revalidate cached coordinate owners in the existing batch. A
                 // stable entity address does not guarantee a stable scene node.
@@ -506,7 +506,7 @@
                     s_cachedWorldBlockCount = blockCount;
 
                     
-                    std::memset(s_prefetchedPositionMask, 0, sizeof(s_prefetchedPositionMask));
+                    std::memset(s_positionReadAttemptedMask, 0, sizeof(s_positionReadAttemptedMask));
                     std::memset(worldDormantFlags, 0, sizeof(worldDormantFlags));
                     for (int candidateIdx = 0; candidateIdx < worldCandidateCount; ++candidateIdx) {
                         const int idx = s_worldCandidateIndices[candidateIdx];
@@ -665,7 +665,7 @@
                     worldEntities[idx] = ent;
                     worldEntityReadBytes[idx] = entityBytes;
                     worldEntityReadComplete[idx] = 1u;
-                    s_prefetchedPositionMask[idx] = 0;
+                    s_positionReadAttemptedMask[idx] = 0;
                     s_identityRefreshMask[idx] = 0;
 
 
@@ -808,10 +808,8 @@
                 int designerNameCount = 0;
                 for (int candidateIdx = 0; candidateIdx < worldCandidateCount; ++candidateIdx) {
                     const int idx = s_worldCandidateIndices[candidateIdx];
-                    if (!esp::data::IsWorldFieldReadComplete(
-                            worldDesignerNamePtrReadBytes[idx],
-                            sizeof(uintptr_t)) ||
-                        !isLikelyGamePointer(worldDesignerNamePtrs[idx])) {
+                    if (!esp::data::IsWorldDesignerNamePointerSample(
+                            worldDesignerNamePtrs[idx], worldDesignerNamePtrReadBytes[idx])) {
                         continue;
                     }
                     mem.AddScatterReadRequest(
@@ -868,6 +866,7 @@
                 if (!worldSceneNodes[idx]) continue;
                 worldPositions[idx] = {};
                 worldPositionReadBytes[idx] = 0;
+                s_positionReadAttemptedMask[idx] = 0u;
                 if (ofs.CGameSceneNode_m_vecAbsOrigin > 0 &&
                     (!bombOnlyWorldMode || worldItemDefs[idx] == kWeaponC4Id || s_worldEntityItemIds[idx] == kWeaponC4Id)) {
                     mem.AddScatterReadRequest(
@@ -876,6 +875,7 @@
                         &worldPositions[idx],
                         sizeof(Vector3),
                         &worldPositionReadBytes[idx]);
+                    s_positionReadAttemptedMask[idx] = 1u;
                 }
                 if ((worldItemDefs[idx] == kWeaponC4Id || s_worldEntityItemIds[idx] == kWeaponC4Id) &&
                     ofs.CGameSceneNode_m_bDormant > 0) {
@@ -959,9 +959,11 @@
                     s_cachedWorldPositionSampleUs[idx] = nowUs;
                 } else {
                     // Invalid full reads are not fresh position evidence either.
-                    if (s_prefetchedPositionMask[idx] != 0u ||
-                        worldSceneNodeChanged[idx] != 0u ||
-                        s_worldEntityChangedFlags[idx] != 0u)
+                    if (esp::data::ShouldCountWorldPositionReadMiss(
+                            s_positionReadAttemptedMask[idx] != 0u,
+                            esp::data::IsWorldFieldReadComplete(
+                                worldPositionReadBytes[idx], sizeof(Vector3)),
+                            isValidWorldPos(worldPositions[idx])))
                         ++worldPositionReadMisses;
                     worldPositionReadBytes[idx] = 0;
                     worldPositions[idx] = esp::data::IsWorldMarkerSourceFresh(

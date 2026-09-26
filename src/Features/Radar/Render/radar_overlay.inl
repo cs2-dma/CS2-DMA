@@ -70,8 +70,10 @@ if (g::radarEnabled) {
         localDirForward /= localDirLen;
     }
     const radar::MapDefinition* knownRadarMap = nullptr;
+    static std::string previousRadarLayer;
     if (!activeMapState.key.empty())
-        knownRadarMap = radar::FindMapByName(activeMapState.key);
+        knownRadarMap = radar::FindMapForPosition(activeMapState.key, localPos.x, localPos.y, localPos.z, previousRadarLayer);
+    previousRadarLayer = knownRadarMap ? knownRadarMap->name : std::string{};
     if (!knownRadarMap && hasMinimapBounds) {
         knownRadarMap = radar::ResolveMapByBounds(
             minimapMins.x,
@@ -111,7 +113,8 @@ if (g::radarEnabled) {
     }
     if (effectiveRange < 500.0f)
         effectiveRange = 500.0f;
-    const bool useKnownMapProjection = radarStaticMode && knownRadarMap != nullptr;
+    const bool useKnownMapProjection = radarStaticMode && knownRadarMap != nullptr && !knownRadarMap->dynamic &&
+        (!activeMapState.overviewAvailable || !knownRadarMap->parent.empty());
     const bool useBoundsProjection = radarStaticMode && !useKnownMapProjection && hasUsableBounds;
 
     auto projectRadarPoint = [&](float worldX, float worldY, float* outX, float* outY) -> bool {
@@ -304,7 +307,7 @@ if (g::radarEnabled) {
             } else {
                 const float relYaw = NormalizeYawDeltaRad(enemyYawRad - yawRad);
                 enemyForward = cosf(relYaw);
-                enemyRight = sinf(relYaw);
+                enemyRight = -sinf(relYaw);
             }
             const float calEnemyRight = radarStaticMode
                 ? (enemyRight * calibrationCos - enemyForward * calibrationSin)

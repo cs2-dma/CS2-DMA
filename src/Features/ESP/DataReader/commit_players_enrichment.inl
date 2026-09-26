@@ -36,7 +36,7 @@
             uint16_t result = 0;
             if (activeWeaponId == 0) {
                 result = s_lastGoodWeaponIconId[playerSlot];
-            } else if (!wantsEspWeaponIconNoKnife || !IsKnifeItemId(activeWeaponId)) {
+            } else if (!wantsEspWeaponIconNoKnife) {
                 result = activeWeaponId;
             } else {
                 bool inventoryKnown = false;
@@ -66,14 +66,16 @@
                 continue;
 
             p.money = std::max(0, moneys[i]);
+            p.moneyKnown = s_cachedMoneyControllers[i] == controllers[i] &&
+                isLikelyGamePointer(moneyServices[i]) && s_moneySampleUs[i] &&
+                nowUs >= s_moneySampleUs[i] && nowUs-s_moneySampleUs[i] < 2000000u;
             p.ping = static_cast<int>(pings[i]);
-            p.scoped = scopedFlags[i] == 1u;
-            p.defusing = defusingFlags[i] == 1u;
+            esp::data::CommitPlayerFlags(p, s_scopedFlagFilters[i],
+                s_defusingFlagFilters[i], s_blindFlagFilters[i], nowUs);
+            flagDiagnostics.published[0] += p.scoped ? 1 : 0;
+            flagDiagnostics.published[1] += p.defusing ? 1 : 0;
+            flagDiagnostics.published[2] += p.flashed ? 1 : 0;
             p.hasDefuser = hasDefuserFlags[i] == 1u;
-            p.flashDuration = flashDurations[i];
-            p.flashed =
-                esp::data::IsValidFlashDurationSample(p.flashDuration) &&
-                p.flashDuration > esp::data::kFlashFlagReleaseSeconds;
             p.eyeYaw = eyeAnglesPerPlayer[i].y;
             memcpy(p.name, names[i], 128);
             p.name[127] = '\0';
@@ -97,3 +99,4 @@
                 memset(p.hitboxes, 0, sizeof(p.hitboxes));
             }
         }
+        PublishPlayerFlagDiagnostics(flagDiagnostics);

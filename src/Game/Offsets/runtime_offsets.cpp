@@ -92,7 +92,7 @@ namespace
 
     runtime_offsets::Values g_values = {};
     std::shared_mutex g_valuesMutex;
-    std::mutex g_runtimeResolveMutex;
+    std::timed_mutex g_runtimeResolveMutex;
 
     struct RuntimeResolveCache
     {
@@ -124,26 +124,34 @@ namespace
         return hash;
     }
 
+    bool ReadControlled(uintptr_t address, void* buffer, std::size_t size,
+        const runtime_offsets::ResolveControl* control)
+    {
+        const auto read = [&] { return mem.Read(address, buffer, size); };
+        return control ? control->Run(read) : read();
+    }
+
     bool ReadModuleImageInfo(
         uintptr_t base,
         std::size_t& imageSize,
-        std::uint32_t& timestamp)
+        std::uint32_t& timestamp,
+        const runtime_offsets::ResolveControl* control)
     {
         imageSize = 0;
         timestamp = 0;
         IMAGE_DOS_HEADER dos = {};
         if (!base ||
-            !mem.Read(base, &dos, sizeof(dos)) ||
+            !ReadControlled(base, &dos, sizeof(dos), control) ||
             dos.e_magic != IMAGE_DOS_SIGNATURE ||
             dos.e_lfanew <= 0 || dos.e_lfanew > 0x4000) {
             return false;
         }
 
         IMAGE_NT_HEADERS64 nt = {};
-        if (!mem.Read(
+        if (!ReadControlled(
                 base + static_cast<uintptr_t>(dos.e_lfanew),
                 &nt,
-                sizeof(nt)) ||
+                sizeof(nt), control) ||
             nt.Signature != IMAGE_NT_SIGNATURE ||
             nt.OptionalHeader.Magic != IMAGE_NT_OPTIONAL_HDR64_MAGIC ||
             nt.OptionalHeader.SizeOfImage == 0 ||
@@ -155,7 +163,7 @@ namespace
         return true;
     }
 
-    std::uint64_t BuildModuleFingerprint()
+    std::uint64_t BuildModuleFingerprint(const runtime_offsets::ResolveControl& control)
     {
         constexpr std::array<const char*, 4> kRuntimeModules = {
             "client.dll",
@@ -165,10 +173,10 @@ namespace
         };
         std::uint64_t hash = 1469598103934665603ULL;
         for (const char* moduleName : kRuntimeModules) {
-            const uintptr_t base = mem.GetModuleBase(moduleName);
+            const uintptr_t base = control.Run([&] { return mem.GetModuleBase(moduleName); });
             std::size_t size = 0;
             std::uint32_t timestamp = 0;
-            ReadModuleImageInfo(base, size, timestamp);
+            ReadModuleImageInfo(base, size, timestamp, &control);
             hash = MixFingerprint(hash, static_cast<std::uint64_t>(base));
             hash = MixFingerprint(hash, static_cast<std::uint64_t>(size));
             hash = MixFingerprint(hash, timestamp);
@@ -252,6 +260,9 @@ namespace
         OffsetField{"schemas", "C_BaseEntity.m_iTeamNum", &runtime_offsets::Values::C_BaseEntity_m_iTeamNum},
         OffsetField{"schemas", "C_BasePlayerPawn.m_vOldOrigin", &runtime_offsets::Values::C_BasePlayerPawn_m_vOldOrigin},
         OffsetField{"schemas", "C_BaseModelEntity.m_vecViewOffset", &runtime_offsets::Values::C_BaseModelEntity_m_vecViewOffset},
+        OffsetField{"schemas", "CNetworkViewOffsetVector.m_vecX", &runtime_offsets::Values::CNetworkViewOffsetVector_m_vecX},
+        OffsetField{"schemas", "CNetworkViewOffsetVector.m_vecY", &runtime_offsets::Values::CNetworkViewOffsetVector_m_vecY},
+        OffsetField{"schemas", "CNetworkViewOffsetVector.m_vecZ", &runtime_offsets::Values::CNetworkViewOffsetVector_m_vecZ},
         OffsetField{"schemas", "C_BasePlayerPawn.m_flFOVSensitivityAdjust", &runtime_offsets::Values::C_BasePlayerPawn_m_flFOVSensitivityAdjust},
         OffsetField{"schemas", "C_BasePlayerPawn.m_pWeaponServices", &runtime_offsets::Values::C_BasePlayerPawn_m_pWeaponServices},
         OffsetField{"schemas", "C_BasePlayerPawn.m_pObserverServices", &runtime_offsets::Values::C_BasePlayerPawn_m_pObserverServices},
@@ -273,6 +284,9 @@ namespace
         OffsetField{"schemas", "CEntityInstance.m_pEntity", &runtime_offsets::Values::CEntityInstance_m_pEntity},
         OffsetField{"schemas", "CEntityIdentity.m_designerName", &runtime_offsets::Values::CEntityIdentity_m_designerName},
         OffsetField{"schemas", "C_BasePlayerWeapon.m_iClip1", &runtime_offsets::Values::C_BasePlayerWeapon_m_iClip1},
+        OffsetField{"schemas", "C_BasePlayerWeapon.m_pReserveAmmo", &runtime_offsets::Values::C_BasePlayerWeapon_m_pReserveAmmo},
+        OffsetField{"schemas", "CBasePlayerWeaponVData.m_iMaxClip1", &runtime_offsets::Values::CBasePlayerWeaponVData_m_iMaxClip1},
+        OffsetField{"schemas", "CBasePlayerWeaponVData.m_bReserveAmmoAsClips", &runtime_offsets::Values::CBasePlayerWeaponVData_m_bReserveAmmoAsClips},
         OffsetField{"schemas", "C_CSWeaponBase.m_bCanBePickedUp", &runtime_offsets::Values::C_CSWeaponBase_m_bCanBePickedUp},
         OffsetField{"schemas", "C_CSWeaponBase.m_nDropTick", &runtime_offsets::Values::C_CSWeaponBase_m_nDropTick},
         OffsetField{"schemas", "C_CSWeaponBase.m_fAccuracyPenalty", &runtime_offsets::Values::C_CSWeaponBase_m_fAccuracyPenalty},
@@ -740,7 +754,7 @@ namespace
             const ReadResult result = reader(field.section, field.key, value);
             if (result == ReadResult::Parsed)
                 outValues.*(field.member) = value;
-            else
+            else if (result == ReadResult::Invalid)
                 outValues.*(field.member) = 0;
 
             if (result == ReadResult::Missing && missingKeys)
@@ -1101,6 +1115,39 @@ namespace
         return true;
     }
 
+    template<typename Sink>
+    bool ReadBoundedHttpBody(HINTERNET request, size_t limit,
+        std::chrono::steady_clock::time_point deadline, Sink&& sink, std::string* error)
+    {
+        size_t total = 0;
+        for (;;) {
+            const auto remaining = std::chrono::duration_cast<std::chrono::milliseconds>(
+                deadline - std::chrono::steady_clock::now()).count();
+            if (remaining <= 0) {
+                if (error) *error = "HTTP response deadline exceeded.";
+                return false;
+            }
+            const int timeout = static_cast<int>(std::min<int64_t>(remaining, kGitHubHttpReceiveTimeoutMs));
+            WinHttpSetTimeouts(request, timeout, timeout, timeout, timeout);
+            char buffer[8192];
+            DWORD count = 0;
+            if (!WinHttpReadData(request, buffer, sizeof(buffer), &count)) {
+                if (error) *error = WinHttpErrorText("WinHttpReadData", GetLastError());
+                return false;
+            }
+            if (count == 0) return true;
+            if (count > limit-total) {
+                if (error) *error = "HTTP response exceeds size limit.";
+                return false;
+            }
+            total += count;
+            if (!sink(buffer, count)) {
+                if (error) *error = "Cannot store HTTP response.";
+                return false;
+            }
+        }
+    }
+
     bool DownloadFileOnce(const char* url, const std::filesystem::path& destination, std::string* error)
     {
         try
@@ -1115,6 +1162,7 @@ namespace
         }
 
         const std::string urlStr = url ? url : "";
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(20);
         WinHttpGetRequest httpRequest;
         if (!OpenAndSendWinHttpGet(urlStr, {}, httpRequest, error))
             return false;
@@ -1147,23 +1195,14 @@ namespace
             return false;
         }
 
-        DWORD bytesRead = 0;
-        char buf[8192];
-        BOOL readOk = TRUE;
-        while ((readOk = WinHttpReadData(hRequest.Get(), buf, sizeof(buf), &bytesRead)) == TRUE && bytesRead > 0) {
-            out.write(buf, bytesRead);
-        }
-        const DWORD readError = readOk ? ERROR_SUCCESS : GetLastError();
-
+        const bool readOk = ReadBoundedHttpBody(hRequest.Get(), 64u * 1024u * 1024u, deadline,
+            [&](const char* data, DWORD count) { out.write(data, count); return out.good(); }, error);
         out.flush();
         const bool writeOk = out.good() && readOk;
         out.close();
-
         if (!readOk) {
-            std::error_code rmEc;
-            std::filesystem::remove(tmpDestination, rmEc);
-            if (error)
-                *error = WinHttpErrorText("WinHttpReadData", readError) + " for " + urlStr;
+            std::error_code ec;
+            std::filesystem::remove(tmpDestination, ec);
             return false;
         }
 
@@ -1211,6 +1250,7 @@ namespace
                          std::string* error)
     {
         const std::string& urlStr = url;
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(20);
         WinHttpGetRequest httpRequest;
         if (!OpenAndSendWinHttpGet(urlStr, extraHeaders, httpRequest, error))
             return false;
@@ -1225,7 +1265,7 @@ namespace
         DWORD etagBytes = 0;
         if (!WinHttpQueryHeaders(hRequest.Get(), WINHTTP_QUERY_CUSTOM, etagHeaderName.data(), WINHTTP_NO_OUTPUT_BUFFER, &etagBytes, WINHTTP_NO_HEADER_INDEX) &&
             GetLastError() == ERROR_INSUFFICIENT_BUFFER &&
-            etagBytes > sizeof(wchar_t))
+            etagBytes > sizeof(wchar_t) && etagBytes <= 8192)
         {
             std::wstring etagWide(etagBytes / sizeof(wchar_t), L'\0');
             if (WinHttpQueryHeaders(hRequest.Get(), WINHTTP_QUERY_CUSTOM, etagHeaderName.data(), etagWide.data(), &etagBytes, WINHTTP_NO_HEADER_INDEX))
@@ -1243,17 +1283,9 @@ namespace
         }
 
         out.body.clear();
-        DWORD bytesRead = 0;
-        char buffer[8192];
-        BOOL readOk = TRUE;
-        while ((readOk = WinHttpReadData(hRequest.Get(), buffer, sizeof(buffer), &bytesRead)) == TRUE && bytesRead > 0)
-            out.body.append(buffer, buffer + bytesRead);
-        const DWORD readError = readOk ? ERROR_SUCCESS : GetLastError();
-
-        if (!readOk)
-        {
-            if (error)
-                *error = WinHttpErrorText("WinHttpReadData", readError) + " for " + urlStr;
+        if (!ReadBoundedHttpBody(hRequest.Get(), 4u * 1024u * 1024u, deadline,
+                [&](const char* data, DWORD count) { out.body.append(data, count); return true; }, error)) {
+            out.body.clear();
             return false;
         }
 
@@ -1955,7 +1987,13 @@ namespace
             requests.push_back({
                 std::string(qualified.substr(0, separator)),
                 std::string(qualified.substr(separator + 2)),
-                field.key
+                field.key,
+                field.member == &runtime_offsets::Values::CNetworkViewOffsetVector_m_vecX ||
+                    field.member == &runtime_offsets::Values::C_BasePlayerWeapon_m_pReserveAmmo ||
+                    field.member == &runtime_offsets::Values::CBasePlayerWeaponVData_m_iMaxClip1 ||
+                    field.member == &runtime_offsets::Values::CBasePlayerWeaponVData_m_bReserveAmmoAsClips ||
+                    field.member == &runtime_offsets::Values::CNetworkViewOffsetVector_m_vecY ||
+                    field.member == &runtime_offsets::Values::CNetworkViewOffsetVector_m_vecZ
             });
         }
         return requests;
@@ -2006,7 +2044,8 @@ namespace
         const runtime_offsets::Values& ofs,
         std::string* message,
         LiveValidationStats* validationStats = nullptr,
-        bool strictModuleValidation = false)
+        bool strictModuleValidation = false,
+        const runtime_offsets::ResolveControl* control = nullptr)
     {
         LiveValidationStats stats = {};
         auto require = [&](bool condition, std::string_view failure) {
@@ -2053,13 +2092,14 @@ namespace
             std::size_t engineSize = 0;
             std::size_t matchmakingSize = 0;
             std::uint32_t ignoredTimestamp = 0;
-            const uintptr_t matchmakingBase = mem.GetModuleBase("matchmaking.dll");
+            const auto getMatchmaking = [] { return mem.GetModuleBase("matchmaking.dll"); };
+            const uintptr_t matchmakingBase = control ? control->Run(getMatchmaking) : getMatchmaking();
             const bool clientImageValid =
-                ReadModuleImageInfo(clientBase, clientSize, ignoredTimestamp);
+                ReadModuleImageInfo(clientBase, clientSize, ignoredTimestamp, control);
             const bool engineImageValid =
-                ReadModuleImageInfo(engineBase, engineSize, ignoredTimestamp);
+                ReadModuleImageInfo(engineBase, engineSize, ignoredTimestamp, control);
             const bool matchmakingImageValid =
-                ReadModuleImageInfo(matchmakingBase, matchmakingSize, ignoredTimestamp);
+                ReadModuleImageInfo(matchmakingBase, matchmakingSize, ignoredTimestamp, control);
             if (!require(engineBase != 0, "engine2.dll base is not loaded."))
                 return false;
             if (!require(clientImageValid, "client.dll image size is unavailable."))
@@ -2094,10 +2134,10 @@ namespace
         }
 
         uintptr_t entityListPtr = 0;
-        if (!mem.Read(
+        if (!ReadControlled(
                 clientBase + ofs.dwEntityList,
                 &entityListPtr,
-                sizeof(entityListPtr)) ||
+                sizeof(entityListPtr), control) ||
             !entityListPtr) {
             require(false, "Failed to read dwEntityList or got null pointer.");
             return false;
@@ -2115,10 +2155,10 @@ namespace
         ++stats.passed;
 
         uintptr_t listEntryPtr = 0;
-        if (!mem.Read(
+        if (!ReadControlled(
                 entityListPtr + 0x10,
                 &listEntryPtr,
-                sizeof(listEntryPtr))) {
+                sizeof(listEntryPtr), control)) {
             require(false, "Failed to read entityList + 0x10.");
             return false;
         }
@@ -2137,10 +2177,10 @@ namespace
 
         if (strictModuleValidation) {
             uintptr_t networkGameClient = 0;
-            if (!mem.Read(
+            if (!ReadControlled(
                     engineBase + ofs.dwNetworkGameClient,
                     &networkGameClient,
-                    sizeof(networkGameClient))) {
+                    sizeof(networkGameClient), control)) {
                 require(false, "Failed to read dwNetworkGameClient.");
                 return false;
             }
@@ -2154,10 +2194,10 @@ namespace
 
         if (ofs.dwLocalPlayerPawn > 0) {
             uintptr_t localPawnPtr = 0;
-            if (mem.Read(
+            if (ReadControlled(
                     clientBase + ofs.dwLocalPlayerPawn,
                     &localPawnPtr,
-                    sizeof(localPawnPtr)) &&
+                    sizeof(localPawnPtr), control) &&
                 localPawnPtr != 0) {
                 ++stats.attempted;
                 if (!app::memory_address::IsLikelyGamePointer(localPawnPtr)) {
@@ -2173,30 +2213,30 @@ namespace
 
                 int32_t health = 0;
                 if (ofs.C_BaseEntity_m_iHealth > 0 &&
-                    mem.Read(
+                    ReadControlled(
                         localPawnPtr + ofs.C_BaseEntity_m_iHealth,
                         &health,
-                        sizeof(health)) &&
+                        sizeof(health), control) &&
                     !require(health >= 0 && health <= 1000,
                              "Local player health is outside the plausible range.")) {
                     return false;
                 }
                 uint8_t team = 0; // m_iTeamNum is one byte; do not read adjacent spawn flags.
                 if (ofs.C_BaseEntity_m_iTeamNum > 0 &&
-                    mem.Read(
+                    ReadControlled(
                         localPawnPtr + ofs.C_BaseEntity_m_iTeamNum,
                         &team,
-                        sizeof(team)) &&
+                        sizeof(team), control) &&
                     !require(team <= 3,
                              "Local player team is outside the plausible range.")) {
                     return false;
                 }
                 uintptr_t sceneNode = 0;
                 if (ofs.C_BaseEntity_m_pGameSceneNode > 0 &&
-                    mem.Read(
+                    ReadControlled(
                         localPawnPtr + ofs.C_BaseEntity_m_pGameSceneNode,
                         &sceneNode,
-                        sizeof(sceneNode)) &&
+                        sizeof(sceneNode), control) &&
                     !require(
                         sceneNode == 0 ||
                             app::memory_address::IsLikelyGamePointer(sceneNode),
@@ -2205,10 +2245,10 @@ namespace
                 }
                 if (ofs.C_BasePlayerPawn_m_hController > 0) {
                     uint32_t controllerHandle = 0;
-                    if (mem.Read(
+                    if (ReadControlled(
                             localPawnPtr + ofs.C_BasePlayerPawn_m_hController,
                             &controllerHandle,
-                            sizeof(controllerHandle)) &&
+                            sizeof(controllerHandle), control) &&
                         controllerHandle != 0) {
                         const uint32_t index = controllerHandle & 0x3FFF;
                         ++stats.attempted;
@@ -2313,162 +2353,217 @@ bool runtime_offsets::PrepareLocalFallback(std::string* message)
 bool runtime_offsets::ResolveFromAttachedProcess(
     RuntimeResolveReport* report,
     std::string* message,
-    bool force)
+    bool force,
+    const ResolveControl* requestedControl)
 {
-    std::scoped_lock resolveLock(g_runtimeResolveMutex);
-    const DWORD pid = mem.GetAttachedPid();
-    const uintptr_t clientBase = g::clientBase.load(std::memory_order_relaxed);
-    const uintptr_t engineBase = g::engine2Base.load(std::memory_order_relaxed);
-    const auto now = std::chrono::steady_clock::now();
-    const std::uint64_t moduleFingerprint =
-        pid && clientBase && engineBase ? BuildModuleFingerprint() : 0;
+    const auto started = ResolveControl::Clock::now();
+    const ResolveControl defaultControl{started + std::chrono::seconds(15), {}};
+    const auto& control = requestedControl ? *requestedControl : defaultControl;
+    std::unique_lock<std::timed_mutex> resolveLock(g_runtimeResolveMutex, std::defer_lock);
+    RuntimeResolveReport currentReport = {};
+    resolver::Result resolved;
+    std::vector<resolver::SchemaRequest> schemaRequests;
+    const char* stage = "resolver lock";
+    try {
+        control.Check();
+        while (!resolveLock.try_lock_for(std::chrono::milliseconds(20))) control.Check();
+        control.Check();
+        stage = "module fingerprint";
+        const DWORD pid = mem.GetAttachedPid();
+        currentReport.pid = pid;
+        const uintptr_t clientBase = g::clientBase.load(std::memory_order_relaxed);
+        const uintptr_t engineBase = g::engine2Base.load(std::memory_order_relaxed);
+        const auto now = std::chrono::steady_clock::now();
+        const std::uint64_t moduleFingerprint =
+            pid && clientBase && engineBase ? BuildModuleFingerprint(control) : 0;
 
-    auto publishReport = [&](const RuntimeResolveReport& value) {
-        if (report)
-            *report = value;
-    };
-    auto cacheFailure = [&](RuntimeResolveReport value, const std::string& reason) {
-        value.pid = pid;
-        value.source = "runtime memory";
-        value.validationPassed = false;
-        value.detail = reason;
-        value.moduleFingerprint = moduleFingerprint;
+        auto publishReport = [&](const RuntimeResolveReport& value) {
+            if (report)
+                *report = value;
+        };
+        auto cacheFailure = [&](RuntimeResolveReport value, const std::string& reason) {
+            value.pid = pid;
+            value.source = "runtime memory";
+            value.validationPassed = false;
+            value.detail = reason;
+            value.moduleFingerprint = moduleFingerprint;
+            g_runtimeResolveCache.pid = pid;
+            g_runtimeResolveCache.clientBase = clientBase;
+            g_runtimeResolveCache.engineBase = engineBase;
+            g_runtimeResolveCache.moduleFingerprint = moduleFingerprint;
+            g_runtimeResolveCache.success = false;
+            g_runtimeResolveCache.attemptedAt = now;
+            g_runtimeResolveCache.report = value;
+            publishReport(value);
+            if (message)
+                *message = reason;
+            return false;
+        };
+
+        currentReport.pid = pid;
+        currentReport.source = "runtime memory";
+        currentReport.moduleFingerprint = moduleFingerprint;
+        if (!pid || !clientBase || !engineBase) {
+            currentReport.startupPending = true;
+            return cacheFailure(currentReport, "Runtime resolver requires an attached CS2 process and loaded modules.");
+        }
+
+        const bool sameTarget =
+            g_runtimeResolveCache.pid == pid &&
+            g_runtimeResolveCache.clientBase == clientBase &&
+            g_runtimeResolveCache.engineBase == engineBase &&
+            g_runtimeResolveCache.moduleFingerprint == moduleFingerprint;
+        if (!force && sameTarget && g_runtimeResolveCache.success) {
+            RuntimeResolveReport cached = g_runtimeResolveCache.report;
+            cached.cached = true;
+            publishReport(cached);
+            if (message)
+                *message = "Runtime offsets are already validated for this process.";
+            return true;
+        }
+        if (!force && sameTarget &&
+            g_runtimeResolveCache.attemptedAt != std::chrono::steady_clock::time_point{} &&
+            now - g_runtimeResolveCache.attemptedAt < kRuntimeResolveFailureCooldown) {
+            RuntimeResolveReport cached = g_runtimeResolveCache.report;
+            cached.cached = true;
+            publishReport(cached);
+            if (message)
+                *message = "Runtime offset retry is cooling down; local offsets remain active.";
+            return false;
+        }
+
+        stage = "module and schema scan";
+        std::string resolveError;
+        schemaRequests = BuildRuntimeSchemaRequests();
+        const bool resolverOk = resolver::ResolveAttachedProcess(
+            schemaRequests,
+            resolved,
+            &resolveError,
+            &control);
+        const auto coverage = resolver::GetSchemaCoverage(schemaRequests, resolved);
+        currentReport.resolvedOffsets = resolved.offsets.size();
+        currentReport.resolvedSchemas = coverage.resolved;
+        currentReport.bytesRead = resolved.bytesRead;
+        currentReport.classesVisited = resolved.classesVisited;
+        currentReport.expectedOffsets = resolved.expectedOffsets;
+        currentReport.expectedSchemas = coverage.expected;
+        currentReport.resolvedOptionalSchemas = coverage.optionalResolved;
+        currentReport.expectedOptionalSchemas = coverage.optionalExpected;
+        currentReport.modulesRead = resolved.modulesRead;
+        currentReport.executableSectionsRead = resolved.executableSectionsRead;
+        currentReport.unreadableCodePages = resolved.unreadableCodePages;
+        currentReport.duplicatePatterns = resolved.duplicatePatterns;
+        currentReport.elapsedMs = resolved.elapsedMs;
+        currentReport.startupPending = resolved.startupPending || resolved.unreadableCodePages != 0;
+        if (!resolverOk)
+            return cacheFailure(currentReport, resolveError.empty()
+                ? "Runtime offset resolution was incomplete."
+                : resolveError);
+
+        Values candidate = GetRuntimeValuesSnapshot();
+        currentReport.retainedFallbackFields =
+            ApplyResolverResult(resolved, candidate);
+
+        std::vector<std::string> missingRuntimeFields;
+        for (const RemoteField& field : kRequiredRemoteFields) {
+            if (!ResolverSuppliedMember(resolved, field.member))
+                missingRuntimeFields.emplace_back(field.remoteKey);
+        }
+        currentReport.unresolvedRequired = missingRuntimeFields.size();
+        if (!missingRuntimeFields.empty()) {
+            return cacheFailure(
+                currentReport,
+                "Runtime resolver missed required fields: " +
+                    JoinKeys(missingRuntimeFields) + (resolved.diagnostics.empty()
+                        ? std::string{} : "; " + JoinKeys(resolved.diagnostics)));
+        }
+
+        const std::vector<std::string> invalidRequired =
+            ValidateLoadedValues(candidate, true);
+        if (!invalidRequired.empty()) {
+            return cacheFailure(
+                currentReport,
+                "Runtime candidate contains invalid required fields: " +
+                    JoinKeys(invalidRequired));
+        }
+
+        std::string sanityMessage;
+        LiveValidationStats validationStats = {};
+        stage = "live validation";
+        if (!SanityCheckValues(candidate, &sanityMessage, &validationStats, true, &control)) {
+            currentReport.startupPending = true;
+            currentReport.validationChecksPassed = validationStats.passed;
+            currentReport.validationChecksAttempted = validationStats.attempted;
+            return cacheFailure(
+                currentReport,
+                "Runtime candidate failed live validation: " + sanityMessage);
+        }
+
+        control.Check();
+        SetRuntimeValues(candidate);
+        currentReport.applied = true;
+        currentReport.validationPassed = true;
+        currentReport.startupPending = false;
+        currentReport.validationChecksPassed = validationStats.passed;
+        currentReport.validationChecksAttempted = validationStats.attempted;
+        currentReport.detail = "Live validation passed.";
+        const std::filesystem::path jsonPath = FindOffsetsJsonPath(true);
+        if (!jsonPath.empty()) {
+            OffsetState state = ReadOffsetState(jsonPath, GetOffsetsStatePath());
+            state.selectedSource = "runtime memory";
+            state.selectedSourceTimestamp.clear();
+            state.selectedSourceBuildNumber = 0;
+            currentReport.persisted = WriteOffsetsJson(jsonPath, candidate, &state);
+        }
+
         g_runtimeResolveCache.pid = pid;
         g_runtimeResolveCache.clientBase = clientBase;
         g_runtimeResolveCache.engineBase = engineBase;
         g_runtimeResolveCache.moduleFingerprint = moduleFingerprint;
-        g_runtimeResolveCache.success = false;
+        g_runtimeResolveCache.success = true;
         g_runtimeResolveCache.attemptedAt = now;
-        g_runtimeResolveCache.report = value;
-        publishReport(value);
-        if (message)
-            *message = reason;
-        return false;
-    };
-
-    RuntimeResolveReport currentReport = {};
-    currentReport.pid = pid;
-    currentReport.source = "runtime memory";
-    currentReport.moduleFingerprint = moduleFingerprint;
-    if (!pid || !clientBase || !engineBase)
-        return cacheFailure(currentReport, "Runtime resolver requires an attached CS2 process and loaded modules.");
-
-    const bool sameTarget =
-        g_runtimeResolveCache.pid == pid &&
-        g_runtimeResolveCache.clientBase == clientBase &&
-        g_runtimeResolveCache.engineBase == engineBase &&
-        g_runtimeResolveCache.moduleFingerprint == moduleFingerprint;
-    if (!force && sameTarget && g_runtimeResolveCache.success) {
-        RuntimeResolveReport cached = g_runtimeResolveCache.report;
-        cached.cached = true;
-        publishReport(cached);
-        if (message)
-            *message = "Runtime offsets are already validated for this process.";
+        g_runtimeResolveCache.report = currentReport;
+        publishReport(currentReport);
+        if (message) {
+            std::ostringstream text;
+            text << "Resolved " << currentReport.resolvedOffsets
+                 << " global and " << resolved.schemas.size()
+                 << " schema offsets from the attached process in "
+                 << static_cast<int>(currentReport.elapsedMs + 0.5) << " ms.";
+            if (!currentReport.persisted)
+                text << " The validated values are active but could not be persisted.";
+            *message = text.str();
+        }
         return true;
-    }
-    if (!force && sameTarget &&
-        g_runtimeResolveCache.attemptedAt != std::chrono::steady_clock::time_point{} &&
-        now - g_runtimeResolveCache.attemptedAt < kRuntimeResolveFailureCooldown) {
-        RuntimeResolveReport cached = g_runtimeResolveCache.report;
-        cached.cached = true;
-        publishReport(cached);
-        if (message)
-            *message = "Runtime offset retry is cooling down; local offsets remain active.";
+    } catch (const ResolveInterrupted& interrupted) {
+        if (resolveLock.owns_lock()) g_runtimeResolveCache = {};
+        currentReport.applied = false;
+        currentReport.persisted = false;
+        currentReport.cached = false;
+        currentReport.validationPassed = false;
+        currentReport.startupPending = !interrupted.Cancelled();
+        currentReport.timedOut = !interrupted.Cancelled();
+        currentReport.cancelled = interrupted.Cancelled();
+        currentReport.source = "runtime memory";
+        const auto coverage = resolver::GetSchemaCoverage(schemaRequests, resolved);
+        currentReport.expectedOffsets = resolved.expectedOffsets;
+        currentReport.expectedSchemas = coverage.expected;
+        currentReport.resolvedOffsets = resolved.offsets.size();
+        currentReport.resolvedSchemas = coverage.resolved;
+        currentReport.expectedOptionalSchemas = coverage.optionalExpected;
+        currentReport.resolvedOptionalSchemas = coverage.optionalResolved;
+        currentReport.bytesRead = resolved.bytesRead;
+        currentReport.classesVisited = resolved.classesVisited;
+        currentReport.modulesRead = resolved.modulesRead;
+        currentReport.executableSectionsRead = resolved.executableSectionsRead;
+        currentReport.unreadableCodePages = resolved.unreadableCodePages;
+        currentReport.elapsedMs = std::chrono::duration<double, std::milli>(
+            ResolveControl::Clock::now() - started).count();
+        currentReport.detail = std::string(interrupted.what()) + " Stage: " + stage;
+        if (report) *report = currentReport;
+        if (message) *message = currentReport.detail;
         return false;
     }
-
-    resolver::Result resolved;
-    std::string resolveError;
-    const bool resolverOk = resolver::ResolveAttachedProcess(
-        BuildRuntimeSchemaRequests(),
-        resolved,
-        &resolveError);
-    currentReport.resolvedOffsets = resolved.offsets.size();
-    currentReport.resolvedSchemas = resolved.schemas.size();
-    currentReport.bytesRead = resolved.bytesRead;
-    currentReport.classesVisited = resolved.classesVisited;
-    currentReport.expectedOffsets = resolved.expectedOffsets;
-    currentReport.expectedSchemas = resolved.expectedSchemas;
-    currentReport.modulesRead = resolved.modulesRead;
-    currentReport.executableSectionsRead = resolved.executableSectionsRead;
-    currentReport.unreadableCodePages = resolved.unreadableCodePages;
-    currentReport.duplicatePatterns = resolved.duplicatePatterns;
-    currentReport.elapsedMs = resolved.elapsedMs;
-    if (!resolverOk)
-        return cacheFailure(currentReport, resolveError.empty()
-            ? "Runtime offset resolution was incomplete."
-            : resolveError);
-
-    Values candidate = GetRuntimeValuesSnapshot();
-    currentReport.retainedFallbackFields =
-        ApplyResolverResult(resolved, candidate);
-
-    std::vector<std::string> missingRuntimeFields;
-    for (const RemoteField& field : kRequiredRemoteFields) {
-        if (!ResolverSuppliedMember(resolved, field.member))
-            missingRuntimeFields.emplace_back(field.remoteKey);
-    }
-    currentReport.unresolvedRequired = missingRuntimeFields.size();
-    if (!missingRuntimeFields.empty()) {
-        return cacheFailure(
-            currentReport,
-            "Runtime resolver missed required fields: " +
-                JoinKeys(missingRuntimeFields));
-    }
-
-    const std::vector<std::string> invalidRequired =
-        ValidateLoadedValues(candidate, true);
-    if (!invalidRequired.empty()) {
-        return cacheFailure(
-            currentReport,
-            "Runtime candidate contains invalid required fields: " +
-                JoinKeys(invalidRequired));
-    }
-
-    std::string sanityMessage;
-    LiveValidationStats validationStats = {};
-    if (!SanityCheckValues(candidate, &sanityMessage, &validationStats, true)) {
-        currentReport.validationChecksPassed = validationStats.passed;
-        currentReport.validationChecksAttempted = validationStats.attempted;
-        return cacheFailure(
-            currentReport,
-            "Runtime candidate failed live validation: " + sanityMessage);
-    }
-
-    SetRuntimeValues(candidate);
-    currentReport.applied = true;
-    currentReport.validationPassed = true;
-    currentReport.validationChecksPassed = validationStats.passed;
-    currentReport.validationChecksAttempted = validationStats.attempted;
-    currentReport.detail = "Live validation passed.";
-    const std::filesystem::path jsonPath = FindOffsetsJsonPath(true);
-    if (!jsonPath.empty()) {
-        OffsetState state = ReadOffsetState(jsonPath, GetOffsetsStatePath());
-        state.selectedSource = "runtime memory";
-        state.selectedSourceTimestamp.clear();
-        state.selectedSourceBuildNumber = 0;
-        currentReport.persisted = WriteOffsetsJson(jsonPath, candidate, &state);
-    }
-
-    g_runtimeResolveCache.pid = pid;
-    g_runtimeResolveCache.clientBase = clientBase;
-    g_runtimeResolveCache.engineBase = engineBase;
-    g_runtimeResolveCache.moduleFingerprint = moduleFingerprint;
-    g_runtimeResolveCache.success = true;
-    g_runtimeResolveCache.attemptedAt = now;
-    g_runtimeResolveCache.report = currentReport;
-    publishReport(currentReport);
-    if (message) {
-        std::ostringstream text;
-        text << "Resolved " << currentReport.resolvedOffsets
-             << " global and " << currentReport.resolvedSchemas
-             << " schema offsets from the attached process in "
-             << static_cast<int>(currentReport.elapsedMs + 0.5) << " ms.";
-        if (!currentReport.persisted)
-            text << " The validated values are active but could not be persisted.";
-        *message = text.str();
-    }
-    return true;
 }
 
 bool runtime_offsets::AutoUpdateFromGitHub(
@@ -2498,7 +2593,7 @@ runtime_offsets::StateView runtime_offsets::GetStateView()
     return view;
 }
 
-bool runtime_offsets::SanityCheckOffsets(std::string* message)
+bool runtime_offsets::SanityCheckOffsets(std::string* message, const ResolveControl* control)
 {
-    return SanityCheckValues(GetRuntimeValuesSnapshot(), message);
+    return SanityCheckValues(GetRuntimeValuesSnapshot(), message, nullptr, false, control);
 }

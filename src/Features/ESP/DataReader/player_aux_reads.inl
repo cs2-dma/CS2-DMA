@@ -134,12 +134,13 @@
          (playerAuxNowUs - s_lastPlayerSpectatorAuxUs) >= esp::intervals::kPlayerSpectatorAuxUs);
     const bool playerSpectatorAuxDue = playerSpectatorDue;
 
-    _playerAuxActiveTick =
-        !_playerHierarchyActiveTick &&
-        (playerIdentityAuxDue ||
-         playerMoneyAuxDue ||
-         playerDefuserAuxDue ||
-         playerSpectatorAuxDue);
+    const bool anyPlayerAuxDue = playerIdentityAuxDue || playerMoneyAuxDue ||
+        playerDefuserAuxDue || playerSpectatorAuxDue;
+    deferredFairness.Observe(DeferredLane::Auxiliary, anyPlayerAuxDue, playerAuxNowUs);
+    _playerAuxActiveTick = anyPlayerAuxDue && !_playerHierarchyActiveTick &&
+        (forcedDeferredLane == DeferredLane::Auxiliary ||
+            (forcedDeferredLane == DeferredLane::None && !prioritizeBoneLane));
+    if (_playerAuxActiveTick) deferredFairness.Served(DeferredLane::Auxiliary);
 
     auto markDynamicPawnsCached = [&]() {
         memcpy(s_cachedDynamicPawns, pawns, sizeof(s_cachedDynamicPawns));
@@ -193,7 +194,7 @@
                         handle,
                         s_cachedMoneyServices[i] + ofs.CCSPlayerController_InGameMoneyServices_m_iAccount,
                         &moneys[i],
-                        sizeof(int));
+                        sizeof(int), &moneyBytesRead[i]);
                     queuedPrimary = true;
                 }
             }
@@ -365,7 +366,7 @@
                             handle,
                             moneyServices[i] + ofs.CCSPlayerController_InGameMoneyServices_m_iAccount,
                             &moneys[i],
-                            sizeof(int));
+                            sizeof(int), &moneyBytesRead[i]);
                         queuedChainedRefresh = true;
                     }
                 }
@@ -420,8 +421,10 @@
                 if (!mem.ExecuteReadScatter(handle)) {
                     
                     for (int i = 0; i < 64; ++i) {
-                        if (moneyServiceRefreshMask[i] && moneyServices[i])
+                        if (moneyServiceRefreshMask[i] && moneyServices[i]) {
                             moneys[i] = s_cachedPlayerMoneys[i];
+                            moneyBytesRead[i] = 0;
+                        }
                         if (itemServiceRefreshMask[i] && itemServices[i])
                             hasDefuserFlags[i] = s_cachedHasDefuserFlags[i];
                         if (observerServiceRefreshMask[i] && observerServices[i]) {
@@ -441,6 +444,12 @@
             }
             if (playerMoneyAuxDue) {
                 memcpy(s_cachedMoneyControllers, controllers, sizeof(s_cachedMoneyControllers));
+                for (int i=0;i<64;++i) {
+                    if (moneyBytesRead[i]==sizeof(int) && moneys[i]>=0 && moneys[i]<=1000000)
+                        s_moneySampleUs[i]=playerAuxNowUs;
+                    else
+                        moneys[i]=s_cachedPlayerMoneys[i];
+                }
                 memcpy(s_cachedMoneyServices, moneyServices, sizeof(s_cachedMoneyServices));
                 memcpy(s_cachedPlayerMoneys, moneys, sizeof(s_cachedPlayerMoneys));
             }

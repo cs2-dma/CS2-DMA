@@ -8,6 +8,7 @@
 #include "app/Platform/win_handle.h"
 #include "Features/ESP/esp.h"
 #include "Features/ESP/Render/weapon_icon_atlas.h"
+#include "Features/ESP/Render/bar_labels.h"
 #include "Features/Target/target.h"
 #include "app/UI/MenuShell/ui_icons.h"
 #include "app/UI/MenuShell/ui_style.h"

@@ -8,7 +8,7 @@ if (g::espWeapon) {
     const char* weaponIcon = WeaponIconFromItemId(weaponIconId);
     const bool hasWeaponVisualAsset = WeaponVisualKeyFromItemId(weaponIconId) != nullptr;
     const char* weaponIconFallback = WeaponIconFallbackTokenFromItemId(weaponIconId);
-    const char* weaponName = WeaponNameFromItemId(p.weaponId);
+    const char* weaponName = WeaponNameFromItemId(weaponIconId);
     if (g::espWeaponIcon && weaponIconId != 0) {
         const ImU32 iconColor = ColorToImU32(g::espWeaponIconColor);
         if (!drawBottomWeaponIcon(weaponIconId, iconColor, g::espWeaponIconSize)) {

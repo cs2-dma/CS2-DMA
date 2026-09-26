@@ -7,6 +7,7 @@
 #include "app/Core/fallback_log.h"
 #include "app/Core/globals.h"
 #include "app/Core/text_utils.h"
+#include "app/Platform/file_replace.h"
 #include <Windows.h>
 #include <bcrypt.h>
 
@@ -305,6 +306,53 @@ namespace
         return fallback;
     }
 
+    bool VerifySshHost(LIBSSH2_SESSION* session, const webradar::remote::Settings& settings,
+        std::string* outError)
+    {
+        static std::mutex trustMutex;
+        std::lock_guard<std::mutex> lock(trustMutex);
+        const char* hash = libssh2_hostkey_hash(session, LIBSSH2_HOSTKEY_HASH_SHA256);
+        const auto fail = [&](const char* message) {
+            if (outError) *outError = message;
+            return false;
+        };
+        if (!hash) return fail("SSH host key unavailable; password was not sent.");
+        std::string fingerprint = "SHA256:" + webradar::runtime::Base64Encode(
+            reinterpret_cast<const unsigned char*>(hash), 32);
+        while (!fingerprint.empty() && fingerprint.back() == '=') fingerprint.pop_back();
+        const std::string endpoint = ToLowerAscii(Trim(settings.host)) + ":" + std::to_string(settings.sshPort);
+        const auto path = app::paths::GetSettingsDirectory() / "ssh_known_hosts.json";
+        nlohmann::json trusted = nlohmann::json::object();
+        std::ifstream input(path, std::ios::binary);
+        if (input.is_open()) {
+            trusted = nlohmann::json::parse(input, nullptr, false);
+            if (!trusted.is_object()) return fail("SSH trust store is invalid; password was not sent.");
+        }
+        input.close();
+        if (const auto it = trusted.find(endpoint); it != trusted.end()) {
+            if (it->is_string() && it->get_ref<const std::string&>() == fingerprint) return true;
+            return fail("SSH host key changed. Verify the server identity before updating ssh_known_hosts.json. Password was not sent.");
+        }
+        const std::string prompt = "First SSH connection to " + endpoint + "\n\n" + fingerprint +
+            "\n\nVerify this fingerprint with the server administrator. Trust this key and continue?";
+        if (MessageBoxA(nullptr, prompt.c_str(), "KevqDMA | SSH server identity",
+                MB_YESNO | MB_ICONWARNING | MB_DEFBUTTON2 | MB_SETFOREGROUND) != IDYES)
+            return fail("SSH server key was not trusted; password was not sent.");
+        trusted[endpoint] = fingerprint;
+        std::error_code ec;
+        std::filesystem::create_directories(path.parent_path(), ec);
+        auto temporary = path;
+        temporary += ".tmp";
+        {
+            std::ofstream output(temporary, std::ios::binary | std::ios::trunc);
+            output << trusted.dump(2);
+            output.flush();
+            if (!output.good()) return fail("Cannot save SSH server identity; password was not sent.");
+        }
+        return app::platform::ReplaceFileWithTemp(temporary, path, ec) ||
+            fail("Cannot commit SSH server identity; password was not sent.");
+    }
+
     class SshSession {
     public:
         SshSession() = default;
@@ -365,6 +413,7 @@ namespace
                 return false;
             }
 
+            if (!VerifySshHost(session_, settings, outError)) return false;
             const std::string login = Trim(settings.login);
             const std::string password = settings.password;
             const int auth = libssh2_userauth_password_ex(
@@ -1151,124 +1200,15 @@ namespace
 
     const char* RemoteServerJs()
     {
-        return R"JS(const http = require("http");
-const fs = require("fs");
-const path = require("path");
-const express = require("express");
-const { WebSocketServer, WebSocket } = require("ws");
-
-const PORT = Number(process.env.PORT || 8080);
-const PUBLIC_DIR = path.join(__dirname, "public");
-const app = express();
-const server = http.createServer(app);
-const viewers = new Set();
-let latest = { v: 2, seq: 0, ts: Date.now(), map: "unknown", lt: 0, p: [], b: [0, [0, 0, 0], 0, 40, 0, 10], w: [] };
-let latestText = JSON.stringify(latest);
-let lastUpdateMs = 0;
-let sourcePackets = 0;
-let broadcastPackets = 0;
-let dirty = false;
-const BROADCAST_HZ = Number(process.env.BROADCAST_HZ || 60);
-const BROADCAST_INTERVAL_MS = Math.max(16, Math.round(1000 / Math.max(1, Math.min(60, BROADCAST_HZ))));
-const MAX_VIEWER_BUFFER_BYTES = 64 * 1024;
-
-app.use(express.static(PUBLIC_DIR, { etag: true, maxAge: "1h" }));
-app.get("/api/status", (req, res) => {
-  res.set("Cache-Control", "no-store");
-  res.json({
-    ok: true,
-    active_map: latest.map || "unknown",
-    sent_packets: sourcePackets,
-    broadcast_packets: broadcastPackets,
-    last_update_ms: lastUpdateMs,
-    connected_clients: viewers.size
-  });
-});
-app.get("/api/live", (req, res) => {
-  res.set("Cache-Control", "no-store");
-  res.json(latest);
-});
-app.get("/api/stream", (req, res) => {
-  res.writeHead(200, {
-    "Content-Type": "text/event-stream",
-    "Cache-Control": "no-store",
-    "Connection": "keep-alive",
-    "Access-Control-Allow-Origin": "*"
-  });
-  res.write(`event: snapshot\ndata: ${JSON.stringify(latest)}\n\n`);
-  const client = {
-    sse: true,
-    send: text => {
-      if (res.destroyed || res.writableEnded || res.writableNeedDrain) return false;
-      return res.write(`event: snapshot\ndata: ${text}\n\n`);
-    }
-  };
-  viewers.add(client);
-  req.on("close", () => viewers.delete(client));
-});
-app.get("*", (req, res) => res.sendFile(path.join(PUBLIC_DIR, "index.html")));
-
-const sourceWss = new WebSocketServer({ noServer: true });
-const viewerWss = new WebSocketServer({ noServer: true });
-
-function broadcastLatest() {
-  if (!dirty) return;
-  dirty = false;
-  const text = latestText;
-  for (const client of viewers) {
-    try {
-      if (client.sse === true) {
-        client.send(text);
-      } else if (client.readyState === WebSocket.OPEN) {
-        if (client.bufferedAmount > MAX_VIEWER_BUFFER_BYTES) continue;
-        client.send(text);
-      }
-    } catch {}
-  }
-  broadcastPackets += 1;
-}
-setInterval(broadcastLatest, BROADCAST_INTERVAL_MS).unref();
-
-sourceWss.on("connection", ws => {
-  ws.on("message", raw => {
-    const text = raw.toString();
-    if (text.length < 8 || text.length > 262144) return;
-    try {
-      const parsed = JSON.parse(text);
-      if (!parsed || Number(parsed.v || 0) !== 2) return;
-      latest = parsed;
-      latestText = text;
-      lastUpdateMs = Date.now();
-      sourcePackets += 1;
-      dirty = true;
-    } catch {}
-  });
-});
-
-viewerWss.on("connection", ws => {
-  viewers.add(ws);
-  ws.send(latestText);
-  ws.on("close", () => viewers.delete(ws));
-  ws.on("error", () => viewers.delete(ws));
-});
-
-server.on("upgrade", (req, socket, head) => {
-  const url = new URL(req.url, "http://127.0.0.1");
-  if (url.pathname === "/api/ingest") {
-    sourceWss.handleUpgrade(req, socket, head, ws => sourceWss.emit("connection", ws, req));
-    return;
-  }
-  if (url.pathname === "/api/ws") {
-    viewerWss.handleUpgrade(req, socket, head, ws => viewerWss.emit("connection", ws, req));
-    return;
-  }
-  socket.destroy();
-});
-
-server.listen(PORT, "0.0.0.0", () => {
-  console.log(`KevqDMA WebRadar server listening on 0.0.0.0:${PORT}`);
-});
-)JS";
+        static const std::string script = [] {
+            const HMODULE module = GetModuleHandleW(nullptr);
+            const HRSRC resource = FindResourceA(module, "REMOTE_SERVER_JS", MAKEINTRESOURCEA(10));
+            if (!resource) return std::string{};
+            const HGLOBAL loaded = LoadResource(module, resource);
+            const char* data = static_cast<const char*>(LockResource(loaded));
+            return data ? std::string(data, SizeofResource(module, resource)) : std::string{};
+        }();
+        return script.c_str();
     }
 
     const char* PackageJson()
@@ -1288,7 +1228,9 @@ server.listen(PORT, "0.0.0.0", () => {
         if (!context || IS_INTRESOURCE(name))
             return TRUE;
 
-        const std::string urlPath(name);
+        std::string urlPath = ToLowerAscii(name);
+        if (urlPath.size() >= 2 && urlPath.front() == '"' && urlPath.back() == '"')
+            urlPath = urlPath.substr(1, urlPath.size() - 2);
         if (urlPath.empty() || urlPath[0] != '/')
             return TRUE;
 
@@ -1413,13 +1355,7 @@ namespace webradar::remote
         if (file.is_open()) {
             nlohmann::json root = nlohmann::json::parse(file, nullptr, false);
             if (!root.is_discarded() && root.is_object()) {
-                settings.enabled = root.value("EnableWeb", settings.enabled);
-                settings.host = root.value("Host", settings.host);
-                settings.webPort = root.value("WebPort", settings.webPort);
-                settings.sshPort = root.value("SshPort", settings.sshPort);
-                settings.login = root.value("Login", settings.login);
-                settings.password = root.value("Password", settings.password);
-                settings.remotePath = root.value("RemotePath", settings.remotePath);
+                ParseSettingsJson(root, settings);
             }
         }
 
@@ -1434,9 +1370,8 @@ namespace webradar::remote
         return true;
     }
 
-    bool SaveSettings(std::string_view profileName)
+    bool SaveSettings(std::string_view profileName, const Settings& settings)
     {
-        const Settings settings = CaptureSettingsFromGlobals();
         const auto path = BuildSettingsPath(profileName);
         std::error_code ec;
         std::filesystem::create_directories(path.parent_path(), ec);
@@ -1448,11 +1383,18 @@ namespace webradar::remote
         root["Login"] = settings.login;
         root["Password"] = settings.password;
         root["RemotePath"] = settings.remotePath;
-        std::ofstream file(path, std::ios::binary | std::ios::trunc);
-        if (!file.is_open())
-            return false;
-        file << root.dump(4);
-        return true;
+        auto temporary = path;
+        temporary += ".tmp";
+        {
+            std::ofstream file(temporary, std::ios::binary | std::ios::trunc);
+            if (!file.is_open())
+                return false;
+            file << root.dump(4);
+            file.flush();
+            if (!file.good())
+                return false;
+        }
+        return app::platform::ReplaceFileWithTemp(temporary, path, ec);
     }
 
     bool TestPing(const Settings& settings, int* outMs, std::string* outError)
@@ -1596,7 +1538,12 @@ namespace webradar::remote
                     *outError = "Cannot write server.js.";
                 return false;
             }
-            serverFile << RemoteServerJs();
+            const char* serverSource = RemoteServerJs();
+            if (!serverSource || !*serverSource) {
+                if (outError) *outError = "Embedded WebRadar server is unavailable.";
+                return false;
+            }
+            serverFile << serverSource;
         }
         {
             std::ofstream packageFile(deployRoot / "package.json", std::ios::binary | std::ios::trunc);
@@ -1718,7 +1665,7 @@ namespace webradar::remote
             "WorkingDirectory=" + remotePath,
             "Environment=PORT=" + std::to_string(webPort),
             "Environment=BROADCAST_HZ=60",
-            "ExecStart=/usr/bin/node server.js",
+            "ExecStart=/usr/bin/node --jitless server.js",
             "Restart=always",
             "RestartSec=2",
             "DynamicUser=yes",

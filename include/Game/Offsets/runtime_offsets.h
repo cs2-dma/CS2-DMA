@@ -3,6 +3,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <string>
+#include "Game/Offsets/runtime_resolve_control.h"
 
 namespace runtime_offsets
 {
@@ -47,6 +48,9 @@ namespace runtime_offsets
         bool applied = false;
         bool cached = false;
         bool persisted = false;
+        bool startupPending = false;
+        bool timedOut = false;
+        bool cancelled = false;
         std::size_t resolvedOffsets = 0;
         std::size_t resolvedSchemas = 0;
         std::size_t retainedFallbackFields = 0;
@@ -54,6 +58,8 @@ namespace runtime_offsets
         std::size_t classesVisited = 0;
         std::size_t expectedOffsets = 0;
         std::size_t expectedSchemas = 0;
+        std::size_t resolvedOptionalSchemas = 0;
+        std::size_t expectedOptionalSchemas = 0;
         std::size_t modulesRead = 0;
         std::size_t executableSectionsRead = 0;
         std::size_t unreadableCodePages = 0;
@@ -99,6 +105,9 @@ namespace runtime_offsets
         std::ptrdiff_t C_BaseEntity_m_iTeamNum = 0;
         std::ptrdiff_t C_BasePlayerPawn_m_vOldOrigin = 0;
         std::ptrdiff_t C_BaseModelEntity_m_vecViewOffset = 0;
+        std::ptrdiff_t CNetworkViewOffsetVector_m_vecX = 0x10;
+        std::ptrdiff_t CNetworkViewOffsetVector_m_vecY = 0x18;
+        std::ptrdiff_t CNetworkViewOffsetVector_m_vecZ = 0x20;
         std::ptrdiff_t C_BasePlayerPawn_m_flFOVSensitivityAdjust = 0;
         std::ptrdiff_t C_BasePlayerPawn_m_pWeaponServices = 0;
         std::ptrdiff_t C_BasePlayerPawn_m_pObserverServices = 0;
@@ -120,6 +129,9 @@ namespace runtime_offsets
         std::ptrdiff_t CEntityInstance_m_pEntity = 0;
         std::ptrdiff_t CEntityIdentity_m_designerName = 0;
         std::ptrdiff_t C_BasePlayerWeapon_m_iClip1 = 0;
+        std::ptrdiff_t C_BasePlayerWeapon_m_pReserveAmmo = 0;
+        std::ptrdiff_t CBasePlayerWeaponVData_m_iMaxClip1 = 0;
+        std::ptrdiff_t CBasePlayerWeaponVData_m_bReserveAmmoAsClips = 0;
         std::ptrdiff_t C_CSWeaponBase_m_bCanBePickedUp = 0;
         std::ptrdiff_t C_CSWeaponBase_m_nDropTick = 0;
         std::ptrdiff_t C_CSWeaponBase_m_fAccuracyPenalty = 0;
@@ -205,11 +217,13 @@ namespace runtime_offsets
     bool ResolveFromAttachedProcess(
         RuntimeResolveReport* report = nullptr,
         std::string* message = nullptr,
-        bool force = false);
+        bool force = false,
+        const ResolveControl* control = nullptr);
     bool AutoUpdateFromGitHub(
         std::string* message = nullptr,
         AutoUpdateReport* report = nullptr,
         bool forceRemote = false);
     bool Load(std::string* message = nullptr);
-    bool SanityCheckOffsets(std::string* message = nullptr);
+    bool SanityCheckOffsets(std::string* message = nullptr,
+        const ResolveControl* control = nullptr);
 }

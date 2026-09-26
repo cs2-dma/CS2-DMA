@@ -1,6 +1,7 @@
 #pragma once
 #include "../pch.h"
 #include <atomic>
+#include "read_priority.h"
 
 class Memory
 {
@@ -48,6 +49,10 @@ private:
 	size_t GetModuleSize(const std::string& moduleName);
 
 public:
+    static inline dma::ReadPriority READ_PRIORITY;
+    static inline std::atomic<uint64_t> DMA_BACKGROUND_READ_COUNT = 0;
+    static inline std::atomic<uint64_t> DMA_BACKGROUND_DEFERRED_COUNT = 0;
+    static inline std::atomic<uint64_t> DMA_BACKGROUND_BYTES = 0;
 	static inline std::atomic<uint64_t> DMA_EXECUTE_SCATTER_TOTAL_US = 0;
 	static inline std::atomic<uint64_t> DMA_EXECUTE_SCATTER_PEAK_US = 0;
 	static inline std::atomic<uint64_t> DMA_EXECUTE_SCATTER_RECENT_PEAK_US = 0;
@@ -98,6 +103,7 @@ public:
 	
 	bool Read(uintptr_t address, void* buffer, size_t size) const;
 	bool ReadCached(uintptr_t address, void* buffer, size_t size) const;
+    bool TryReadBackground(uintptr_t address, void* buffer, size_t size, bool cached, bool& deferred) const;
 
 	
 	VMMDLL_SCATTER_HANDLE CreateScatterHandle() const;

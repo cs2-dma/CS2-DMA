@@ -17,6 +17,7 @@
     DWORD localPosBytesRead = 0;
     bool localPosReadValid = false;
     Vector3 localViewOffset = s_localViewOffset;
+    esp::data::ViewOffsetSample localViewOffsetSample;
     DWORD localViewOffsetBytesRead = 0;
     bool localViewOffsetReadValid = false;
     Vector3 localAimPunch = {};
@@ -43,6 +44,7 @@
     float bombDefuseLength = 0.0f;
     float currentGameTime = s_lastStableGameTime;
     bool currentGameTimeFresh = false;
+    uint64_t currentGameTimeSampleUs = 0;
     float intervalPerTick = s_lastStableIntervalPerTick;
     highestEntityIndex = std::max(0, s_highestEntityIdxStat.load(std::memory_order_relaxed));
     uintptr_t bombSceneNode = 0;
@@ -401,8 +403,11 @@
                 mem.AddScatterReadRequest(handle, s_cbpLocalPawn + ofs.C_BaseEntity_m_lifeState, &localPawnLifeState, sizeof(localPawnLifeState), &localPawnLifeStateBytesRead);
             if (ofs.C_BasePlayerPawn_m_vOldOrigin > 0)
                 mem.AddScatterReadRequest(handle, s_cbpLocalPawn + ofs.C_BasePlayerPawn_m_vOldOrigin, &localPos, sizeof(localPos), &localPosBytesRead);
-            if (ofs.C_BaseModelEntity_m_vecViewOffset > 0)
-                mem.AddScatterReadRequest(handle, s_cbpLocalPawn + ofs.C_BaseModelEntity_m_vecViewOffset, &localViewOffset, sizeof(localViewOffset), &localViewOffsetBytesRead);
+            if (localViewOffsetSample.Prepare(s_cbpLocalPawn, ofs.C_BaseModelEntity_m_vecViewOffset,
+                    ofs.CNetworkViewOffsetVector_m_vecX, ofs.CNetworkViewOffsetVector_m_vecY,
+                    ofs.CNetworkViewOffsetVector_m_vecZ))
+                mem.AddScatterReadRequest(handle, localViewOffsetSample.address,
+                    localViewOffsetSample.bytes.data(), localViewOffsetSample.size, &localViewOffsetBytesRead);
             if (ofs.C_BasePlayerPawn_m_flFOVSensitivityAdjust > 0)
                 mem.AddScatterReadRequest(handle, s_cbpLocalPawn + ofs.C_BasePlayerPawn_m_flFOVSensitivityAdjust, &localFovSensitivityAdjust, sizeof(localFovSensitivityAdjust), &localFovSensitivityBytesRead);
             if (ofs.C_CSPlayerPawnBase_m_iIDEntIndex > 0)
@@ -542,6 +547,7 @@
             localPos = {};
             localPosBytesRead = 0;
             localViewOffset = {};
+            localViewOffsetSample = {};
             localViewOffsetBytesRead = 0;
             localFovSensitivityAdjust = 1.0f;
             rawLocalAimPunchServices = 0;
@@ -576,8 +582,11 @@
                     mem.AddScatterReadRequest(handle, localPawn + ofs.C_BaseEntity_m_lifeState, &localPawnLifeState, sizeof(localPawnLifeState), &localPawnLifeStateBytesRead);
                 if (ofs.C_BasePlayerPawn_m_vOldOrigin > 0)
                     mem.AddScatterReadRequest(handle, localPawn + ofs.C_BasePlayerPawn_m_vOldOrigin, &localPos, sizeof(localPos), &localPosBytesRead);
-                if (ofs.C_BaseModelEntity_m_vecViewOffset > 0)
-                    mem.AddScatterReadRequest(handle, localPawn + ofs.C_BaseModelEntity_m_vecViewOffset, &localViewOffset, sizeof(localViewOffset), &localViewOffsetBytesRead);
+                if (localViewOffsetSample.Prepare(localPawn, ofs.C_BaseModelEntity_m_vecViewOffset,
+                        ofs.CNetworkViewOffsetVector_m_vecX, ofs.CNetworkViewOffsetVector_m_vecY,
+                        ofs.CNetworkViewOffsetVector_m_vecZ))
+                    mem.AddScatterReadRequest(handle, localViewOffsetSample.address,
+                        localViewOffsetSample.bytes.data(), localViewOffsetSample.size, &localViewOffsetBytesRead);
                 if (ofs.C_BasePlayerPawn_m_flFOVSensitivityAdjust > 0)
                     mem.AddScatterReadRequest(handle, localPawn + ofs.C_BasePlayerPawn_m_flFOVSensitivityAdjust, &localFovSensitivityAdjust, sizeof(localFovSensitivityAdjust), &localFovSensitivityBytesRead);
                 if (ofs.C_CSPlayerPawnBase_m_iIDEntIndex > 0)
@@ -633,8 +642,7 @@
             localShotsFiredBytesRead == sizeof(localShotsFired) &&
             localShotsFired >= 0 && localShotsFired <= 100;
         localViewOffsetReadValid =
-            localPawn != 0 &&
-            localViewOffsetBytesRead == sizeof(localViewOffset);
+            localViewOffsetSample.Decode(localPawn, localViewOffsetBytesRead, localViewOffset);
         localPosReadValid =
             localPawn != 0 &&
             localPosBytesRead == sizeof(localPos) &&
@@ -654,7 +662,7 @@
             std::fabs(localAimPunch.y) <= 45.0f &&
             std::fabs(localAimPunch.z) <= 10.0f;
         localAimPunchValid =
-            wantsTargetRecoil && localShotsFiredValid &&
+            wantsTargetRecoil &&
             localAimPunchReadComplete;
         if (!localShotsFiredValid)
             localShotsFired = 0;
@@ -750,6 +758,7 @@
                     s_currentTimeCandidateIndex);
             currentGameTime = gameTimeSelection.value;
             currentGameTimeFresh = gameTimeSelection.acceptedRaw;
+            currentGameTimeSampleUs = currentGameTimeFresh ? baseNowUs : 0;
             if (gameTimeSelection.acceptedRaw) {
                 s_currentTimeCandidateIndex = gameTimeSelection.candidateIndex;
                 const bool firstStableGameTime =

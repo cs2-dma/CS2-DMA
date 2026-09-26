@@ -146,7 +146,8 @@
             s_playerDiscoveryCursor = 0;
         }
 
-        if (hierarchyRefreshDue && playerRefreshSlotCount > 0) {
+        if (hierarchyRefreshDue && playerRefreshSlotCount > 0 &&
+            (forcedDeferredLane == DeferredLane::None || !s_controllerCacheWarmed)) {
             _playerHierarchyActiveTick = true;
             int hierarchyHeldSlotCount = 0;
             auto validateControllersForRefresh = [&]() {

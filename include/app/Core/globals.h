@@ -38,6 +38,7 @@ namespace g {
     inline std::atomic<uintptr_t>& engine2Base = runtimeState.engine2Base;
     inline std::atomic<bool>& running = runtimeState.running;
     inline std::atomic<bool>& menuOpen = runtimeState.menuOpen;
+    inline std::atomic<uint64_t>& targetKeyCaptureUntilMs = runtimeState.targetKeyCaptureUntilMs;
 
     inline bool& espEnabled = espSettings.enabled;
     inline bool& espBox = espSettings.box;
@@ -76,6 +77,8 @@ namespace g {
     inline float& espDistanceSize = espSettings.distanceSize;
     inline bool& espSkeleton = espSettings.skeleton;
     inline bool& espSkeletonDots = espSettings.skeletonDots;
+    inline bool& espSkeletonHeadCircle = espSettings.skeletonHeadCircle;
+    inline float& espSkeletonHeadScale = espSettings.skeletonHeadScale;
     inline bool& espSnaplines = espSettings.snaplines;
     inline bool& espSnaplineFromTop = espSettings.snaplineFromTop;
     inline bool& espVisibilityColoring = espSettings.visibilityColoring;
@@ -152,20 +155,20 @@ namespace g {
     inline int& targetAimKey = targetSettings.aimKey;
     inline int& targetAimActivationMode = targetSettings.aimActivationMode;
     inline int& targetAimBone = targetSettings.aimBone;
-    inline float& targetAimSmoothing = targetSettings.aimSmoothing;
     inline bool& targetAimVisibleOnly = targetSettings.aimVisibleOnly;
     inline bool& targetAimPredictive = targetSettings.aimPredictive;
     inline bool& targetAimRecoilControl = targetSettings.aimRecoilControl;
     inline bool& targetAimHumanization = targetSettings.aimHumanization;
+    inline bool& targetAimTargetLock = targetSettings.aimTargetLock;
     inline bool& targetTriggerbotEnabled = targetSettings.triggerbotEnabled;
     inline int& targetTriggerKey = targetSettings.triggerKey;
     inline int& targetTriggerActivationMode = targetSettings.triggerActivationMode;
     inline bool& targetTriggerAimAssist = targetSettings.triggerAimAssist;
     inline int& targetTriggerAimBone = targetSettings.triggerAimBone;
-    inline float& targetTriggerAimSmoothing = targetSettings.triggerAimSmoothing;
     inline bool& targetTriggerAimPredictive = targetSettings.triggerAimPredictive;
     inline bool& targetTriggerAimRecoilControl = targetSettings.triggerAimRecoilControl;
     inline bool& targetTriggerAimHumanization = targetSettings.triggerAimHumanization;
+    inline bool& targetTriggerTargetLock = targetSettings.triggerTargetLock;
     inline int& targetTriggerDelayMs = targetSettings.triggerDelayMs;
     inline bool& targetTriggerVisibleOnly = targetSettings.triggerVisibleOnly;
     inline bool& targetTriggerAutoShot = targetSettings.triggerAutoShot;
@@ -227,6 +230,7 @@ namespace g {
     inline ImFont*& fontUiTitle = fontState.fontUiTitle;
     inline ImFont*& fontEspName = fontState.fontEspName;
     inline ImFont*& fontOverlayText = fontState.fontOverlayText;
+    inline ImFont*& fontBarValues = fontState.fontBarValues;
     inline ImFont*& fontSegoeBold = fontState.fontEspName;
     inline ImFont*& fontComicSans = fontState.fontOverlayText;
     inline ImFont*& fontUiIcons = fontState.fontUiIcons;

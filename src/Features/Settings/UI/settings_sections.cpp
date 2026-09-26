@@ -260,6 +260,8 @@ void ui::tabs::settings_sections::RenderInputDeviceSection(IStatusSink& statusSi
     ImGui::TextDisabled(
         "%s",
         KEVQ_TR(app::input::DeviceKindTransportLabel(selected)));
+    if (selected == DeviceKind::FerrumOne && ImGui::IsItemHovered())
+        ImGui::SetItemTooltip("%s", KEVQ_TR("Keep Ferrum App running. Copy IP, port, and UUID from its Net API tab. Network settings are shared with KMBox NET."));
 
     static std::array<char, 65> netHost = {};
     static std::array<char, 33> netKey = {};
@@ -275,9 +277,6 @@ void ui::tabs::settings_sections::RenderInputDeviceSection(IStatusSink& statusSi
     syncBuffer(netKey, bufferedKey, g::inputDeviceNetKey);
 
     const bool networkDevice = app::input::IsNetworkDeviceKind(selected);
-    if (selected == DeviceKind::FerrumOne) {
-        ImGui::TextWrapped("%s", KEVQ_TR("Keep Ferrum App running. Copy IP, port, and UUID from its Net API tab. Network settings are shared with KMBox NET."));
-    }
     if (networkDevice) {
         ImGui::Dummy(ImVec2(0.0f, 6.0f));
         if (ImGui::BeginTable(
@@ -1205,6 +1204,9 @@ void ui::tabs::settings_sections::RenderDebugWindow(bool* open)
             worldLastMs,
             msFromUs(st.commitEnrichUs));
         diagnostics += line;
+        std::snprintf(line, sizeof(line), "enrichment_ms weapon=%.2f helmets=%.2f\n",
+            msFromUs(st.weaponTelemetryUs), msFromUs(st.helmetReadsUs));
+        diagnostics += line;
 
         std::snprintf(line, sizeof(line),
             "lane_last_ms player_aux=%.2f@%.1f inventory=%.2f@%.1f bones=%.2f@%.1f\n",
@@ -1250,6 +1252,19 @@ void ui::tabs::settings_sections::RenderDebugWindow(bool* open)
             "player_core_rejections incomplete_mask=0x%llX invalid_values_mask=0x%llX\n",
             static_cast<unsigned long long>(debug.playerCoreIncompleteMask),
             static_cast<unsigned long long>(debug.playerCoreInvalidMask));
+        diagnostics += line;
+
+        const auto& flags = debug.playerFlags;
+        const auto flagNowUs = esp::GetSnapshotTimeUs();
+        const double flagAgeMs = flags.sampledAtUs && flagNowUs >= flags.sampledAtUs
+            ? static_cast<double>(flagNowUs - flags.sampledAtUs) / 1000.0 : -1.0;
+        std::snprintf(line, sizeof(line),
+            "player_flags requested_mask=0x%X order=scope/defuse/blind fresh=%d/%d/%d active=%d/%d/%d published=%d/%d/%d age_ms=%.1f flash_slot=%d bang=%.3f duration=%.3f game_time=%.3f clock_fresh=%d\n",
+            flags.requestedMask, flags.fresh[0], flags.fresh[1], flags.fresh[2],
+            flags.active[0], flags.active[1], flags.active[2],
+            flags.published[0], flags.published[1], flags.published[2], flagAgeMs,
+            flags.flashSlot, flags.flashBangTime, flags.flashDuration, flags.gameTime,
+            flags.gameTimeFresh ? 1 : 0);
         diagnostics += line;
 
         const auto visibilityState = esp::data::ResolveVisibilityDiagnosticState(
@@ -1403,6 +1418,15 @@ void ui::tabs::settings_sections::RenderDebugWindow(bool* open)
             static_cast<unsigned long long>(debug.dma.scatterIncompleteRequests),
             static_cast<unsigned long long>(debug.dma.scatterPartialBatches),
             static_cast<unsigned long long>(debug.dma.scatterSetupFailures));
+        diagnostics += line;
+
+        std::snprintf(line, sizeof(line),
+            "geometry_io totals_since_start reads=%llu bytes=%llu deferred=%llu foreground_active=%u pressure=%d\n",
+            static_cast<unsigned long long>(Memory::DMA_BACKGROUND_READ_COUNT.load(std::memory_order_relaxed)),
+            static_cast<unsigned long long>(Memory::DMA_BACKGROUND_BYTES.load(std::memory_order_relaxed)),
+            static_cast<unsigned long long>(Memory::DMA_BACKGROUND_DEFERRED_COUNT.load(std::memory_order_relaxed)),
+            Memory::READ_PRIORITY.ForegroundCount(),
+            Memory::READ_PRIORITY.UnderPressure(dma::ReadPriority::NowUs()) ? 1 : 0);
         diagnostics += line;
 
         const auto& qualityInterval = debug.dma.readQualityInterval;

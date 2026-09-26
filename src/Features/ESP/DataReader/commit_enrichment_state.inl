@@ -120,16 +120,17 @@
 
     auto resolveCommittedWeaponState = [&](int idx, uint16_t liveWeaponId, uint16_t& outWeaponId, int& outAmmoClip) {
         outWeaponId = 0;
-        outAmmoClip = ammoClips[idx];
+        outAmmoClip = -1;
         if (idx < 0 || idx >= 64)
             return;
+        outAmmoClip = ammoClips[idx];
 
         const uint32_t activeHandle = activeWeaponHandles[idx];
         const bool activeHandleValid = activeHandle != 0u && activeHandle != 0xFFFFFFFFu;
         const uintptr_t activeEntity = activeWeapons[idx];
-        const bool sameWeaponIdentity =
-            (activeHandleValid && activeHandle == s_cachedCommittedWeaponHandles[idx]) ||
-            (activeEntity != 0 && activeEntity == s_cachedCommittedWeaponEntities[idx]);
+        const bool sameWeaponIdentity = esp::data::SameCommittedWeapon(
+            activeHandle, activeEntity, s_cachedCommittedWeaponHandles[idx],
+            s_cachedCommittedWeaponEntities[idx]);
 
         if (liveWeaponId != 0u) {
             outWeaponId = liveWeaponId;
@@ -624,19 +625,22 @@
     {
         static uintptr_t s_telemetryWeapon = 0;
         static uint64_t s_lastTelemetryReadUs = 0;
-        if (!wantsTargetWeaponState || !localWeaponEntityResolved ||
+        const bool wantsWeaponTelemetry = settingsSnapshot.targetNeedsWeaponTelemetry;
+        if (!wantsWeaponTelemetry || !localWeaponEntityResolved ||
             localWeaponEntityResolved != s_telemetryWeapon) {
-            if (localWeaponEntityResolved != s_telemetryWeapon) {
-                s_telemetryWeapon = localWeaponEntityResolved;
-                s_lastTelemetryReadUs = 0;
-                s_localWeaponTelemetry = {};
-            }
+            s_telemetryWeapon = localWeaponEntityResolved;
+            s_lastTelemetryReadUs = 0;
+            s_localWeaponTelemetry = {};
+            if (!wantsWeaponTelemetry && std::isfinite(intervalPerTick) &&
+                intervalPerTick >= 0.001f && intervalPerTick <= 0.1f)
+                s_localWeaponTelemetry.intervalPerTick = intervalPerTick;
         }
-        const bool telemetryDue = wantsTargetWeaponState &&
+        const bool telemetryDue = wantsWeaponTelemetry &&
             localWeaponEntityResolved != 0 &&
             (s_lastTelemetryReadUs == 0 || nowUs < s_lastTelemetryReadUs ||
              nowUs - s_lastTelemetryReadUs >= 12000u);
         if (telemetryDue) {
+            const uint64_t telemetryStartedUs = TickNowUs();
             s_lastTelemetryReadUs = nowUs;
             esp::WeaponTelemetry telemetry = {};
             uintptr_t weaponVData = 0;
@@ -668,20 +672,6 @@
                 ofs.CCSWeaponBaseVData_m_flRange > 0 &&
                 ofs.CCSWeaponBaseVData_m_flArmorRatio > 0 &&
                 ofs.CCSWeaponBaseVData_m_flHeadshotMultiplier > 0;
-            if (offsetsReady) {
-                const uintptr_t subclassVDataAddress =
-                    localWeaponEntityResolved +
-                    static_cast<uintptr_t>(ofs.C_BaseEntity_m_nSubclassID) +
-                    0x8u;
-                if (!readValue(
-                        subclassVDataAddress,
-                        &weaponVData,
-                        sizeof(weaponVData)) ||
-                    !isLikelyGamePointer(weaponVData)) {
-                    weaponVData = 0;
-                }
-            }
-
             constexpr size_t kWeaponBlockBytes = 0x180u;
             constexpr size_t kVDataBlockBytes = 0x340u;
             std::array<std::byte, kWeaponBlockBytes> weaponBlock = {};
@@ -715,11 +705,33 @@
                     ofs.CCSWeaponBaseVData_m_flArmorRatio,
                     ofs.CCSWeaponBaseVData_m_flHeadshotMultiplier,
                 }));
-            const bool weaponBlockValid = weaponVData != 0 &&
-                readValue(
-                    localWeaponEntityResolved + weaponBaseOffset,
-                    weaponBlock.data(),
-                    weaponBlock.size());
+            uint32_t flags = 0;
+            Vector3 localVelocity = {};
+            uint8_t walking = 0;
+            esp::data::CheckedScatterBatch<5> telemetryBatch;
+            size_t vdataRequest = telemetryBatch.invalid;
+            size_t weaponRequest = telemetryBatch.invalid;
+            size_t flagsRequest = telemetryBatch.invalid;
+            size_t velocityRequest = telemetryBatch.invalid;
+            size_t walkingRequest = telemetryBatch.invalid;
+            if (offsetsReady && isLikelyGamePointer(localWeaponEntityResolved) &&
+                isLikelyGamePointer(localPawn)) {
+                vdataRequest = telemetryBatch.Add(localWeaponEntityResolved +
+                    static_cast<uintptr_t>(ofs.C_BaseEntity_m_nSubclassID) + 0x8u,
+                    &weaponVData, sizeof(weaponVData));
+                weaponRequest = telemetryBatch.Add(localWeaponEntityResolved + weaponBaseOffset,
+                    weaponBlock.data(), weaponBlock.size());
+                flagsRequest = telemetryBatch.Add(localPawn + ofs.C_BaseEntity_m_fFlags,
+                    &flags, sizeof(flags));
+                velocityRequest = telemetryBatch.Add(localPawn + ofs.C_BaseEntity_m_vecVelocity,
+                    &localVelocity, sizeof(localVelocity));
+                walkingRequest = telemetryBatch.Add(localPawn + ofs.C_CSPlayerPawn_m_bIsWalking,
+                    &walking, sizeof(walking));
+            }
+            telemetryBatch.Execute(mem, handle);
+            if (!telemetryBatch.Complete(vdataRequest) || !isLikelyGamePointer(weaponVData))
+                weaponVData = 0;
+            const bool weaponBlockValid = telemetryBatch.Complete(weaponRequest);
             const bool vdataBlockValid = weaponVData != 0 &&
                 readValue(
                     weaponVData + vdataBaseOffset,
@@ -791,22 +803,8 @@
                 readBlock(vdataBlock, vdataBaseOffset, ofs.CCSWeaponBaseVData_m_flArmorRatio, armorRatio) &&
                 readBlock(vdataBlock, vdataBaseOffset, ofs.CCSWeaponBaseVData_m_flHeadshotMultiplier, headshotMultiplier);
 
-            uint32_t flags = 0;
-            Vector3 localVelocity = {};
-            uint8_t walking = 0;
-            const bool playerStateValid = localPawn != 0 &&
-                readValue(
-                    localPawn + ofs.C_BaseEntity_m_fFlags,
-                    &flags,
-                    sizeof(flags)) &&
-                readValue(
-                    localPawn + ofs.C_BaseEntity_m_vecVelocity,
-                    &localVelocity,
-                    sizeof(localVelocity)) &&
-                readValue(
-                    localPawn + ofs.C_CSPlayerPawn_m_bIsWalking,
-                    &walking,
-                    sizeof(walking)) &&
+            const bool playerStateValid = telemetryBatch.Complete(flagsRequest) &&
+                telemetryBatch.Complete(velocityRequest) && telemetryBatch.Complete(walkingRequest) &&
                 IsFiniteVec(localVelocity) && walking <= 1u;
             const bool onGround = (flags & 1u) != 0u;
             const bool crouching = (flags & (1u << 1u)) != 0u;
@@ -918,6 +916,7 @@
             } else {
                 s_localWeaponTelemetry = {};
             }
+            _stageWeaponTelemetryUs = TickNowUs() - telemetryStartedUs;
         }
     }
     s_localHasBomb = localHasBombResolved;
@@ -925,48 +924,63 @@
     std::copy(std::begin(localGrenadeIdsResolved), std::end(localGrenadeIdsResolved), std::begin(s_localGrenadeIds));
 
     static uintptr_t s_helmetPawns[64] = {};
+    static uintptr_t s_helmetServices[64] = {};
     static uint8_t s_helmetFlags[64] = {};
     static uint64_t s_helmetUpdatedAtUs[64] = {};
+    static uint64_t s_helmetAttemptedAtUs[64] = {};
     static uint64_t s_helmetCacheResetSerial = 0;
     const uint64_t helmetResetSerial =
         s_sceneResetSerial.load(std::memory_order_relaxed);
     if (s_helmetCacheResetSerial != helmetResetSerial) {
         s_helmetCacheResetSerial = helmetResetSerial;
         memset(s_helmetPawns, 0, sizeof(s_helmetPawns));
+        memset(s_helmetServices, 0, sizeof(s_helmetServices));
         memset(s_helmetFlags, 0, sizeof(s_helmetFlags));
         memset(s_helmetUpdatedAtUs, 0, sizeof(s_helmetUpdatedAtUs));
+        memset(s_helmetAttemptedAtUs, 0, sizeof(s_helmetAttemptedAtUs));
     }
+    const uint64_t helmetStartedUs = TickNowUs();
+    esp::data::CheckedScatterBatch<64> helmetBatch;
+    std::array<uint8_t, 64> helmetSamples = {};
+    std::array<size_t, 64> helmetRequests;
+    helmetRequests.fill(helmetBatch.invalid);
     for (int i = 0; i < 64; ++i) {
-        if (s_helmetPawns[i] != pawns[i]) {
+        if (s_helmetPawns[i] != pawns[i] || s_helmetServices[i] != itemServices[i]) {
             s_helmetPawns[i] = pawns[i];
+            s_helmetServices[i] = itemServices[i];
             s_helmetFlags[i] = 0;
             s_helmetUpdatedAtUs[i] = 0;
+            s_helmetAttemptedAtUs[i] = 0;
         }
-        if (!pawns[i] || !itemServices[i] ||
+        if (!wantsTargetWeaponState || !pawns[i] || healths[i] <= 0 || !itemServices[i] ||
             ofs.CCSPlayer_ItemServices_m_bHasHelmet <= 0) {
             continue;
         }
-        if (s_helmetUpdatedAtUs[i] != 0 && nowUs >= s_helmetUpdatedAtUs[i] &&
-            nowUs - s_helmetUpdatedAtUs[i] < 100000u) {
+        if (s_helmetAttemptedAtUs[i] != 0 && nowUs >= s_helmetAttemptedAtUs[i] &&
+            nowUs - s_helmetAttemptedAtUs[i] < 100000u) {
             continue;
         }
-        uint8_t helmet = 0;
-        if (readValue(
-                itemServices[i] + ofs.CCSPlayer_ItemServices_m_bHasHelmet,
-                &helmet,
-                sizeof(helmet)) && helmet <= 1u) {
-            s_helmetFlags[i] = helmet;
+        s_helmetAttemptedAtUs[i] = nowUs;
+        helmetRequests[i] = helmetBatch.Add(itemServices[i] + ofs.CCSPlayer_ItemServices_m_bHasHelmet,
+            &helmetSamples[i], sizeof(helmetSamples[i]));
+    }
+    helmetBatch.Execute(mem, handle);
+    for (int i = 0; i < 64; ++i) {
+        if (helmetBatch.Complete(helmetRequests[i]) && helmetSamples[i] <= 1u) {
+            s_helmetFlags[i] = helmetSamples[i];
             s_helmetUpdatedAtUs[i] = nowUs;
         }
     }
+    _stageHelmetReadsUs = TickNowUs() - helmetStartedUs;
 
 #include "commit_players_enrichment.inl"
+#include "weapon_presentation.inl"
     for (int i = 0; i < 64; ++i) {
         if (s_players[i].valid &&
             s_players[i].health > 0 &&
             s_players[i].pawn == s_helmetPawns[i]) {
             s_players[i].hasHelmet = s_helmetFlags[i] == 1u;
-            s_players[i].hasHelmetValid = s_helmetUpdatedAtUs[i] != 0 &&
+            s_players[i].hasHelmetValid = wantsTargetWeaponState && s_helmetUpdatedAtUs[i] != 0 &&
                 nowUs >= s_helmetUpdatedAtUs[i] &&
                 nowUs - s_helmetUpdatedAtUs[i] <= 150000u;
             s_players[i].helmetUpdatedAtUs = s_players[i].hasHelmetValid
@@ -1553,13 +1567,9 @@
             wp.position = webRadarPos;
             wp.velocity = isDead ? Vector3{} : velocities[i];
             wp.velocityValid = !isDead && velocityReadFresh[i];
-            wp.scoped = scopedFlags[i] == 1u;
-            wp.defusing = defusingFlags[i] == 1u;
+            esp::data::CommitPlayerFlags(wp, s_scopedFlagFilters[i],
+                s_defusingFlagFilters[i], s_blindFlagFilters[i], nowUs);
             wp.hasDefuser = hasDefuserFlags[i] == 1u;
-            wp.flashDuration = flashDurations[i];
-            wp.flashed =
-                esp::data::IsValidFlashDurationSample(wp.flashDuration) &&
-                wp.flashDuration > esp::data::kFlashFlagReleaseSeconds;
             wp.eyeYaw = eyeAnglesPerPlayer[i].y;
             wp.visible = false;
             wp.visibilityUpdatedAtUs = 0;

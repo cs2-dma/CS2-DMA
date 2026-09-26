@@ -165,6 +165,15 @@ void bootstrap::RuntimeConsole::PrintInfoLine(const std::string& text) const
     PrintLine("Info", text);
 }
 
+void bootstrap::RuntimeConsole::PrintInfoQuestion(const std::string& text) const
+{
+    std::ostringstream line;
+    line << "\r" << C(kColorYellow) << "  | " << app::localization::Get("Info") << " | "
+         << C(kColorReset) << app::localization::Get(text.c_str()) << " ["
+         << C(kColorYellow) << "?" << C(kColorReset) << "]                    \n";
+    DmaConsoleWriteUtf8(line.str().c_str());
+}
+
 void bootstrap::RuntimeConsole::PrintInfoMarkedLine(const std::string& text) const
 {
     PrintMarkedLine("Info", text);

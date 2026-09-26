@@ -1,5 +1,6 @@
 #include "app/Core/build_info.h"
 #include "app/UI/MenuShell/menu_controller.h"
+#include "app/UI/MenuShell/version_notice.h"
 
 #include "app/Config/config.h"
 #include "app/Core/globals.h"
@@ -191,6 +192,7 @@ void ui::MenuController::Render()
         static_cast<unsigned>(dmaStats.consecutiveFailures),
         static_cast<unsigned>(dmaStats.consecutiveDegraded));
 
+    ui::RenderVersionNotice(app::updates::GetStatus(), false);
     if (ImGui::BeginTabBar("##tabs", ImGuiTabBarFlags_FittingPolicyResizeDown)) {
         for (const auto& tab : tabs_) {
             if (ImGui::BeginTabItem(app::localization::Get(tab->Label()))) {

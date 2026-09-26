@@ -31,6 +31,8 @@
             s_stageWorldScanLastUs.store(worldScanDelta, std::memory_order_relaxed);
         s_stageBombScanUs.store(_stageBombEnd - _stageWorldEnd, std::memory_order_relaxed);
         s_stageCommitEnrichUs.store(_stageEnrichEnd - _stageBombEnd, std::memory_order_relaxed);
+        s_stageWeaponTelemetryUs.store(_stageWeaponTelemetryUs, std::memory_order_relaxed);
+        s_stageHelmetReadsUs.store(_stageHelmetReadsUs, std::memory_order_relaxed);
         s_stageTimingSequence.fetch_add(1, std::memory_order_release);
 
         const uint64_t totalCycleUs = _stageEnrichEnd - _stagePipelineStart;

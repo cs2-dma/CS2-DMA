@@ -2,13 +2,17 @@
 #include <WS2tcpip.h>
 
 #include "app/Platform/file_replace.h"
+#include "app/Bootstrap/startup_offsets.h"
 #include "app/Config/config_parse_utils.h"
 #include "app/Localization/localization_catalog.h"
 #include "app/Input/input_device_policy.h"
+#include "app/Input/primary_keyboard_policy.h"
 #include "app/Input/input_device.h"
 #include "app/Config/profile_name_utils.h"
 #include "Game/Offsets/runtime_offsets_parse_utils.h"
 #include "Game/Offsets/runtime_resolver_policy.h"
+#include "Game/Offsets/runtime_offset_resolver.h"
+#include "Features/ESP/DataReader/checked_scatter_batch.h"
 #include "Features/ESP/DataReader/bone_read_policy.h"
 #include "Features/ESP/DataReader/deferred_lane_policy.h"
 #include "Features/ESP/DataReader/bone_plausibility.h"
@@ -32,6 +36,7 @@
 #include "Features/ESP/Recovery/process_identity_policy.h"
 #include "Features/ESP/Recovery/reset_policy.h"
 #include "Features/ESP/Render/draw_policy.h"
+#include "Features/ESP/Render/presentation_policy.h"
 #include "Features/ESP/Render/skeleton_gate.h"
 #include "Features/ESP/Render/visual_style_policy.h"
 #include "Features/ESP/Render/weapon_icon_atlas_data.generated.h"
@@ -42,6 +47,8 @@
 #include "Features/ESP/weapon_catalog.h"
 #include "Features/Target/target_policy.h"
 #include "Features/Target/target_ballistics.h"
+#include "Features/Target/convar_snapshot_worker.h"
+#include "Features/Target/physics_shape_policy.h"
 #include "Features/WebRadar/runtime_utils.h"
 
 #include <json/json.hpp>
@@ -180,9 +187,621 @@ namespace
         CHECK(!IsCompleteGamePointerSample(kMinimumUserAddress, sizeof(uintptr_t) + 1));
     }
 
+    void TestConvarSnapshotWorker()
+    {
+        using target::convars::detail::SnapshotWorker;
+        std::atomic<uint64_t> now{10000000};
+        std::atomic<int> calls{0};
+        std::atomic<int> resets{0};
+        std::atomic<bool> hold{true};
+        SnapshotWorker worker([&](const auto& canceled) {
+            const int call = ++calls;
+            const uint64_t started = now.load();
+            while (hold.load() && !canceled()) std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            target::convars::Values result;
+            result.updatedAtUs = started;
+            result.recoilScaleValid = true;
+            result.recoilScale = static_cast<float>(call);
+            return result;
+        }, [&] { ++resets; }, [&] { return now.load(); });
+        const auto waitFor = [](const auto& ready) {
+            const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+            while (!ready() && std::chrono::steady_clock::now() < deadline)
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            return ready();
+        };
+        CHECK(!worker.Read(1).recoilScaleValid && calls == 0);
+        worker.Start();
+        worker.Start();
+        CHECK(!worker.Read(1).recoilScaleValid);
+        CHECK(waitFor([&] { return calls == 1; }));
+        const auto before = std::chrono::steady_clock::now();
+        for (int i = 0; i < 1000; ++i) CHECK(!worker.Read(1).recoilScaleValid);
+        CHECK(std::chrono::steady_clock::now() - before < std::chrono::milliseconds(200));
+        CHECK(calls == 1);
+        CHECK(!worker.Read(2).recoilScaleValid);
+        CHECK(waitFor([&] { return calls == 2; }));
+        CHECK(!worker.Read(2).recoilScaleValid);
+        hold = false;
+        CHECK(waitFor([&] { return worker.Read(2).recoilScaleValid; }));
+        CHECK(worker.Read(2).recoilScale == 2.0f);
+        CHECK(resets == 2);
+        for (int i = 0; i < 1000; ++i) CHECK(worker.Read(2).recoilScaleValid);
+        CHECK(calls == 2);
+        now += SnapshotWorker::kMaximumSampleAgeUs + 1;
+        hold = true;
+        CHECK(!worker.Read(2).recoilScaleValid);
+        CHECK(waitFor([&] { return calls == 3; }));
+        const auto stopStarted = std::chrono::steady_clock::now();
+        worker.Stop();
+        CHECK(std::chrono::steady_clock::now() - stopStarted < std::chrono::seconds(1));
+        CHECK(!worker.Read(2).recoilScaleValid);
+        worker.Stop();
+        hold = false;
+        worker.Start();
+        CHECK(!worker.Read(3).recoilScaleValid);
+        CHECK(waitFor([&] { return worker.Read(3).recoilScaleValid; }));
+        CHECK(worker.Read(3).recoilScale == 4.0f);
+        worker.Stop();
+    }
+
+    void TestPhysicsShapeLayouts()
+    {
+        using namespace target::physics::shape_policy;
+        const auto put = [](auto& bytes, size_t offset, auto value) {
+            std::memcpy(bytes.data() + offset, &value, sizeof(value));
+        };
+        for (const auto kind : {Kind::Hull, Kind::Mesh}) {
+            for (const size_t scaleOffset : {size_t{0xB0}, size_t{0xB8}}) {
+                std::array<uint8_t, 0xD0> shape{};
+                std::array<uint8_t, 0x100> header{};
+                shape[0x18] = static_cast<uint8_t>(kind);
+                put(shape, scaleOffset, 2.0f);
+                if (kind == Kind::Mesh) {
+                    put(shape, scaleOffset + 4, 3.0f);
+                    put(shape, scaleOffset + 8, -4.0f);
+                }
+                const size_t pointerOffset = scaleOffset + (kind == Kind::Hull ? 8 : 16);
+                put(shape, pointerOffset, uintptr_t{0x20000});
+                const auto offsets = kind == Kind::Hull ? std::array<size_t, 3>{0x88, 0xA0, 0xB8}
+                    : std::array<size_t, 3>{0x18, 0x30, 0x48};
+                for (const size_t offset : offsets) {
+                    put(header, offset, int{12});
+                    put(header, offset + 8, uintptr_t{0x30000});
+                }
+                bool readable = true;
+                int reads = 0;
+                const auto read = [&](uintptr_t address, void* output, size_t size) {
+                    ++reads;
+                    if (!readable || address != 0x20000 || size > header.size()) return false;
+                    std::memcpy(output, header.data(), size);
+                    return true;
+                };
+                const auto result = ReadPayload(shape, kind, read);
+                CHECK(result && result->address == 0x20000 && result->scaleOffset == scaleOffset);
+                CHECK(result && result->scale[0] == 2.0f);
+                CHECK(result && result->scale[2] == (kind == Kind::Hull ? 2.0f : -4.0f));
+                CHECK(reads == 1);
+                readable = false;
+                CHECK(!ReadPayload(shape, kind, read));
+                readable = true;
+                put(header, offsets[0], int{-1});
+                CHECK(!ReadPayload(shape, kind, read));
+                put(header, offsets[0], int{12});
+                shape[0x18] = 1;
+                CHECK(!ReadPayload(shape, kind, read));
+                shape[0x18] = static_cast<uint8_t>(kind);
+                put(shape, scaleOffset, std::numeric_limits<float>::quiet_NaN());
+                CHECK(!ReadPayload(shape, kind, read));
+                put(shape, scaleOffset, 0.0f);
+                CHECK(!ReadPayload(shape, kind, read));
+                put(shape, scaleOffset, 2.0f);
+                put(shape, pointerOffset, uintptr_t{0x20001});
+                CHECK(!ReadPayload(shape, kind, read));
+                CHECK(!ReadPayload(std::span(shape).first(0xC8), kind, read));
+            }
+        }
+        std::array<uint8_t, 0xD0> ambiguous{};
+        ambiguous[0x18] = 2;
+        put(ambiguous, 0xB0, 1.0f);
+        put(ambiguous, 0xB8, uintptr_t{0x13F800000});
+        put(ambiguous, 0xC0, uintptr_t{0x30000});
+        CHECK(!ReadPayload(ambiguous, Kind::Hull, [&](uintptr_t, void* output, size_t size) {
+            std::array<uint8_t, 0x100> header{};
+            for (const size_t offset : {size_t{0x88}, size_t{0xA0}, size_t{0xB8}}) {
+                put(header, offset, int{12});
+                put(header, offset + 8, uintptr_t{0x40000});
+            }
+            std::memcpy(output, header.data(), size);
+            return true;
+        }));
+    }
+
+    void TestCheckedScatterBatch()
+    {
+        struct Reader {
+            struct Pending { void* data; size_t size; DWORD* bytes; };
+            std::vector<Pending> pending;
+            int calls = 0;
+            int partial = -1;
+            int overread = -1;
+            bool success = true;
+            void AddScatterReadRequest(int, uintptr_t, void* data, size_t size, DWORD* bytes)
+            {
+                pending.push_back({data, size, bytes});
+            }
+            bool ExecuteReadScatter(int)
+            {
+                ++calls;
+                for (size_t i = 0; i < pending.size(); ++i) {
+                    auto& request = pending[i];
+                    memset(request.data, 1, request.size);
+                    *request.bytes = static_cast<DWORD>(request.size);
+                    if (static_cast<int>(i) == partial) --*request.bytes;
+                    if (static_cast<int>(i) == overread) ++*request.bytes;
+                }
+                pending.clear();
+                return success;
+            }
+        } reader;
+        esp::data::CheckedScatterBatch<5> empty;
+        empty.Execute(reader, 0);
+        CHECK(reader.calls == 0 && !empty.Complete(0));
+        uint32_t output[5] = {};
+        CHECK(empty.Add(0, output, sizeof(output[0])) == empty.invalid);
+        CHECK(empty.Add(1, nullptr, sizeof(output[0])) == empty.invalid);
+        CHECK(empty.Add(1, output, 0) == empty.invalid);
+        CHECK(empty.Add(UINTPTR_MAX, output, sizeof(output[0])) == empty.invalid);
+        for (int bad = -1; bad < 5; ++bad) {
+            esp::data::CheckedScatterBatch<5> batch;
+            for (size_t i = 0; i < 5; ++i)
+                CHECK(batch.Add(0x10000 + i * 8, &output[i], sizeof(output[i])) == i);
+            CHECK(batch.Add(0x20000, output, 4) == batch.invalid);
+            reader.partial = bad;
+            const int before = reader.calls;
+            batch.Execute(reader, 0);
+            batch.Execute(reader, 0);
+            CHECK(reader.calls == before + 1);
+            for (size_t i = 0; i < 5; ++i)
+                CHECK(batch.Complete(i) == (static_cast<int>(i) != bad));
+            CHECK(!batch.Complete(batch.invalid));
+            CHECK(batch.Add(0x20000, output, 4) == batch.invalid);
+        }
+        reader.partial = -1;
+        reader.success = false;
+        esp::data::CheckedScatterBatch<1> failed;
+        failed.Add(0x10000, output, 4);
+        failed.Execute(reader, 0);
+        CHECK(!failed.Complete(0));
+        reader.success = true;
+        reader.overread = 0;
+        esp::data::CheckedScatterBatch<1> overread;
+        overread.Add(0x10000, output, 4);
+        overread.Execute(reader, 0);
+        CHECK(!overread.Complete(0));
+        reader.overread = -1;
+        std::array<uint8_t, 64> helmets = {};
+        esp::data::CheckedScatterBatch<64> allPlayers;
+        for (size_t i = 0; i < helmets.size(); ++i)
+            CHECK(allPlayers.Add(0x10000 + i * 8, &helmets[i], 1) == i);
+        const int before = reader.calls;
+        allPlayers.Execute(reader, 0);
+        CHECK(reader.calls == before + 1);
+        for (size_t i = 0; i < helmets.size(); ++i)
+            CHECK(allPlayers.Complete(i) && helmets[i] == 1);
+    }
+
+    void TestKeyboardReadPolicy()
+    {
+        using namespace app::input::keyboard_policy;
+        CHECK(NeedsResolution(false, 0, 0, 1000));
+        CHECK(!NeedsResolution(true, 0, 0, 1000));
+        CHECK(!NeedsResolution(true, 1, 1000, 2000));
+        CHECK(!NeedsResolution(true, 8, 1000, 1499));
+        CHECK(NeedsResolution(true, 8, 1000, 1500));
+        CHECK(!NeedsResolution(true, 8, 1000, 999));
+        CHECK(RetryDelayMs(1) == 5000 && RetryDelayMs(2) == 10000 && RetryDelayMs(3) == 30000);
+        constexpr uintptr_t base = 0xFFFFF80000000000ULL;
+        std::vector<uint8_t> memory(131072, 0xCC);
+        const auto pattern = runtime_offsets::resolver_policy::CompilePattern("AB CD ? 12 34");
+        const std::array<uint8_t, 5> signature{0xAB, 0xCD, 0xEF, 0x12, 0x34};
+        int missingPage = -1;
+        int calls = 0;
+        bool cancel = false;
+        auto read = [&](uintptr_t address, void* output, size_t size) {
+            ++calls;
+            const size_t offset = address - base;
+            if (offset > memory.size() || size > memory.size() - offset) return false;
+            if (missingPage >= 0 && offset < (static_cast<size_t>(missingPage) + 1) * 4096 &&
+                offset + size > static_cast<size_t>(missingPage) * 4096) {
+                std::memset(output, 0, size);
+                return false;
+            }
+            std::memcpy(output, memory.data() + offset, size);
+            return true;
+        };
+        auto scan = [&] {
+            return ScanReadablePattern(base, memory.size(), pattern, read, [&] { return cancel; });
+        };
+        for (const size_t offset : {size_t{65534}, size_t{12286}, memory.size() - signature.size()}) {
+            std::fill(memory.begin(), memory.end(), uint8_t{0xCC});
+            std::copy(signature.begin(), signature.end(), memory.begin() + offset);
+            missingPage = offset == 65534 ? -1 : 0;
+            CHECK(scan() == base + offset);
+        }
+        std::fill(memory.begin(), memory.end(), uint8_t{0xCC});
+        std::copy(signature.begin(), signature.end(), memory.begin() + 8190);
+        missingPage = 2;
+        CHECK(scan() == 0);
+        missingPage = -1;
+        CHECK(scan() == base + 8190);
+        cancel = true;
+        calls = 0;
+        CHECK(scan() == 0 && calls == 0);
+        cancel = false;
+        CHECK(ScanReadablePattern(UINTPTR_MAX - 1, 5, pattern, read, [] { return false; }) == 0);
+        uint64_t missing = 0;
+        CHECK(ScanReadablePattern(base, 8192, pattern,
+            [](uintptr_t, void*, size_t) { return false; }, [] { return false; }, &missing) == 0);
+        CHECK(missing == 2);
+    }
+
+    void TestStartupOffsets()
+    {
+        using namespace std::chrono;
+        using bootstrap::OffsetAttempt;
+        using bootstrap::OffsetWaitResult;
+        steady_clock::time_point time{};
+        const auto now = [&] { return time; };
+        const auto sleep = [&](milliseconds delay) {
+            CHECK(delay > milliseconds::zero() && delay <= milliseconds(100));
+            time += delay;
+        };
+        const auto notCancelled = [] { return false; };
+        int attempts = 0;
+        auto result = bootstrap::WaitForRuntimeOffsets([&](bool force) {
+            CHECK(force == (attempts != 0));
+            ++attempts;
+            time += milliseconds(959);
+            return attempts < 4 ? OffsetAttempt::Retry : OffsetAttempt::Ready;
+        }, now, sleep, notCancelled);
+        CHECK(result == OffsetWaitResult::Ready && attempts == 4);
+        CHECK(time.time_since_epoch() == milliseconds(6836));
+
+        time = {};
+        attempts = 0;
+        result = bootstrap::WaitForRuntimeOffsets([&](bool force) {
+            CHECK(force == (attempts != 0));
+            ++attempts;
+            return OffsetAttempt::Retry;
+        }, now, sleep, notCancelled, milliseconds(2500));
+        CHECK(result == OffsetWaitResult::TimedOut && attempts == 3);
+        CHECK(time.time_since_epoch() == milliseconds(2500));
+
+        time = {};
+        attempts = 0;
+        result = bootstrap::WaitForRuntimeOffsets([&](bool force) {
+            CHECK(!force);
+            ++attempts;
+            return OffsetAttempt::Failed;
+        }, now, sleep, notCancelled);
+        CHECK(result == OffsetWaitResult::Failed && attempts == 1);
+        CHECK(time.time_since_epoch() == milliseconds::zero());
+
+        bool cancel = true;
+        attempts = 0;
+        result = bootstrap::WaitForRuntimeOffsets([&](bool) {
+            ++attempts;
+            return OffsetAttempt::Ready;
+        }, now, sleep, [&] { return cancel; });
+        CHECK(result == OffsetWaitResult::Cancelled && attempts == 0);
+        cancel = false;
+        result = bootstrap::WaitForRuntimeOffsets([&](bool) {
+            ++attempts;
+            return OffsetAttempt::Retry;
+        }, now, [&](milliseconds delay) { sleep(delay); cancel = true; }, [&] { return cancel; });
+        CHECK(result == OffsetWaitResult::Cancelled && attempts == 1);
+
+        time = {};
+        result = bootstrap::WaitForRuntimeOffsets([&](bool) {
+            time += seconds(65);
+            return OffsetAttempt::Retry;
+        }, now, sleep, notCancelled);
+        CHECK(result == OffsetWaitResult::TimedOut);
+
+        time = steady_clock::time_point(seconds(10));
+        result = bootstrap::WaitForRuntimeOffsets([&](bool) {
+            time -= seconds(1);
+            return OffsetAttempt::Retry;
+        }, now, sleep, notCancelled);
+        CHECK(result == OffsetWaitResult::TimedOut);
+
+        time = {};
+        attempts = 0;
+        constexpr uintptr_t invalidEntityList = 0x4A5B6B90C8603008ULL;
+        result = bootstrap::WaitForRuntimeOffsets([&](bool) {
+            ++attempts;
+            return app::memory_address::IsLikelyGamePointer(invalidEntityList)
+                ? OffsetAttempt::Ready : OffsetAttempt::Retry;
+        }, now, sleep, notCancelled, seconds(2));
+        CHECK(result == OffsetWaitResult::TimedOut && attempts == 2);
+    }
+
+    void TestStartupOffsetRecovery()
+    {
+        using namespace std::chrono;
+        using runtime_offsets::ResolveControl;
+        using runtime_offsets::ResolveInterrupted;
+        using bootstrap::OffsetAttempt;
+        using bootstrap::OffsetWaitResult;
+        using bootstrap::OffsetRecovery;
+        using bootstrap::OffsetCache;
+        auto time = steady_clock::time_point{};
+        ResolveControl control{time + seconds(3), {}};
+        control.CheckAt(time + seconds(2));
+        bool interrupted = false;
+        try { control.CheckAt(time + seconds(3)); }
+        catch (const ResolveInterrupted& error) { interrupted = !error.Cancelled(); }
+        CHECK(interrupted);
+        control.cancelled = [] { return true; };
+        interrupted = false;
+        try { control.CheckAt(time + seconds(4)); }
+        catch (const ResolveInterrupted& error) { interrupted = error.Cancelled(); }
+        CHECK(interrupted);
+
+        int reads = 0;
+        control = {steady_clock::time_point{}, {}};
+        interrupted = false;
+        try { control.Run([&] { ++reads; return true; }); }
+        catch (const ResolveInterrupted& error) { interrupted = !error.Cancelled(); }
+        CHECK(interrupted && reads == 0);
+
+        control = {};
+        bool committed = false;
+        interrupted = false;
+        try {
+            if (control.Run([&] {
+                ++reads;
+                control.deadline = steady_clock::time_point{};
+                return true;
+            })) committed = true;
+        } catch (const ResolveInterrupted& error) { interrupted = !error.Cancelled(); }
+        CHECK(interrupted && reads == 1 && !committed);
+
+        control = {};
+        bool cancel = false;
+        control.cancelled = [&] { return cancel; };
+        interrupted = false;
+        try { control.Run([&] { cancel = true; }); }
+        catch (const ResolveInterrupted& error) { interrupted = error.Cancelled(); }
+        CHECK(interrupted);
+
+        std::vector<std::uint8_t> code(1024 * 1024, 0x90);
+        const auto pattern = runtime_offsets::resolver_policy::CompilePattern("CC CC");
+        int checkpoints = 0;
+        interrupted = false;
+        control = {};
+        try {
+            runtime_offsets::resolver_policy::FindPatternMatches(code, pattern, [&] {
+                if (++checkpoints == 4) control.deadline = steady_clock::time_point{};
+                control.Check();
+            });
+        } catch (const ResolveInterrupted& error) { interrupted = !error.Cancelled(); }
+        CHECK(interrupted && checkpoints == 4);
+
+        std::vector<std::uint8_t> hash(runtime_offsets::resolver_policy::kSchemaHashBytes);
+        constexpr std::uintptr_t firstNode = 0x200000;
+        std::memcpy(hash.data() + 0x68, &firstNode, sizeof(firstNode));
+        reads = 0;
+        control = {};
+        interrupted = false;
+        try {
+            runtime_offsets::resolver_policy::ReadSchemaBindings(hash,
+                [&](std::uintptr_t address, void* output, std::size_t size) {
+                    return control.Run([&] {
+                        ++reads;
+                        std::memset(output, 0, size);
+                        const std::uintptr_t next = address + 0x100;
+                        std::memcpy(static_cast<std::uint8_t*>(output) + 8, &next, sizeof(next));
+                        if (reads == 3) control.deadline = steady_clock::time_point{};
+                        return true;
+                    });
+                });
+        } catch (const ResolveInterrupted& error) { interrupted = !error.Cancelled(); }
+        CHECK(interrupted && reads == 3);
+
+        reads = 0;
+        int fields = 0;
+        control = {};
+        interrupted = false;
+        try {
+            runtime_offsets::resolver_policy::ReadSchemaFields(firstNode, 512,
+                [&](std::uintptr_t, void*, std::size_t) {
+                    return control.Run([&] {
+                        if (++reads == 3) control.deadline = steady_clock::time_point{};
+                        return false;
+                    });
+                }, [&](auto) { ++fields; });
+        } catch (const ResolveInterrupted& error) { interrupted = !error.Cancelled(); }
+        CHECK(interrupted && reads == 3 && fields == 0);
+
+        bootstrap::OffsetRecoveryPlan plan;
+        CHECK(plan.BeforeRetry(time) == OffsetRecovery::None);
+        CHECK(plan.BeforeRetry(time + seconds(1)) == OffsetRecovery::MemoryAndTranslation);
+        CHECK(plan.BeforeRetry(time + seconds(2)) == OffsetRecovery::None);
+        CHECK(plan.BeforeRetry(time + seconds(3)) == OffsetRecovery::Full);
+        for (int i = 0; i < 100; ++i)
+            CHECK(plan.BeforeRetry(time + seconds(10 + i)) == OffsetRecovery::None);
+        plan = {};
+        CHECK(plan.BeforeRetry(time + seconds(15)) == OffsetRecovery::None);
+        CHECK(plan.BeforeRetry(time + seconds(31)) == OffsetRecovery::MemoryAndTranslation);
+        CHECK(plan.BeforeRetry(time + seconds(47)) == OffsetRecovery::Full);
+
+        std::vector<OffsetCache> refreshes;
+        const auto refresh = [&](OffsetCache cache) {
+            refreshes.push_back(cache);
+            return cache != OffsetCache::Memory;
+        };
+        CHECK(bootstrap::RecoverOffsetReads(OffsetRecovery::None, refresh));
+        CHECK(refreshes.empty());
+        CHECK(!bootstrap::RecoverOffsetReads(OffsetRecovery::MemoryAndTranslation, refresh));
+        CHECK(refreshes == std::vector<OffsetCache>({OffsetCache::Memory, OffsetCache::Translation}));
+        CHECK(bootstrap::RecoverOffsetReads(OffsetRecovery::Full, refresh));
+        CHECK(refreshes.size() == 3 && refreshes.back() == OffsetCache::All);
+
+        control = {};
+        reads = 0;
+        interrupted = false;
+        try {
+            bootstrap::RecoverOffsetReads(OffsetRecovery::MemoryAndTranslation, [&](OffsetCache) {
+                return control.Run([&] {
+                    ++reads;
+                    control.deadline = steady_clock::time_point{};
+                    return true;
+                });
+            });
+        } catch (const ResolveInterrupted& error) { interrupted = !error.Cancelled(); }
+        CHECK(interrupted && reads == 1);
+
+        int attempts = 0;
+        const auto now = [&] { return time; };
+        const auto sleep = [&](milliseconds delay) { time += delay; };
+        const auto notCancelled = [] { return false; };
+        auto result = bootstrap::WaitForRuntimeOffsets([&](bool, auto deadline) {
+            ++attempts;
+            CHECK(deadline == steady_clock::time_point{} + seconds(3));
+            time += seconds(4);
+            return OffsetAttempt::Ready;
+        }, now, sleep, notCancelled, seconds(3));
+        CHECK(result == OffsetWaitResult::TimedOut && attempts == 1);
+        attempts = 0;
+        result = bootstrap::WaitForRuntimeOffsets([&](bool) {
+            ++attempts;
+            return OffsetAttempt::Ready;
+        }, now, sleep, notCancelled, milliseconds(0));
+        CHECK(result == OffsetWaitResult::TimedOut && attempts == 0);
+
+        time = {};
+        attempts = 0;
+        refreshes.clear();
+        plan = {};
+        result = bootstrap::WaitForRuntimeOffsets([&](bool force, auto deadline) {
+            CHECK(time < deadline);
+            ++attempts;
+            if (force) bootstrap::RecoverOffsetReads(plan.BeforeRetry(time), refresh);
+            return attempts == 5 ? OffsetAttempt::Ready : OffsetAttempt::Retry;
+        }, now, sleep, notCancelled, seconds(10));
+        CHECK(result == OffsetWaitResult::Ready && attempts == 5);
+        CHECK(refreshes == std::vector<OffsetCache>({OffsetCache::Memory, OffsetCache::Translation, OffsetCache::All}));
+    }
+
+    void TestSchemaScopeStartup()
+    {
+        using runtime_offsets::resolver_policy::ReadSchemaScopes;
+        constexpr uintptr_t system = 0x100000;
+        constexpr uintptr_t data = 0x200000;
+        std::array<uint8_t, 0xF4> header{};
+        const std::array<uintptr_t, 2> scopes{0x300000, 0x400000};
+        int metadataReads = 0;
+        int totalReads = 0;
+        int failAt = 0;
+        int changedOffset = -1;
+        const auto initialize = [&](int32_t count, uintptr_t pointer, int32_t registered) {
+            header = {};
+            std::memcpy(header.data(), &count, sizeof(count));
+            std::memcpy(header.data() + 8, &pointer, sizeof(pointer));
+            std::memcpy(header.data() + 0xF0, &registered, sizeof(registered));
+            metadataReads = totalReads = 0;
+        };
+        const auto read = [&](uintptr_t address, void* out, size_t size) {
+            if (++totalReads == failAt) return false;
+            if (address == system + 0x190 && size == header.size()) {
+                std::memcpy(out, header.data(), size);
+                if (++metadataReads == 2 && changedOffset >= 0)
+                    static_cast<uint8_t*>(out)[changedOffset] ^= 1;
+                return true;
+            }
+            if (address == data && size <= sizeof(scopes)) {
+                std::memcpy(out, scopes.data(), size);
+                return true;
+            }
+            return false;
+        };
+        initialize(0, 0, 0);
+        CHECK(ReadSchemaScopes(system, read).empty());
+        CHECK(totalReads == 1);
+        initialize(2, data, 1);
+        CHECK(ReadSchemaScopes(system, read) == std::vector<uintptr_t>(scopes.begin(), scopes.end()));
+        CHECK(totalReads == 3 && metadataReads == 2);
+        for (const int count : {-1, 0, 65, 0x7FFFFFFF}) {
+            initialize(count, data, 1);
+            CHECK(ReadSchemaScopes(system, read).empty() && totalReads == 1);
+        }
+        for (const uintptr_t pointer : {uintptr_t{0}, data + 1, uintptr_t{0x4A5B6B90C8603008ULL}}) {
+            initialize(2, pointer, 1);
+            CHECK(ReadSchemaScopes(system, read).empty() && totalReads == 1);
+        }
+        for (const int registered : {-1, 0}) {
+            initialize(2, data, registered);
+            CHECK(ReadSchemaScopes(system, read).empty() && totalReads == 1);
+        }
+        for (failAt = 1; failAt <= 3; ++failAt) {
+            initialize(2, data, 1);
+            CHECK(ReadSchemaScopes(system, read).empty());
+        }
+        failAt = 0;
+        for (const int offset : {0, 8, 0xF0}) {
+            changedOffset = offset;
+            initialize(2, data, 1);
+            CHECK(ReadSchemaScopes(system, read).empty());
+        }
+        changedOffset = -1;
+        initialize(2, data, 1);
+        CHECK(ReadSchemaScopes(0, read).empty() && totalReads == 0);
+        CHECK(ReadSchemaScopes(0x7FFFFFFFFF00ULL, read).empty() && totalReads == 0);
+
+        std::chrono::steady_clock::time_point time{};
+        int attempts = 0;
+        const auto result = bootstrap::WaitForRuntimeOffsets([&](bool force) {
+            CHECK(force == (attempts != 0));
+            initialize(++attempts == 1 ? 0 : 2, data, 1);
+            return ReadSchemaScopes(system, read).empty()
+                ? bootstrap::OffsetAttempt::Retry : bootstrap::OffsetAttempt::Ready;
+        }, [&] { return time; }, [&](std::chrono::milliseconds delay) { time += delay; },
+            [] { return false; });
+        CHECK(result == bootstrap::OffsetWaitResult::Ready && attempts == 2);
+    }
+
     void TestRuntimeResolverPolicy()
     {
         using namespace runtime_offsets::resolver_policy;
+
+        using namespace runtime_offsets::resolver;
+        std::vector<SchemaRequest> requests;
+        Result result;
+        for (int i = 0; i < 104; ++i) {
+            const auto key = "required" + std::to_string(i);
+            requests.push_back({"TestClass", key, key});
+            result.schemas[key] = 16;
+        }
+        for (const char* key : {"m_vecX", "m_vecY", "m_vecZ"})
+            requests.push_back({"CNetworkViewOffsetVector", key, key, true});
+        auto coverage = GetSchemaCoverage(requests, result);
+        CHECK(coverage.expected == 104 && coverage.resolved == 104);
+        CHECK(coverage.optionalExpected == 3 && coverage.optionalResolved == 0);
+        result.schemas["m_vecX"] = 16;
+        result.schemas["m_vecY"] = 24;
+        result.schemas["m_vecZ"] = 32;
+        coverage = GetSchemaCoverage(requests, result);
+        CHECK(coverage.resolved == 104 && coverage.optionalResolved == 3);
+        result.schemas.erase("required0");
+        result.schemas["unexpected"] = 32;
+        coverage = GetSchemaCoverage(requests, result);
+        CHECK(coverage.expected == 104 && coverage.resolved == 103);
+        result.schemas["required0"] = -1;
+        CHECK(GetSchemaCoverage(requests, result).resolved == 103);
+        result.schemas["required0"] = 0x100001;
+        CHECK(GetSchemaCoverage(requests, result).resolved == 103);
 
         CHECK(AddRvaOffset(std::ptrdiff_t{0x1000}, 8).value_or(0) == 0x1008);
         CHECK(!AddRvaOffset(std::nullopt, 8).has_value());
@@ -197,6 +816,132 @@ namespace
         CHECK(pattern[2].wildcard);
         CHECK(CompilePattern("48 xyz").empty());
         CHECK(CompilePattern("4").empty());
+
+        for (const auto signature : {kSensitivityPattern, kLegacySensitivityPattern}) {
+            const auto compiled = CompilePattern(signature);
+            std::vector<std::uint8_t> code(compiled.size() + 5, 0xCC);
+            for (std::size_t i = 0; i < compiled.size(); ++i) code[2 + i] = compiled[i].value;
+            const std::int32_t displacement = 0x200;
+            std::memcpy(code.data() + 5, &displacement, sizeof(displacement));
+            CHECK(FindUniquePattern(code, compiled).value_or(99) == 2);
+            const auto rva = ResolveRelativeRva(0x1002, 3, code, 2, 0x2000);
+            CHECK(rva.value_or(0) == 0x1209);
+            CHECK(AddRvaOffset(rva, 8).value_or(0) == 0x1211);
+            const auto duplicate = code;
+            code.insert(code.end(), duplicate.begin(), duplicate.end());
+            CHECK(!FindUniquePattern(code, compiled));
+        }
+
+        std::array<std::uint8_t, 8192> schemaMemory{};
+        bool secondPageReadable = false;
+        unsigned schemaReads = 0;
+        const auto readSchema = [&](std::uintptr_t address, void* output, std::size_t size) {
+            ++schemaReads;
+            const auto limit = secondPageReadable ? schemaMemory.size() : std::size_t{4096};
+            if (address < 0x10000 || address - 0x10000 > limit || size > limit - (address - 0x10000)) return false;
+            std::memcpy(output, schemaMemory.data() + address - 0x10000, size);
+            return true;
+        };
+        std::memcpy(schemaMemory.data() + 4088, "m_Item", 7);
+        CHECK(ReadSchemaName(0x10FF8, 128, readSchema) == "m_Item");
+        CHECK(schemaReads == 1);
+        schemaMemory[4094] = 'X'; schemaMemory[4095] = 'Y'; schemaMemory[4096] = 'Z';
+        CHECK(ReadSchemaName(0x10FFE, 128, readSchema).empty());
+        secondPageReadable = true;
+        CHECK(ReadSchemaName(0x10FFE, 128, readSchema) == "XYZ");
+        std::fill_n(schemaMemory.data(), 128, 'A');
+        CHECK(ReadSchemaName(0x10000, 128, readSchema).empty());
+        schemaMemory[127] = 0;
+        CHECK(ReadSchemaName(0x10000, 128, readSchema).size() == 127);
+        schemaMemory[4] = 1;
+        CHECK(ReadSchemaName(0x10000, 128, readSchema).empty());
+        CHECK(ReadSchemaName(0, 128, readSchema).empty());
+        CHECK(ReadSchemaName(0x10000, 257, readSchema).empty());
+        CHECK(ReadSchemaName((std::numeric_limits<std::uintptr_t>::max)() - 1, 128, readSchema).empty());
+        for (std::uintptr_t alignment = 0; alignment < 8; ++alignment) {
+            const auto address = 0x10100 + alignment;
+            std::memcpy(schemaMemory.data() + address - 0x10000, "m_Item", 7);
+            CHECK(ReadSchemaName(address, 128, readSchema) == "m_Item");
+            CHECK(app::memory_address::IsLikelyGamePointer(address) == (alignment == 0));
+        }
+        CHECK(ReadSchemaName(0xFFFF, 128, readSchema).empty());
+        CHECK(ReadSchemaName(app::memory_address::kMaximumUserAddress - 16, 128, readSchema).empty());
+        std::memcpy(schemaMemory.data() + 4076, "weapon_recoil_scale", 20);
+        secondPageReadable = false;
+        schemaReads = 0;
+        const auto convarName = app::remote_string::ReadName(0x10FEC, 128, readSchema);
+        CHECK(convarName.text == "weapon_recoil_scale" && !convarName.readFailed);
+        CHECK(schemaReads == 1);
+        schemaMemory[4095] = 'X';
+        const auto incompleteName = app::remote_string::ReadName(0x10FEC, 128, readSchema);
+        CHECK(incompleteName.text.empty() && incompleteName.readFailed);
+        std::fill_n(schemaMemory.data(), 128, 'A');
+        const auto unterminated = app::remote_string::ReadName(0x10000, 128, readSchema);
+        CHECK(unterminated.text.empty() && !unterminated.readFailed);
+
+        std::array<std::uint8_t, kSchemaHashBytes> hash{};
+        std::unordered_map<std::uintptr_t, std::array<std::uint8_t, 0x18>> nodes;
+        const auto putPointer = [](auto& bytes, std::size_t offset, std::uintptr_t value) {
+            std::memcpy(bytes.data() + offset, &value, sizeof(value));
+        };
+        putPointer(hash, 0x60 + 0x08, 0x20000);
+        putPointer(hash, 0x60 + 0x18 + 0x10, 0x20100);
+        putPointer(hash, 0x60 + 0x30 + 0x08, 0x20200);
+        putPointer(hash, 0x60 + 0x48 + 0x10, 0x20300);
+        putPointer(hash, 0x60 + 0x60 + 0x08, 0x20000);
+        putPointer(hash, 0x20, 0x20400);
+        putPointer(nodes[0x20000], 0x10, 0x30000);
+        putPointer(nodes[0x20100], 0x08, 0x20000);
+        putPointer(nodes[0x20100], 0x10, 0x30100);
+        putPointer(nodes[0x20200], 0x08, 0x20200);
+        putPointer(nodes[0x20200], 0x10, 0x30200);
+        putPointer(nodes[0x20400], 0x00, 0x20400);
+        putPointer(nodes[0x20400], 0x10, 0x30200);
+        const auto readNode = [&](std::uintptr_t address, void* output, std::size_t size) {
+            const auto found = nodes.find(address);
+            if (found == nodes.end() || size != found->second.size()) return false;
+            std::memcpy(output, found->second.data(), size);
+            return true;
+        };
+        const std::vector<std::uintptr_t> expectedBindings{0x30000, 0x30200, 0x30100};
+        CHECK(ReadSchemaBindings(hash, readNode) == expectedBindings);
+        const std::int32_t undersizedCount = 1;
+        std::memcpy(hash.data() + 0x0C, &undersizedCount, sizeof(undersizedCount));
+        CHECK(ReadSchemaBindings(hash, readNode) == expectedBindings);
+        CHECK(ReadSchemaBindings(std::span<const std::uint8_t>(hash.data(), 32), readNode).empty());
+        hash.fill(0);
+        putPointer(hash, 0x60 + 0x08, 0x20000);
+        std::size_t chainReads = 0;
+        const auto endlessChain = [&](std::uintptr_t address, void* output, std::size_t size) {
+            ++chainReads;
+            std::array<std::uint8_t, 0x18> node{};
+            putPointer(node, 0x08, address + 32);
+            putPointer(node, 0x10, address + 0x100000);
+            std::memcpy(output, node.data(), size);
+            return true;
+        };
+        CHECK(ReadSchemaBindings(hash, endlessChain).size() == 8192);
+        CHECK(chainReads == 8192);
+        for (const bool partial : {false, true}) {
+            std::array<std::uint8_t, 96> records{};
+            records[0] = 1; records[32] = 2; records[64] = 3;
+            std::vector<int> visited;
+            int calls = 0;
+            const auto readFields = [&](std::uintptr_t address, void* output, std::size_t size) {
+                ++calls;
+                if (partial && (size > 32 || address == 0x10020)) return false;
+                if (address < 0x10000 || address - 0x10000 + size > records.size()) return false;
+                std::memcpy(output, records.data() + address - 0x10000, size);
+                return true;
+            };
+            ReadSchemaFields(0x10000, 3, readFields,
+                [&](std::span<const std::uint8_t> field) { visited.push_back(field[0]); });
+            CHECK(visited == (partial ? std::vector<int>{1, 3} : std::vector<int>{1, 2, 3}));
+            CHECK(calls == (partial ? 4 : 1));
+            ReadSchemaFields(0x10000, 513, readFields, [](auto) {});
+            ReadSchemaFields((std::numeric_limits<std::uintptr_t>::max)() - 8, 2, readFields, [](auto) {});
+            CHECK(calls == (partial ? 4 : 1));
+        }
 
         std::array<std::uint8_t, 0x18> allocatedNodeBytes = {};
         const std::uintptr_t allocatedNext = 0x10000u;
@@ -474,7 +1219,12 @@ namespace
 
         const std::set<std::set<std::string>> allowedAliases{
             {"ar_shoots", "ar_shoots_night"},
-            {"de_ancient", "de_ancient_night"}
+            {"de_ancient", "de_ancient_night"},
+            {"ar_baggage", "ar_baggage_lower"},
+            {"de_nuke", "de_nuke_lower"},
+            {"de_train", "de_train_lower"},
+            {"de_vertigo", "de_vertigo_lower"},
+            {"de_boulder", "de_boulder_higher1"}
         };
         for (const auto& [key, maps] : duplicateGroups) {
             (void)key;
@@ -574,59 +1324,30 @@ namespace
 
     void TestSkeletonGate()
     {
-        using esp::render::BoneConfidence;
-        using esp::render::EvaluateSkeletonGate;
-        using esp::render::ShouldDrawSkeleton;
-        using esp::render::SkeletonDrawDecision;
-        using esp::render::SkeletonSkipReason;
-
-        {
-            const auto result = EvaluateSkeletonGate({
-                false,
-                10,
-            });
-            CHECK(result.decision == SkeletonDrawDecision::Skip);
-            CHECK(result.skipReason == SkeletonSkipReason::UnreliableBones);
-            CHECK(result.confidence == BoneConfidence::None);
-            CHECK(!ShouldDrawSkeleton(result));
-        }
-
-        {
-            const auto result = EvaluateSkeletonGate({
-                true,
-                2,
-            });
-            CHECK(result.decision == SkeletonDrawDecision::Skip);
-            CHECK(result.skipReason == SkeletonSkipReason::NotEnoughProjectedSegments);
-            CHECK(result.confidence == BoneConfidence::Low);
-            CHECK(!ShouldDrawSkeleton(result));
-        }
-
-        {
-            const auto result = EvaluateSkeletonGate({
-                true,
-                3,
-            });
-            CHECK(result.decision == SkeletonDrawDecision::Partial);
-            CHECK(result.skipReason == SkeletonSkipReason::None);
-            CHECK(result.confidence == BoneConfidence::Low);
-            CHECK(ShouldDrawSkeleton(result));
-        }
-
-        {
-            const auto result = EvaluateSkeletonGate({
-                true,
-                5,
-            });
-            CHECK(result.decision == SkeletonDrawDecision::Full);
-            CHECK(result.skipReason == SkeletonSkipReason::None);
-            CHECK(result.confidence == BoneConfidence::High);
-            CHECK(ShouldDrawSkeleton(result));
-        }
+        CHECK(!esp::render::ShouldDrawSkeleton(false, 20));
+        CHECK(!esp::render::ShouldDrawSkeleton(true, 0));
+        CHECK(esp::render::ShouldDrawSkeleton(true, 1));
+        CHECK(esp::render::ShouldDrawSkeleton(true, 20));
     }
 
     void TestDrawPolicy()
     {
+        for (int heading = 0; heading < 8; ++heading) {
+            const float angle = heading * 3.14159265358979323846f / 4.0f;
+            const float fx = std::cos(angle), fy = std::sin(angle);
+            const float rx = fy, ry = -fx;
+            const auto front = esp::render::ResolveOffscreenDirection(fx, fy, rx * 2, ry * 2);
+            const auto back = esp::render::ResolveOffscreenDirection(-fx, -fy, rx, ry);
+            const auto right = esp::render::ResolveOffscreenDirection(rx, ry, rx, ry);
+            const auto left = esp::render::ResolveOffscreenDirection(-rx, -ry, rx, ry);
+            CHECK(front.valid && std::fabs(front.x) < 0.0001f && std::fabs(front.y + 1) < 0.0001f);
+            CHECK(back.valid && std::fabs(back.y - 1) < 0.0001f);
+            CHECK(right.valid && std::fabs(right.x - 1) < 0.0001f);
+            CHECK(left.valid && std::fabs(left.x + 1) < 0.0001f);
+        }
+        CHECK(!esp::render::ResolveOffscreenDirection(0, 0, 0, -1).valid);
+        CHECK(!esp::render::ResolveOffscreenDirection(1, 0, 0, 0).valid);
+        CHECK(!esp::render::ResolveOffscreenDirection(NAN, 0, 0, -1).valid);
         using esp::render::IsWebRadarCoreSampleFresh;
         using esp::render::ShouldUpdateCachedViewMatrix;
         CHECK(ShouldUpdateCachedViewMatrix(true, 200, false, 0, 250));
@@ -660,11 +1381,9 @@ namespace
         using esp::render::SelectWebRadarPlayerHoldUs;
         using esp::render::ShouldApplyVelocityExtrapolation;
         using esp::render::ShouldClearLastAliveCache;
-        using esp::render::ShouldHoldWebRadarPlayer;
         using esp::render::ShouldRecordDrawEvent;
         using esp::render::ShouldRenderOverlayForMenuState;
         using esp::render::ShouldReuseCachedViewMatrix;
-        using esp::render::ShouldReusePersistedBone;
         using esp::render::ShouldTrackLastValidAlive;
         using esp::render::ShouldUseFallbackProjectionBox;
         using esp::render::ShouldUsePrevTickFallback;
@@ -748,15 +1467,6 @@ namespace
         CHECK(SelectWebRadarPlayerHoldUs(true, 100) == esp::render::kWebRadarAliveHoldBulkRecoveryUs);
         CHECK(SelectWebRadarPlayerHoldUs(false, 0) == esp::render::kWebRadarDeadHoldUs);
         CHECK(SelectWebRadarPlayerHoldUs(false, 100) == esp::render::kWebRadarAliveHoldUs);
-        CHECK(ShouldHoldWebRadarPlayer(true, false, true, 0x123u, 100u, 110u, 10u));
-        CHECK(!ShouldHoldWebRadarPlayer(true, false, true, 0x123u, 100u, 110u, 10u, true));
-        CHECK(!ShouldHoldWebRadarPlayer(false, false, true, 0x123u, 100u, 110u, 10u));
-        CHECK(!ShouldHoldWebRadarPlayer(true, true, true, 0x123u, 100u, 110u, 10u));
-        CHECK(!ShouldHoldWebRadarPlayer(true, false, false, 0x123u, 100u, 110u, 10u));
-        CHECK(!ShouldHoldWebRadarPlayer(true, false, true, 0u, 100u, 110u, 10u));
-        CHECK(!ShouldHoldWebRadarPlayer(true, false, true, 0x123u, 100u, 111u, 10u));
-        CHECK(ShouldReusePersistedBone(100u, 100u + esp::render::kBonePersistUs));
-        CHECK(!ShouldReusePersistedBone(100u, 101u + esp::render::kBonePersistUs));
         CHECK(esp::render::CanInterpolatePlayer(1, 1, 10, 10, 100, {8, 0, 0}, {}));
         CHECK(!esp::render::CanInterpolatePlayer(1, 1, 11, 10, 100, {8, 0, 0}, {}));
         CHECK(!esp::render::CanInterpolatePlayer(1, 1, 10, 10, 0, {8, 0, 0}, {}));
@@ -796,43 +1506,6 @@ namespace
                 0.01f);
             CHECK(std::fabs(motion.interpolationOffset.x) < 0.0001f);
             CHECK(std::fabs(motion.renderPosition.x - 11.0f) < 0.0001f);
-        }
-        {
-            const Vector3 predicted = esp::render::ResolveBombRenderPosition(
-                Vector3{10.0f, 20.0f, 30.0f},
-                Vector3{100.0f, 0.0f, 0.0f},
-                true,
-                100000u,
-                110000u);
-            CHECK(std::fabs(predicted.x - 11.0f) < 0.0001f);
-            CHECK(std::fabs(predicted.y - 20.0f) < 0.0001f);
-        }
-        {
-            const Vector3 clamped = esp::render::ResolveBombRenderPosition(
-                Vector3{10.0f, 20.0f, 30.0f},
-                Vector3{100.0f, 0.0f, 0.0f},
-                true,
-                100000u,
-                140000u);
-            CHECK(std::fabs(clamped.x - 12.5f) < 0.0001f);
-        }
-        {
-            const Vector3 unchanged = esp::render::ResolveBombRenderPosition(
-                Vector3{10.0f, 20.0f, 30.0f},
-                Vector3{100.0f, 0.0f, 0.0f},
-                false,
-                100000u,
-                110000u);
-            CHECK(std::fabs(unchanged.x - 10.0f) < 0.0001f);
-        }
-        {
-            const Vector3 stale = esp::render::ResolveBombRenderPosition(
-                Vector3{10.0f, 20.0f, 30.0f},
-                Vector3{100.0f, 0.0f, 0.0f},
-                true,
-                100000u,
-                100000u + esp::render::kBombPositionSampleMaxAgeUs + 1u);
-            CHECK(std::fabs(stale.x - 10.0f) < 0.0001f);
         }
         CHECK(std::fabs(esp::render::ResolveBombDefuseTotal(5.0f) - 5.0f) < 0.0001f);
         {
@@ -1082,6 +1755,12 @@ namespace
 
     void TestPlayerCommitPolicy()
     {
+        CHECK(esp::data::SameCommittedWeapon(0x10001, 0x10000, 0x10001, 0x10000));
+        CHECK(!esp::data::SameCommittedWeapon(0x10001, 0x20000, 0x10001, 0x10000));
+        CHECK(!esp::data::SameCommittedWeapon(0x20001, 0x10000, 0x10001, 0x10000));
+        CHECK(!esp::data::SameCommittedWeapon(0, 0x10000, 0, 0x10000));
+        CHECK(!esp::data::SameCommittedWeapon(0xFFFFFFFFu, 0x10000, 0xFFFFFFFFu, 0x10000));
+        CHECK(!esp::data::SameCommittedWeapon(1, 0, 1, 0));
         using esp::data::CanTemporarilyHoldAliveCore;
         using esp::data::IsAuthoritativeDeadCoreSample;
         using esp::data::IsDeathConfirmed;
@@ -1297,6 +1976,14 @@ namespace
               PlayerCoreBatchDecision::Degraded);
 
         CHECK(IsPlayerCoreStatePlausible(true, 100, 50, 0, true));
+        using esp::data::ResolveCoreRejectionReason;
+        using esp::data::CoreRejectionReason;
+        CHECK(ResolveCoreRejectionReason(false, 100, 0, 0, true) == CoreRejectionReason::Team);
+        CHECK(ResolveCoreRejectionReason(true, 501, 0, 0, true) == CoreRejectionReason::Health);
+        CHECK(ResolveCoreRejectionReason(true, 100, -1, 0, true) == CoreRejectionReason::Armor);
+        CHECK(ResolveCoreRejectionReason(true, 100, 0, 3, true) == CoreRejectionReason::LifeState);
+        CHECK(ResolveCoreRejectionReason(true, 100, 0, 0, false) == CoreRejectionReason::Position);
+        CHECK(ResolveCoreRejectionReason(true, 0, 0, 1, false) == CoreRejectionReason::None);
         CHECK(!IsPlayerCoreStatePlausible(true, 100, 50, 0, false));
         CHECK(IsPlayerCoreStatePlausible(true, 0, 50, 1, false));
         CHECK(IsPlayerCoreStatePlausible(true, 0, 0, 0, false));
@@ -1340,7 +2027,8 @@ namespace
             std::numeric_limits<float>::quiet_NaN()));
         CHECK(IsValidFlashBangTimeSample(100.0f, 100.0f));
         CHECK(IsValidFlashBangTimeSample(100.4f, 100.0f));
-        CHECK(!IsValidFlashBangTimeSample(100.6f, 100.0f));
+        CHECK(IsValidFlashBangTimeSample(105.0f, 100.0f));
+        CHECK(!IsValidFlashBangTimeSample(111.0f, 100.0f));
         CHECK(!IsValidFlashBangTimeSample(-0.1f, 100.0f));
         CHECK(IsBlindFlashReadComplete(
             true,
@@ -1367,32 +2055,43 @@ namespace
             2.0f,
             101.0f));
 
-        const auto justBelowActivation =
-            EvaluateBlindFlashSample(100.0f, 2.0f, 101.81f, false);
-        CHECK(justBelowActivation.fresh);
-        CHECK(!justBelowActivation.active);
-        const auto atActivation =
-            EvaluateBlindFlashSample(100.0f, 2.0f, 101.79f, false);
-        CHECK(atActivation.fresh);
-        CHECK(atActivation.active);
-        const auto activeHysteresis =
-            EvaluateBlindFlashSample(100.0f, 2.0f, 101.91f, true);
-        CHECK(activeHysteresis.fresh);
-        CHECK(activeHysteresis.active);
-        const auto atRelease =
-            EvaluateBlindFlashSample(100.0f, 2.0f, 101.93f, true);
-        CHECK(atRelease.fresh);
-        CHECK(!atRelease.active);
+        const auto initial = EvaluateBlindFlashSample(105.0f, 5.0f, 100.0f);
+        CHECK(initial.fresh && initial.active && initial.remainingSeconds == 5.0f);
+        const auto fading = EvaluateBlindFlashSample(105.0f, 5.0f, 104.95f);
+        CHECK(fading.fresh && fading.active && fading.remainingSeconds < 0.06f);
+        const auto expired = EvaluateBlindFlashSample(105.0f, 5.0f, 105.0f);
+        CHECK(expired.fresh && !expired.active && expired.remainingSeconds == 0);
+        CHECK(!EvaluateBlindFlashSample(105.0f, 1.0f, 100.0f).fresh);
+        CHECK(!EvaluateBlindFlashSample(105.0f, 0.0f, 105.0f).active);
+        CHECK(EvaluateBlindFlashSample(105.0f, 0.0f, 100.0f).fresh);
+        CHECK(!EvaluateBlindFlashSample(105.0f, 0.0f, 100.0f).active);
+        CHECK(!EvaluateBlindFlashSample(NAN, 5.0f, 100.0f).fresh);
+        esp::data::BlindFlashState flash;
+        CHECK(flash.Update(true, initial, 1000000, 1000000) == 5.0f);
+        CHECK(flash.Update(true, {}, 0, 1010000) > 4.98f);
+        CHECK(flash.sampledAtUs == 1000000);
+        CHECK(flash.Update(true, {}, 0, 1060000) == 0);
+        CHECK(flash.Update(true, fading, 2000000, 2000000) > 0);
+        CHECK(flash.Update(true, {}, 0, 2051000) == 0);
+        CHECK(flash.Update(true, initial, 3000000, 3000000) == 5.0f);
+        CHECK(flash.Update(true, expired, 3010000, 3010000) == 0);
+        CHECK(flash.Update(true, {}, 0, 3015000) == 0);
+        CHECK(flash.Update(true, initial, 4000000, 4000000) == 5.0f);
+        CHECK(flash.Update(false, {}, 0, 4000001) == 0);
+        CHECK(flash.sampledAtUs == 0);
+        CHECK(esp::data::RemainingBlindSeconds(0.01f, 1000000, 1010001) == 0);
+        CHECK(esp::data::RemainingBlindSeconds(1.0f, 1000000, 999999) == 0);
+        CHECK(esp::data::RemainingBlindSeconds(NAN, 1000000, 1000001) == 0);
         const auto expiredHistoricalDuration =
-            EvaluateBlindFlashSample(50.0f, 5.0f, 100.0f, false);
+            EvaluateBlindFlashSample(50.0f, 5.0f, 100.0f);
         CHECK(expiredHistoricalDuration.fresh);
         CHECK(!expiredHistoricalDuration.active);
         const auto staleGameClock =
-            EvaluateBlindFlashSample(100.0f, 2.0f, 0.0f, false);
+            EvaluateBlindFlashSample(100.0f, 2.0f, 0.0f);
         CHECK(!staleGameClock.fresh);
 
         PlayerFlagFilterState state = {};
-        CHECK(!UpdatePlayerFlagFilter(state, true, true, true, 100u));
+        CHECK(UpdatePlayerFlagFilter(state, true, true, true, 100u));
         CHECK(UpdatePlayerFlagFilter(state, true, true, true, 101u));
         CHECK(UpdatePlayerFlagFilter(
             state,
@@ -1408,16 +2107,16 @@ namespace
             102u + esp::data::kPlayerFlagReadGapHoldUs));
 
         ResetPlayerFlagFilter(state);
-        CHECK(!UpdatePlayerFlagFilter(state, true, true, true, 200u));
-        CHECK(!UpdatePlayerFlagFilter(state, true, false, false, 201u));
-        CHECK(state.positiveSamples == 1u);
+        CHECK(UpdatePlayerFlagFilter(state, true, true, true, 200u));
+        CHECK(UpdatePlayerFlagFilter(state, true, false, false, 201u));
+        CHECK(state.lastFreshUs == 200u);
         CHECK(UpdatePlayerFlagFilter(state, true, true, true, 201u));
         CHECK(!UpdatePlayerFlagFilter(state, true, true, false, 202u));
         CHECK(!state.active);
 
-        CHECK(!UpdatePlayerFlagFilter(state, true, true, true, 300u));
+        CHECK(UpdatePlayerFlagFilter(state, true, true, true, 300u));
         CHECK(!UpdatePlayerFlagFilter(state, false, true, true, 301u));
-        CHECK(!state.active && state.positiveSamples == 0u);
+        CHECK(!state.active && state.lastFreshUs == 0u);
     }
 
     void TestPlayerHierarchyPolicy()
@@ -2576,6 +3275,14 @@ namespace
 
     void TestWorldMarkerPolicy()
     {
+        using esp::data::ShouldCountWorldPositionReadMiss;
+        CHECK(!ShouldCountWorldPositionReadMiss(false, false, false));
+        CHECK(!ShouldCountWorldPositionReadMiss(false, true, false));
+        CHECK(!ShouldCountWorldPositionReadMiss(false, false, true));
+        CHECK(ShouldCountWorldPositionReadMiss(true, false, false));
+        CHECK(ShouldCountWorldPositionReadMiss(true, false, true));
+        CHECK(ShouldCountWorldPositionReadMiss(true, true, false));
+        CHECK(!ShouldCountWorldPositionReadMiss(true, true, true));
         CHECK(esp::data::ResolveInfernoDuration(5.5f, true) == 5.5f);
         CHECK(esp::data::ResolveInfernoDuration(7.0f, true) == 7.0f);
         CHECK(esp::data::ResolveInfernoDuration(0.0f, true) == 7.0f);
@@ -2835,6 +3542,14 @@ namespace
         CHECK(esp::data::CanonicalWorldItemId(48, esp::data::WorldEntityClass::MolotovProjectile) == 48);
         CHECK(esp::data::CanonicalWorldItemId(49, esp::data::WorldEntityClass::DroppedWeapon) == 49);
         const char partialName[48] = "inferno";
+        for (uintptr_t alignment = 0; alignment < 8; ++alignment) {
+            CHECK(esp::data::IsWorldDesignerNamePointerSample(0x10000 + alignment, sizeof(uintptr_t)));
+            for (size_t bytes = 0; bytes < sizeof(uintptr_t); ++bytes)
+                CHECK(!esp::data::IsWorldDesignerNamePointerSample(0x10000 + alignment, bytes));
+        }
+        CHECK(!esp::data::IsWorldDesignerNamePointerSample(0, sizeof(uintptr_t)));
+        CHECK(!esp::data::IsWorldDesignerNamePointerSample(
+            app::memory_address::kMaximumUserAddress, sizeof(uintptr_t)));
         CHECK(esp::data::ReadWorldDesignerName(partialName, 48, 8) == "inferno");
         CHECK(esp::data::ReadWorldDesignerName(partialName, 48, 7).empty());
         CHECK(esp::data::ReadWorldDesignerName(partialName, 48, 0).empty());
@@ -4210,6 +4925,9 @@ namespace
         latencyBuckets[LatencyBucketIndex(8334u)] = 5u;
         CHECK(esp::worker::kCycleLatencyUpperBoundsUs[LatencyBucketIndex(3999u)] == 4000u);
         CHECK(esp::worker::kCycleLatencyUpperBoundsUs[LatencyBucketIndex(4001u)] == 5000u);
+        CHECK(esp::worker::kCycleLatencyUpperBoundsUs[LatencyBucketIndex(5001u)] == 6000u);
+        CHECK(esp::worker::kCycleLatencyUpperBoundsUs[LatencyBucketIndex(9000u)] == 10000u);
+        CHECK(esp::worker::kCycleLatencyUpperBoundsUs[LatencyBucketIndex(13800u)] == 14000u);
         CHECK(LatencyPercentileUpperBound(latencyBuckets, 100u, 50u) == 500u);
         CHECK(LatencyPercentileUpperBound(latencyBuckets, 100u, 95u) == 2000u);
         CHECK(LatencyPercentileUpperBound(latencyBuckets, 100u, 99u) == 8334u);
@@ -4291,6 +5009,39 @@ namespace
 
     void TestDeferredLanePolicy()
     {
+        using esp::data::ShouldPrioritizeBoneLane;
+        CHECK(!ShouldPrioritizeBoneLane(false, false, 0, 100000));
+        CHECK(!ShouldPrioritizeBoneLane(true, true, 0, 100000));
+        CHECK(!ShouldPrioritizeBoneLane(true, false, 100000, 119999));
+        CHECK(ShouldPrioritizeBoneLane(true, false, 100000, 120000));
+        CHECK(ShouldPrioritizeBoneLane(true, false, 120000, 100000));
+        for (const uint64_t cycleUs : {4000ull, 12000ull, 33000ull, 80000ull}) {
+            uint64_t last = 0;
+            bool prioritized = false;
+            int serviced = 0;
+            for (uint64_t tick = 1; tick <= 500; ++tick) {
+                const uint64_t now = tick * cycleUs;
+                prioritized = ShouldPrioritizeBoneLane(true, prioritized, last, now);
+                if (prioritized) {
+                    last = now;
+                    ++serviced;
+                }
+                CHECK(last != 0 && now - last <= 20000 + cycleUs);
+            }
+            CHECK(serviced >= 80 && serviced <= 250);
+        }
+        CHECK(esp::data::IsBoneServiceOverdue(0, 200000));
+        CHECK(esp::data::IsBoneServiceOverdue(100000, 200001));
+        CHECK(!esp::data::IsBoneServiceOverdue(100000, 200000));
+        using esp::data::NeedsTargetWeaponTelemetry;
+        for (bool aim : {false, true}) for (bool trigger : {false, true})
+        for (bool damage : {false, true})
+            CHECK(!NeedsTargetWeaponTelemetry(false, aim, trigger, damage));
+        CHECK(!NeedsTargetWeaponTelemetry(true, true, false, false));
+        CHECK(NeedsTargetWeaponTelemetry(true, true, false, true));
+        CHECK(!NeedsTargetWeaponTelemetry(true, false, false, true));
+        CHECK(NeedsTargetWeaponTelemetry(true, false, true, false));
+        CHECK(NeedsTargetWeaponTelemetry(true, true, true, false));
         using esp::data::IsInventoryMetadataRetryDue;
         using esp::data::IsInventoryPlayerCoverageComplete;
         using esp::data::IsInventoryWeaponCoverageComplete;
@@ -4853,6 +5604,79 @@ namespace
 
     void TestInputDevicePolicy()
     {
+        app::input::LatestMoveMailbox mailbox;
+        CHECK(!mailbox.HasPending());
+        CHECK(!mailbox.Take().has_value());
+        CHECK(mailbox.Submit(10, 20, 1000, 35000));
+        CHECK(mailbox.Submit(-3, 4, 1001, 35000));
+        const auto latest = mailbox.Take();
+        CHECK(latest.has_value() && latest->x == -3 && latest->y == 4);
+        CHECK(!mailbox.HasPending());
+        CHECK(mailbox.IsCurrent(*latest));
+        CHECK(app::input::LatestMoveMailbox::IsFresh(*latest, 36000));
+        CHECK(!app::input::LatestMoveMailbox::IsFresh(*latest, 36001));
+        CHECK(!app::input::LatestMoveMailbox::IsFresh(*latest, 1000));
+        mailbox.Cancel();
+        CHECK(!mailbox.IsCurrent(*latest));
+        CHECK(mailbox.Submit(3000, -3000, 50000, UINT64_MAX));
+        const auto bounded = mailbox.Take();
+        CHECK(bounded->x == 2048 && bounded->y == -2048 && bounded->expiresAtUs == 85000);
+        CHECK(!mailbox.Submit(1, 1, UINT64_MAX - 1, 20));
+        CHECK(!mailbox.Submit(0, 0, 100, 10));
+        CHECK(!mailbox.Submit(1, 1, 100, 0));
+        CHECK(mailbox.Submit(1, 1, 100, 10));
+        CHECK(mailbox.Cancel());
+        CHECK(!mailbox.HasPending());
+        CHECK(target::policy::RemainingSampleLifetimeUs(1000, 7000, 35000) == 29000);
+        CHECK(target::policy::RemainingSampleLifetimeUs(1000, 36000, 35000) == 0);
+        CHECK(target::policy::RemainingSampleLifetimeUs(1000, UINT64_MAX, 35000) == 0);
+        CHECK(target::policy::RemainingSampleLifetimeUs(0, 2000, 35000) == 0);
+        CHECK(target::policy::RemainingSampleLifetimeUs(2001, 2000, 35000) == 0);
+        app::input::MouseActivationRouter route;
+        for (const auto kind : {app::input::DeviceKind::Makcu, app::input::DeviceKind::KmBox,
+                app::input::DeviceKind::KmBoxNet, app::input::DeviceKind::FerrumOne}) {
+            app::input::DeviceStatus device;
+            device.state = app::input::ConnectionState::Connected;
+            device.selected = kind;
+            device.physicalButtonsAvailable = true;
+            for (const int mouseKey : {2, 4, 5, 6}) {
+                app::input::ActivationKeyRouter keys;
+                device.physicalButtonMask = 0;
+                CHECK(keys.Read(device, mouseKey, {true, true}, 1000).down);
+                CHECK(!keys.Read(device, mouseKey, {true, false}, 1001).down);
+                device.physicalButtonMask = app::input::VirtualKeyToMouseButtonMask(mouseKey);
+                CHECK(keys.Read(device, mouseKey, {true, true}, 1010).down);
+                device.physicalButtonMask = 0;
+                CHECK(!keys.Read(device, mouseKey, {true, true}, 1011).down);
+                CHECK(!keys.Read(device, mouseKey, {true, true}, 1600).down);
+                CHECK(!keys.Read(device, mouseKey, {true, false}, 1601).down);
+                CHECK(keys.Read(device, mouseKey, {true, true}, 1602).down);
+                CHECK(!keys.Read(device, 1, {true, true}, 1602).down);
+                CHECK(!keys.Read(device, 0, {true, true}, 1602).available);
+            }
+        }
+        CHECK(route.Read({true, false}, {true, true}, 1000).down);
+        CHECK(!route.Read({true, false}, {}, 1001).available);
+        CHECK(!route.Read({true, false}, {true, false}, 1002).down);
+        CHECK(route.Read({true, true}, {true, false}, 1010).down);
+        CHECK(!route.Read({true, false}, {true, true}, 1011).down);
+        CHECK(!route.Read({true, false}, {true, true}, 1500).down);
+        CHECK(route.Read({true, true}, {true, true}, 1501).down);
+        CHECK(!route.Read({}, {true, false}, 1502).available);
+        CHECK(!route.Read({true, false}, {true, false}, 1503).down);
+        CHECK(!route.Read({true, false}, {true, false}, 1800).down);
+        CHECK(route.Read({true, false}, {true, true}, 1801).down);
+        CHECK(!route.Read({true, false}, {true, false}, 1802).down);
+        route = {};
+        CHECK(!route.Read({}, {}, 1).available);
+        CHECK(route.Read({}, {true, true}, 2).down);
+        CHECK(!route.Read({true, false}, {true, false}, 3).down);
+        route = {};
+        CHECK(route.Read({true, true}, {true, true}, 2000).down);
+        CHECK(!route.Read({}, {true, true}, 2001).available);
+        CHECK(!route.Read({}, {true, false}, 2002).available);
+        CHECK(!route.Read({}, {true, false}, 2300).down);
+        CHECK(route.Read({}, {true, true}, 2301).down);
         // A delayed down sample must never mask physical UP. Test two full
         // Toggle cycles with primary input stuck down throughout.
         target::policy::ActivationState activation;
@@ -4884,7 +5708,6 @@ namespace
         using app::input::IsValidDeviceKind;
         using app::input::MakcuButtonStreamParser;
         using app::input::ParseKmBoxHardwareKey;
-        using app::input::SanitizeDeviceKind;
         using app::input::SanitizeSelectableDeviceKind;
 
         CHECK(IsValidDeviceKind(0));
@@ -4900,8 +5723,6 @@ namespace
         CHECK(!app::input::IsNetworkDeviceKind(DeviceKind::KmBox));
         CHECK(!app::input::IsNetworkDeviceKind(DeviceKind::Makcu));
         CHECK(!app::input::IsNetworkDeviceKind(DeviceKind::None));
-        CHECK(SanitizeDeviceKind(1) == DeviceKind::Makcu);
-        CHECK(SanitizeDeviceKind(99) == DeviceKind::None);
         CHECK(!IsSelectableDeviceKind(0));
         CHECK(IsSelectableDeviceKind(1));
         CHECK(IsSelectableDeviceKind(3));
@@ -4961,7 +5782,79 @@ namespace
         CHECK(app::input::VirtualKeyToMouseButtonMask(0x06) == 0x10);
         CHECK(app::input::VirtualKeyToMouseButtonMask(0x20) == 0);
 
+        std::array<uint8_t, 20> report = {};
+        report[1] = 0x12;
+        report[9] = 0x20;
+        report[10] = 4;
+        report[11] = 0x3F;
+        app::input::PhysicalKeyboardState keyboard;
+        uint8_t physicalMouse = 0;
+        CHECK(app::input::ParseNetworkInputReport(report, physicalMouse, keyboard));
+        CHECK(physicalMouse == 0x12 && keyboard.available);
+        CHECK(app::input::ReadPhysicalKeyboardKey(keyboard, 'A').down);
+        CHECK(!app::input::ReadPhysicalKeyboardKey(keyboard, 'B').down);
+        CHECK(app::input::ReadPhysicalKeyboardKey(keyboard, 0x75).down);
+        CHECK(app::input::ReadPhysicalKeyboardKey(keyboard, 0x10).down);
+        CHECK(app::input::ReadPhysicalKeyboardKey(keyboard, 0xA1).down);
+        CHECK(!app::input::ReadPhysicalKeyboardKey(keyboard, 0xA0).down);
+        CHECK(!app::input::ReadPhysicalKeyboardKey(keyboard, 0xFF).available);
+        CHECK(!app::input::ParseNetworkInputReport(
+            std::span<const uint8_t>(report.data(), 19), physicalMouse, keyboard));
+        report[10] = 1;
+        CHECK(app::input::ParseNetworkInputReport(report, physicalMouse, keyboard));
+        CHECK(!app::input::ReadPhysicalKeyboardKey(keyboard, 'A').available);
+        CHECK(app::input::IsNetworkInputFresh(1000, 1500));
+        CHECK(!app::input::IsNetworkInputFresh(1000, 1501));
+        CHECK(!app::input::IsNetworkInputFresh(1000, 999));
+        CHECK(!app::input::IsNetworkInputFresh(0, 1));
+        CHECK(app::input::SelectKeyboardActivationKeyState({true, false}, {true, true}).down);
+        CHECK(app::input::SelectKeyboardActivationKeyState({true, true}, {true, false}).down);
+        CHECK(!app::input::SelectKeyboardActivationKeyState({true, false}, {true, false}).down);
+        CHECK(!app::input::SelectKeyboardActivationKeyState({}, {}).available);
+        CHECK(!app::input::SelectActivationKeyState({true, false}, {true, true}).down);
+
+        app::input::KmBoxSerialButtonParser serialParser;
+        uint8_t serialMask = 0;
+        const auto parseSerial = [&](std::string_view text) {
+            bool parsed = false;
+            for (const auto byte : text)
+                parsed = serialParser.Consume(static_cast<uint8_t>(byte), serialMask) || parsed;
+            return parsed;
+        };
+        for (int values = 0; values < 1024; ++values) {
+            std::string line = "KVQB";
+            uint8_t expected = 0;
+            for (int button = 0; button < 5; ++button) {
+                const int state = (values >> (2 * button)) & 3;
+                line += ' '; line += static_cast<char>('0' + state);
+                if (state & 1) expected |= static_cast<uint8_t>(1u << button);
+            }
+            line += "\r\n>>> ";
+            serialParser.Reset();
+            CHECK(parseSerial(line));
+            CHECK(serialMask == expected);
+        }
+        serialParser.Reset();
+        CHECK(!parseSerial("print('KVQB',km.left())\r\n"));
+        CHECK(!parseSerial("KVQB 0 0 0 0 4\r\n"));
+        CHECK(!parseSerial("KVQB 0 0 0 0 0garbage\r\n"));
+        CHECK(!parseSerial("KVQB 0 0 0 0 0" + std::string(200, ' ') + "garbage\r\n"));
+        CHECK(!parseSerial("KVQB 0 0 "));
+        CHECK(parseSerial("0 0 1\r\n"));
+        CHECK(serialMask == 0x10);
+
         MakcuButtonStreamParser parser;
+        CHECK(!parser.HasSample());
+        const std::string monitorReply = "km.buttons(1)\r\n>>> km." + std::string(1, '\x02');
+        for (const unsigned char byte : monitorReply) parser.Consume(byte);
+        CHECK(parser.HasSample() && parser.Mask() == 0x02);
+        parser.Reset();
+        CHECK(!parser.HasSample() && parser.Mask() == 0);
+        for (const unsigned char byte : std::string("km.buttons(1)\r\n>>> ")) parser.Consume(byte);
+        CHECK(!parser.HasSample());
+        for (const unsigned char byte : std::string("km.") + std::string(1, '\0')) parser.Consume(byte);
+        CHECK(parser.HasSample() && parser.Mask() == 0);
+        parser.Reset();
         uint8_t buttonMask = 0xFF;
         constexpr std::array<uint8_t, 9> stream = {
             '>', 'k', 'm', '.', 0x10, 'k', 'm', '.', 0x00
@@ -4981,6 +5874,28 @@ namespace
         CHECK(buttonMask == 0x0A);
         parser.Reset();
         CHECK(parser.Mask() == 0);
+
+        for (const auto prefix : {std::string_view("km."), std::string_view("km.buttons")}) {
+            for (uint8_t mask = 0; mask <= 0x1F; ++mask) {
+                parser.Reset();
+                const std::string packet = std::string(prefix) + static_cast<char>(mask) + "\r\n>>> ";
+                int events = 0;
+                for (const unsigned char byte : packet) events += parser.Consume(byte) ? 1 : 0;
+                CHECK(events == 1 && parser.HasSample() && parser.Mask() == mask);
+                CHECK(parser.LastPacketBytes() == prefix.size() + 1);
+            }
+        }
+        parser.Reset();
+        for (const auto noise : {std::string("km.buttons(1)\r\n>>> "), std::string("km.buttons(0)\r\n>>> "),
+            std::string("km.MAKCU v3.9\r\n>>> "), std::string("\x02\x10\x00", 3),
+            std::string("km.broken\r\nkm.buttonsX\r\n")}) {
+            for (const unsigned char byte : noise) CHECK(!parser.Consume(byte));
+            CHECK(!parser.HasSample());
+        }
+        for (const unsigned char byte : std::string("km.butkm.buttons") + '\x02') parser.Consume(byte);
+        CHECK(parser.HasSample() && parser.Mask() == 2 && parser.LastPacketBytes() == 11);
+        for (const unsigned char byte : std::string("km.move(1,2)\r\n>>> ")) parser.Consume(byte);
+        CHECK(parser.Mask() == 2 && parser.LastPacketBytes() == 11);
 
         const auto path = BuildCircularTestPath(28, 48);
         CHECK(path.size() == 50u);
@@ -5078,6 +5993,29 @@ namespace
 
     void TestTargetPolicy()
     {
+        CHECK(target::policy::ResolveSmoothingFraction(NAN, 5, true) == 0.0f);
+        CHECK(target::policy::ResolveSmoothingFraction(-1, 5, true) == 0.0f);
+        for (const float smoothing : {1.0f, 5.0f, 50.0f}) {
+            float previous = 0.0f;
+            for (int i = 0; i <= 400; ++i) {
+                const float fraction = target::policy::ResolveSmoothingFraction(i * 0.01f, smoothing, true);
+                CHECK(std::isfinite(fraction) && fraction > 0 && fraction <= 1);
+                CHECK(fraction >= previous);
+                previous = fraction;
+            }
+        }
+        CHECK(std::fabs(target::policy::ResolveSmoothingFraction(2.0f, 5, true) -
+            target::policy::ResolveSmoothingFraction(1.9999f, 5, true)) < 0.00001f);
+        for (const float hz : {64.0f, 128.0f, 250.0f}) {
+            float error = 1.5f;
+            for (int i = 0; i < static_cast<int>(hz); ++i) {
+                const float fraction = target::policy::ResolveSmoothingFraction(error, 5, true);
+                const float step = error * target::policy::TimeAdjustedSmoothing(fraction, 1.0f / hz);
+                CHECK(step >= 0 && step <= error);
+                error -= step;
+            }
+            CHECK(error < 0.001f);
+        }
         CHECK(target::policy::ResolveConfiguredFov(77.0f, false, 180.0f) == 77.0f);
         CHECK(target::policy::ResolveConfiguredFov(77.0f, true, 180.0f) == 180.0f);
         CHECK(target::policy::ResolveConfiguredFov(77.0f, true, std::nanf("")) == 77.0f);
@@ -5104,7 +6042,8 @@ namespace
         CHECK(target::policy::SanitizeSmoothing(1.0f) == 1.0f);
         CHECK(target::policy::SanitizeSmoothing(51.0f) == 5.0f);
         CHECK(target::policy::SanitizeAimBone(4) == 4);
-        CHECK(target::policy::SanitizeAimBone(5) == 0);
+        CHECK(target::policy::SanitizeAimBone(5) == 5);
+        CHECK(target::policy::SanitizeAimBone(6) == 0);
         CHECK(target::policy::SanitizeDelayMs(500) == 500);
         CHECK(target::policy::SanitizeDelayMs(501) == 10);
         CHECK(target::policy::SanitizeActivationMode(0) == 0);
@@ -5170,7 +6109,8 @@ namespace
         CHECK(target::policy::ResolvePredictionSeconds(
             UINT64_MAX, 999, 1.0f) ==
             target::policy::kMaximumPredictionSeconds);
-        CHECK(target::policy::ShouldKeepLockedTarget(111.0f, 100.0f));
+        CHECK(target::policy::ShouldKeepLockedTarget(100.0f, 100.0f));
+        CHECK(!target::policy::ShouldKeepLockedTarget(100.1f, 100.0f));
         CHECK(!target::policy::ShouldKeepLockedTarget(113.0f, 100.0f));
         CHECK(std::fabs(target::policy::UpdateCorrelatedNoise(
             0.05f, 0.0f) - 0.041f) < 0.0001f);
@@ -5198,10 +6138,6 @@ namespace
         CHECK(target::policy::IsFreshSample(900u, 1000u, 100u));
         CHECK(!target::policy::IsFreshSample(899u, 1000u, 100u));
         CHECK(!target::policy::IsFreshSample(1001u, 1000u, 100u));
-        CHECK(std::fabs(target::policy::ResolveHeadAimCoordinate(
-            10.0f, 0.0f) - 8.5f) < 0.0001f);
-        CHECK(target::policy::ResolveHeadAimCoordinate(
-            10.0f, 9.0f) == 9.85f);
         CHECK(target::policy::ClampAimStepToTarget(0.5f, 0.2f) == 0.2f);
         CHECK(target::policy::ClampAimStepToTarget(-0.5f, 0.2f) == 0.0f);
         CHECK(target::policy::ResolveAlignmentToleranceDegrees(
@@ -5247,12 +6183,6 @@ namespace
             false, 80.0f, 80.0f));
         CHECK(!target::policy::ShouldHoldCapsuleAim(
             true, 74.9f, 80.0f));
-        CHECK(target::policy::IsMarginalSeedWindowReady(
-            75.0f, 80.0f, 3, 2));
-        CHECK(!target::policy::IsMarginalSeedWindowReady(
-            75.0f, 80.0f, 3, 1));
-        CHECK(!target::policy::IsMarginalSeedWindowReady(
-            74.9f, 80.0f, 3, 3));
         const uint32_t targetNameHash =
             target::policy::HashTargetName("same-player");
         CHECK(targetNameHash != 0u);
@@ -5304,8 +6234,6 @@ namespace
         CHECK(target::policy::IsPostShotRecoilReady(
             true, 1, true,
             target::policy::kRequiredPostShotRecoilSamples));
-        CHECK(!target::policy::ShouldRetryUnobservedClick(
-            true, false, true, true, true, 0u));
         CHECK(target::policy::ResolvePostShotOutcomeDelaySeconds(
             40, 0.015f, 1.0f / 64.0f, 0.012f) >= 0.075f);
         CHECK(target::policy::ResolveUnobservedClickTimeoutSeconds(
@@ -5376,7 +6304,7 @@ namespace
             0.0f).valid);
     }
 
-    void TestKmBoxNetLoopback(app::input::DeviceKind device)
+    void TestKmBoxNetLoopback(app::input::DeviceKind device, bool monitorAvailable = true)
     {
         WSADATA winsock = {};
         CHECK(WSAStartup(MAKEWORD(2, 2), &winsock) == 0);
@@ -5415,6 +6343,11 @@ namespace
 
         std::atomic<bool> running { true };
         std::atomic<int> receivedPackets { 0 };
+        std::atomic<uint16_t> monitorPort { 0 };
+        std::atomic<uint8_t> monitorButtons { 0 };
+        std::atomic<uint8_t> monitorKey { 0 };
+        std::atomic<uint8_t> monitorModifiers { 0 };
+        std::atomic<bool> monitorSilent { false };
         std::atomic<int> leftDownPackets { 0 };
         std::atomic<int> leftUpPackets { 0 };
         std::atomic<int64_t> lastLeftDownAtUs { 0 };
@@ -5447,6 +6380,15 @@ namespace
                     continue;
                 uint32_t command = 0;
                 std::memcpy(&command, packet.data() + 12, sizeof(command));
+                if (command == 0x27388020u) {
+                    uint32_t field = 0;
+                    std::memcpy(&field, packet.data() + 4, sizeof(field));
+                    monitorPort.store((field >> 16) == 0xAA55
+                        ? static_cast<uint16_t>(field) : 0);
+                    sendto(server, packet.data(), 16, 0,
+                        reinterpret_cast<const sockaddr*>(&sender), senderLength);
+                    continue;
+                }
                 lastCommand.store(command, std::memory_order_release);
                 if (command == kMouseMoveCommand)
                     ++movePackets;
@@ -5524,6 +6466,28 @@ namespace
         SetThreadPriority(
             serverThread.native_handle(),
             THREAD_PRIORITY_ABOVE_NORMAL);
+
+        std::thread monitorThread([&] {
+            while (running.load()) {
+                const auto portToSend = monitorPort.load();
+                if (portToSend != 0 && monitorAvailable && !monitorSilent.load()) {
+                    std::array<uint8_t, 20> report = {};
+                    report[0] = 1;
+                    report[1] = monitorButtons.load();
+                    report[8] = 2;
+                    report[9] = monitorModifiers.load();
+                    report[10] = monitorKey.load();
+                    sockaddr_in destination = {};
+                    destination.sin_family = AF_INET;
+                    destination.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+                    destination.sin_port = htons(portToSend);
+                    sendto(server, reinterpret_cast<const char*>(report.data()),
+                        static_cast<int>(report.size()), 0,
+                        reinterpret_cast<const sockaddr*>(&destination), sizeof(destination));
+                }
+                std::this_thread::sleep_for(std::chrono::milliseconds(4));
+            }
+        });
 
         using app::input::ConnectionState;
         using app::input::DeviceKind;
@@ -5628,9 +6592,6 @@ namespace
         }
         CHECK(watchdogStatus.state == ConnectionState::Connected);
 
-        // Hold an unrelated backend request in flight. A click reserved while
-        // the worker is blocked must start its hold interval at the actual
-        // successful DOWN, not at RequestLeftClick().
         releaseMoveResponse.store(false, std::memory_order_release);
         moveResponseBlocked.store(false, std::memory_order_release);
         blockNextMoveResponse.store(true, std::memory_order_release);
@@ -5653,6 +6614,11 @@ namespace
               delayedDownBefore);
         CHECK(leftUpPackets.load(std::memory_order_acquire) == delayedUpBefore);
         releaseMoveResponse.store(true, std::memory_order_release);
+        waitForPackets(expectedPackets + 8);
+        CHECK(leftDownPackets.load() == delayedDownBefore);
+        CHECK(leftUpPackets.load() == delayedUpBefore);
+        CHECK(!app::input::GetLeftClickStatus().active);
+        CHECK(app::input::RequestLeftClick(30));
         waitForPackets(expectedPackets + 10);
         CHECK(leftDownPackets.load(std::memory_order_acquire) ==
               delayedDownBefore + 1);
@@ -5760,7 +6726,74 @@ namespace
         CHECK(status.state == ConnectionState::Error);
         CHECK(status.error == app::input::DeviceError::InvalidConfiguration);
 
+        app::input::SetKmBoxNetConfig({"127.0.0.1", port, "A1B2C3D4"});
+        CHECK(app::input::RequestConnectAndTest());
+        const auto monitorDeadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+        do {
+            std::this_thread::sleep_for(std::chrono::milliseconds(2));
+            status = app::input::GetDeviceStatus();
+        } while (status.state != ConnectionState::Connected &&
+                 status.state != ConnectionState::Error &&
+                 std::chrono::steady_clock::now() < monitorDeadline);
+        CHECK(status.state == ConnectionState::Connected);
+        CHECK(monitorPort.load() >= 1024 && monitorPort.load() <= 49151);
+        if (monitorAvailable) {
+        const auto waitForInput = [&](int key, bool available, bool down) {
+            const auto until = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+            app::input::KeyState value;
+            do {
+                value = app::input::ReadActivationKeyState(key);
+                if (value.available == available && (!available || value.down == down)) break;
+                std::this_thread::sleep_for(std::chrono::milliseconds(2));
+            } while (std::chrono::steady_clock::now() < until);
+            CHECK(value.available == available);
+            if (available) CHECK(value.down == down);
+            return value;
+        };
+        waitForInput(0x06, true, false);
+        for (const int key : {0x06, 0x75, 0x10}) {
+            target::policy::ActivationState toggle;
+            const auto update = [&](app::input::KeyState value) {
+                return target::policy::UpdateActivation(toggle, true, key, 1,
+                    value.down, value.available, false);
+            };
+            monitorButtons.store(key == 0x06 ? 0x10 : 0);
+            monitorKey.store(key == 0x75 ? 0x3F : 0);
+            monitorModifiers.store(key == 0x10 ? 0x20 : 0);
+            CHECK(update(waitForInput(key, true, true)));
+            const int movesBefore = movePackets.load();
+            CHECK(app::input::RequestMove(4, -3));
+            const auto moveUntil = std::chrono::steady_clock::now() + std::chrono::seconds(1);
+            while (movePackets.load() <= movesBefore && std::chrono::steady_clock::now() < moveUntil)
+                std::this_thread::sleep_for(std::chrono::milliseconds(2));
+            CHECK(movePackets.load() > movesBefore);
+            monitorButtons.store(0); monitorKey.store(0); monitorModifiers.store(0);
+            CHECK(update(waitForInput(key, true, false)));
+            monitorButtons.store(key == 0x06 ? 0x10 : 0);
+            monitorKey.store(key == 0x75 ? 0x3F : 0);
+            monitorModifiers.store(key == 0x10 ? 0x20 : 0);
+            CHECK(!update(waitForInput(key, true, true)));
+            monitorButtons.store(0); monitorKey.store(0); monitorModifiers.store(0);
+            CHECK(!update(waitForInput(key, true, false)));
+        }
+        monitorButtons.store(0x10);
+        waitForInput(0x06, true, true);
+        monitorSilent.store(true);
+        waitForInput(0x06, false, false);
+        CHECK(app::input::GetDeviceStatus().state == ConnectionState::Connected);
+        CHECK(!app::input::IsHardwareKeyDown(0x06));
+        monitorButtons.store(0); monitorSilent.store(false);
+        waitForInput(0x06, true, false);
+        CHECK(app::input::RequestDisconnect());
+        waitForInput(0x06, false, false);
+        } else {
+            CHECK(!app::input::ReadActivationKeyState(0x06).available);
+            CHECK(!app::input::ReadActivationKeyState(0x75).available);
+            CHECK(app::input::RequestDisconnect());
+        }
+
         running.store(false, std::memory_order_release);
+        monitorThread.join();
         serverThread.join();
         closesocket(server);
         WSACleanup();
@@ -6129,14 +7162,107 @@ void TestDmaReadCompletionContracts()
     CHECK(reads.Add(0, &output) == nullptr && output == 0);
 }
 
-int main()
+void TestEspPresentation()
 {
+    using namespace esp::render;
+    CHECK(ValueMode(-1,true)==1 && ValueMode(-1,false)==2);
+    CHECK(ShowBarValue(0,100,false));
+    CHECK(!ShowBarValue(1,100,true));
+    CHECK(ShowBarValue(1,0,true));
+    CHECK(!ShowBarValue(2,74,true));
+    CHECK(!ShowBarValue(0,-1,true));
+    CHECK(FormatAmmo(30,5,true,true,7)=="30 | 5 mags");
+    CHECK(FormatAmmo(4,12,true,false,35)=="4 | 12 shells");
+    CHECK(FormatAmmo(200,200,true,false,14)=="200 | 200 rounds");
+    CHECK(FormatAmmo(0,-1,true,true,7)=="0");
+    CHECK(FormatAmmo(30,90,false,false,7)=="30");
+    CHECK(FormatAmmo(-1,5,true,true,7).empty());
+    CHECK(VisibilityState(true,100,100)==1);
+    CHECK(VisibilityState(false,100,150100)==0);
+    CHECK(VisibilityState(true,100,150101)==2);
+    CHECK(VisibilityState(true,101,100)==2);
+    CHECK(VisibilityState(true,0,100)==2);
+    HealthTrail trail;
+    CHECK(trail.Update(1,1,100,1000000)==1);
+    CHECK(trail.Update(1,1,40,1010000)==1);
+    CHECK(trail.value==40);
+    CHECK(trail.Update(1,1,40,1090000)==1);
+    CHECK(trail.Update(1,1,40,1120000)<1);
+    CHECK(trail.Update(2,1,60,1130000)==0.6f);
+    CHECK(trail.Update(2,2,30,1140000)==0.3f);
+    CHECK(trail.Update(2,2,80,1150000)==0.8f);
+    CHECK(trail.Update(2,2,0,1160000)==0);
+    CHECK(trail.Update(2,2,50,1)==0.5f);
+    CHECK(trail.Update(2,2,20,600001)==0.2f);
+    DistanceReadout distance;
+    CHECK(distance.Update(1,1,1,40.4f)==40);
+    CHECK(distance.Update(1,1,1,40.6f)==40);
+    CHECK(distance.Update(1,1,1,40.8f)==41);
+    CHECK(distance.Update(1,2,1,40.4f)==40);
+    CHECK(distance.Update(1,2,1,-1)==-1);
+    const auto order=NormalizeFlagOrder({7,7,-1,8,1,1,5,0});
+    const std::array<int,8> expected={7,1,0,2,3,4,6,5};
+    CHECK(order==expected);
+    const Vector3 aligned=PoseRenderOffset({5,6,7},true,{7,8,9},{9,10,11},1000,1100);
+    CHECK(aligned.x==4 && aligned.y==4 && aligned.z==4);
+    const Vector3 stale=PoseRenderOffset({5,6,7},true,{7,8,9},{9,10,11},1000,200000);
+    CHECK(stale.x==2 && stale.y==2 && stale.z==2);
+    view_matrix_t matrix{};
+    matrix[0][0]=matrix[1][1]=matrix[3][3]=1;
+    ScreenPos a{},b{};
+    CHECK(ClipProjectedSegment({-2,0,0},{2,0,0},matrix,1920,1080,a,b));
+    CHECK(std::fabs(a.x)<0.01f && std::fabs(b.x-1920)<0.01f);
+    CHECK(std::fabs(a.y-540)<0.01f && std::fabs(b.y-540)<0.01f);
+    CHECK(!ClipProjectedSegment({-2,2,0},{2,2,0},matrix,1920,1080,a,b));
+    CHECK(ClipProjectedSegment({-2,-2,0},{2,2,0},matrix,1920,1080,a,b));
+    CHECK(std::fabs(a.x)<0.01f && std::fabs(a.y-1080)<0.01f);
+    CHECK(!ClipProjectedSegment({0,0,0},{1,1,1},matrix,
+        std::numeric_limits<float>::quiet_NaN(),1080,a,b));
+    CHECK(!ClipProjectedSegment({NAN,0,0},{0,0,0},matrix,1920,1080,a,b));
+    matrix[3][3]=0; matrix[3][2]=1;
+    CHECK(ClipProjectedSegment({0,0,-1},{0,0,2},matrix,1920,1080,a,b));
+    CHECK(std::fabs(a.x-960)<0.01f && std::fabs(b.x-960)<0.01f);
+    CHECK(!ClipProjectedSegment({0,0,-1},{0,0,-2},matrix,1920,1080,a,b));
+}
+
+#include "audit_regressions.inl"
+
+int main(int argc, char** argv)
+{
+    TestEspPresentation();
+    if (argc==2 && std::string_view(argv[1])=="--esp-presentation") {
+        if (g_failedChecks) return 1;
+        std::cout << "ESP presentation policy tests passed\n";
+        return 0;
+    }
+    if (argc == 2 && std::string_view(argv[1]) == "--readers-bvh") {
+        TestKeyboardReadPolicy();
+        TestStartupOffsets();
+        TestStartupOffsetRecovery();
+        TestSchemaScopeStartup();
+        TestMemoryValidation();
+        TestRuntimeResolverPolicy();
+        TestConvarSnapshotWorker();
+        TestPhysicsShapeLayouts();
+        TestWorldDomainPolicy();
+        TestInputDevicePolicy();
+        if (g_failedChecks != 0) return 1;
+        std::cout << "readers/BVH/input policy tests passed\n";
+        return 0;
+    }
+    TestCheckedScatterBatch();
+    TestKeyboardReadPolicy();
+    TestStartupOffsets();
+    TestStartupOffsetRecovery();
+    TestSchemaScopeStartup();
     TestDmaReadCompletionContracts();
     TestTrim();
     TestConfigParseUtils();
     TestWeaponCatalog();
     TestMemoryValidation();
     TestRuntimeResolverPolicy();
+    TestConvarSnapshotWorker();
+    TestPhysicsShapeLayouts();
     TestBase64();
     TestLocalizationCatalog();
     TestInputDevicePolicy();
@@ -6179,6 +7305,10 @@ int main()
     TestTargetBallistics();
     TestKmBoxNetLoopback(app::input::DeviceKind::KmBoxNet);
     TestKmBoxNetLoopback(app::input::DeviceKind::FerrumOne);
+    TestKmBoxNetLoopback(app::input::DeviceKind::FerrumOne, false);
+    TestAuditRegressions();
+    TestLostReleaseAndCircleCancellation(app::input::DeviceKind::KmBoxNet);
+    TestLostReleaseAndCircleCancellation(app::input::DeviceKind::FerrumOne);
     TestMakcuHardwareIfRequested();
 
     if (g_failedChecks != 0) {

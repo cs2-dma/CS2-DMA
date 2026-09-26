@@ -1,0 +1,50 @@
+name: Build and regression tests
+on:
+  pull_request:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  checks:
+    runs-on: windows-2025
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - uses: microsoft/setup-msbuild@v2
+      - name: Prepare CJK test font
+        shell: pwsh
+        run: |
+          $fontPath = Join-Path $env:RUNNER_TEMP 'NotoSansCJKsc-Regular.otf'
+          Invoke-WebRequest -Uri 'https://raw.githubusercontent.com/notofonts/noto-cjk/f8d157532fbfaeda587e826d4cd5b21a49186f7c/Sans/OTF/SimplifiedChinese/NotoSansCJKsc-Regular.otf' -OutFile $fontPath -TimeoutSec 60
+          "KEVQ_TEST_CJK_FONT=$fontPath" >> $env:GITHUB_ENV
+      - name: Project and resource consistency
+        shell: pwsh
+        run: |
+          ./tools/tests/audit_project.ps1
+          node tools/tests/audit_localization.js
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          node tools/tests/map_assets_test.js
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          node tools/tests/webradar_continuity_test.js
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          node tools/tests/remote_server_test.js
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+      - name: Build Release with private symbols
+        run: msbuild KevqDMA.vcxproj /m /p:Configuration=Release /p:Platform=x64 /p:PlatformToolset=v143 /v:minimal
+      - name: Build and run C++ regressions
+        shell: pwsh
+        run: |
+          ./tools/tests/verify_embedded_resources.ps1
+          ./tools/tests/run_regressions.ps1 -PlatformToolset v143
+  asan:
+    runs-on: windows-2025
+    steps:
+      - uses: actions/checkout@v4
+      - uses: microsoft/setup-msbuild@v2
+      - name: AddressSanitizer regressions
+        shell: pwsh
+        run: ./tools/tests/run_regressions.ps1 -PlatformToolset v143 -Sanitizer

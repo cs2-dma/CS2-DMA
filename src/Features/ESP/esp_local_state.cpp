@@ -1,11 +1,13 @@
 #include <Windows.h>
 #include "Features/ESP/esp_local_state.h"
+#include "Features/ESP/DataReader/player_core_policy.h"
 #include "Features/ESP/esp_helpers.h"
 #include "Features/ESP/DataReader/deferred_lane_policy.h"
 #include "Features/ESP/DataReader/player_commit_policy.h"
 #include "Features/Target/target_policy.h"
 #include "Features/ESP/Recovery/dma_cache_profile.h"
 #include "Features/ESP/Recovery/dma_refresh_policy.h"
+#include "Features/ESP/Recovery/dma_read_session.h"
 #include "Features/ESP/State/snapshot_ring.h"
 #include "Features/ESP/Worker/worker_policy.h"
 #include "app/Core/globals.h"
@@ -45,6 +47,15 @@ namespace esp {
         s_readQualityInterval = sample;
     }
 
+    static std::mutex s_playerFlagDiagnosticsMutex;
+    static esp::PlayerFlagDiagnostics s_playerFlagDiagnostics;
+
+    void PublishPlayerFlagDiagnostics(const esp::PlayerFlagDiagnostics& frame)
+    {
+        std::lock_guard<std::mutex> lock(s_playerFlagDiagnosticsMutex);
+        s_playerFlagDiagnostics = frame;
+    }
+
     void PublishDataSettingsSnapshot()
     {
         DataSettingsSnapshot snapshot;
@@ -53,12 +64,15 @@ namespace esp {
             snapshot.espSkeleton = g::espEnabled && g::espSkeleton;
             snapshot.espShowTeammates = g::espShowTeammates;
             snapshot.espWeaponIconNoKnife = g::espWeaponIconNoKnife;
-            snapshot.espBombInfo = g::espBombInfo;
+            snapshot.espBombInfo = g::espBombInfo ||
+                (g::espEnabled && g::espFlags && g::espSettings.presentation.flagBomb);
             snapshot.radarShowBomb = g::radarShowBomb;
             snapshot.espWeapon = g::espEnabled && g::espWeapon;
             snapshot.espWeaponAmmo = snapshot.espWeapon && g::espWeaponAmmo;
+            snapshot.espWeaponPresentation = snapshot.espWeaponAmmo ||
+                (g::espEnabled && g::espFlags && g::espSettings.presentation.flagReload);
             snapshot.espWeaponIcon = snapshot.espWeapon && g::espWeaponIcon;
-            snapshot.espName = g::espEnabled && g::espFlags && g::espName;
+            snapshot.espName = g::espEnabled && g::espName;
             snapshot.radarSpectatorList = g::radarSpectatorList;
             snapshot.espFlags = g::espEnabled && g::espFlags;
             snapshot.espFlagMoney = g::espFlagMoney;
@@ -92,7 +106,12 @@ namespace esp {
             snapshot.targetNeedsWeaponState =
                 g::targetEnabled &&
                 (g::targetAimbotEnabled || g::targetTriggerbotEnabled);
+            snapshot.targetNeedsWeaponTelemetry = esp::data::NeedsTargetWeaponTelemetry(
+                g::targetEnabled, g::targetAimbotEnabled, g::targetTriggerbotEnabled,
+                std::any_of(g::targetWeaponProfiles.begin(), g::targetWeaponProfiles.end(),
+                    [](const auto& profile) { return profile.aimDamageCheck; }));
             snapshot.webRadarEnabled = g::webRadarEnabled;
+            snapshot.grenadeHelperNeedsWeaponState = g::grenadeHelperEnabled && g::grenadeHelperVisible;
             snapshot.webRadarRemoteEnabled = g::webRadarRemoteEnabled;
             snapshot.espItemEnabledMask = g::espItemEnabledMask;
             snapshot.espItem = g::espItem;
@@ -543,6 +562,8 @@ namespace esp {
     std::atomic<uint64_t> s_stageWorldScanUs{0};
     std::atomic<uint64_t> s_stageWorldScanLastUs{0};
     std::atomic<uint64_t> s_stageCommitEnrichUs{0};
+    std::atomic<uint64_t> s_stageWeaponTelemetryUs{0};
+    std::atomic<uint64_t> s_stageHelmetReadsUs{0};
     std::atomic<uint64_t> s_stagePlayerAuxLastUs{0};
     std::atomic<uint64_t> s_stageInventoryLastUs{0};
     std::atomic<uint64_t> s_stageBoneReadsLastUs{0};
@@ -588,6 +609,7 @@ namespace esp {
 
     std::atomic<uint32_t> s_pendingRefreshFlags{0};
     std::atomic<bool> s_dmaAdminThreadStarted{false};
+    std::mutex s_dmaAdminLifecycleMutex;
     std::jthread s_dmaAdminThread;
 
     uint32_t s_requiredReadFailureCount = 0;
@@ -821,6 +843,7 @@ namespace esp {
                 for (int i = 0; i < 64; ++i) {
                     frame.players[i].pawn = s_players[i].pawn;
                     frame.players[i].visible = s_players[i].visible;
+                    frame.players[i].updatedAtUs = s_players[i].visibilityUpdatedAtUs;
                 }
                 frame.crosshairValid =
                     s_visibilityCrosshairValid.load(std::memory_order_relaxed);
@@ -1110,6 +1133,8 @@ namespace esp {
             s_stageWorldScanUs.store(0, std::memory_order_relaxed);
             s_stageWorldScanLastUs.store(0, std::memory_order_relaxed);
             s_stageCommitEnrichUs.store(0, std::memory_order_relaxed);
+            s_stageWeaponTelemetryUs.store(0, std::memory_order_relaxed);
+            s_stageHelmetReadsUs.store(0, std::memory_order_relaxed);
             s_stagePlayerAuxLastUs.store(0, std::memory_order_relaxed);
             s_stageInventoryLastUs.store(0, std::memory_order_relaxed);
             s_stageBoneReadsLastUs.store(0, std::memory_order_relaxed);
@@ -1509,14 +1534,16 @@ namespace esp {
 
     void EnsureDmaAdminThread()
     {
-        bool expected = false;
-        if (s_dmaAdminThreadStarted.compare_exchange_strong(expected, true, std::memory_order_acq_rel)) {
+        std::lock_guard<std::mutex> lock(s_dmaAdminLifecycleMutex);
+        if (!s_dmaAdminThreadStarted.load(std::memory_order_acquire)) {
             s_dmaAdminThread = std::jthread(DmaAdminThreadFn);
+            s_dmaAdminThreadStarted.store(true, std::memory_order_release);
         }
     }
 
     void StopDmaAdminThread()
     {
+        std::lock_guard<std::mutex> lock(s_dmaAdminLifecycleMutex);
         s_dmaAdminThread.request_stop();
         if (s_dmaAdminThread.joinable())
             s_dmaAdminThread.join();
@@ -1817,6 +1844,21 @@ namespace esp {
         s_dmaLastSuccessTick.store(TickNowUs() / 1000u, std::memory_order_relaxed);
     }
 
+    recovery::DmaReadSession::DmaReadSession()
+        : lock_(s_dmaLifecycleMutex, std::try_to_lock),
+          generation_(s_dmaSessionGeneration.load(std::memory_order_acquire)) {}
+
+    bool recovery::DmaReadSession::Valid() const noexcept
+    {
+        return lock_.owns_lock() &&
+            !s_dmaRecovering.load(std::memory_order_acquire) &&
+            !s_dmaRecoveryRequested.load(std::memory_order_acquire) &&
+            !s_dmaAdminPauseActive.load(std::memory_order_acquire) &&
+            !s_dataWorkerStopRequested.load(std::memory_order_acquire) &&
+            generation_ == s_dmaSessionGeneration.load(std::memory_order_acquire) &&
+            GetAttachedCs2ProcessId() != 0;
+    }
+
     esp::DmaHealthStats GetDmaHealthStats()
     {
         const uint64_t nowMs = TickNowUs() / 1000u;
@@ -1908,6 +1950,12 @@ namespace esp {
     {
         const uint64_t nowUs = TickNowUs();
         esp::DebugStats stats = {};
+        {
+            std::lock_guard<std::mutex> lock(s_playerFlagDiagnosticsMutex);
+            if (s_playerFlagDiagnostics.sceneSerial == s_sceneResetSerial.load(std::memory_order_relaxed) &&
+                s_engineInGame.load(std::memory_order_relaxed) && !s_engineMenu.load(std::memory_order_relaxed))
+                stats.playerFlags = s_playerFlagDiagnostics;
+        }
         stats.publishCount = s_publishCount.load(std::memory_order_relaxed);
         stats.publishDropCount = s_publishDropCount.load(std::memory_order_relaxed);
         stats.visibilityPublishDropCount =
@@ -2034,6 +2082,8 @@ namespace esp {
             stats.stages.worldScanUs = s_stageWorldScanUs.load(std::memory_order_relaxed);
             stats.stages.worldScanLastUs = s_stageWorldScanLastUs.load(std::memory_order_relaxed);
             stats.stages.commitEnrichUs = s_stageCommitEnrichUs.load(std::memory_order_relaxed);
+            stats.stages.weaponTelemetryUs = s_stageWeaponTelemetryUs.load(std::memory_order_relaxed);
+            stats.stages.helmetReadsUs = s_stageHelmetReadsUs.load(std::memory_order_relaxed);
             stats.stages.playerAuxLastUs = s_stagePlayerAuxLastUs.load(std::memory_order_relaxed);
             stats.stages.inventoryLastUs = s_stageInventoryLastUs.load(std::memory_order_relaxed);
             stats.stages.boneReadsLastUs = s_stageBoneReadsLastUs.load(std::memory_order_relaxed);
@@ -2331,7 +2381,8 @@ namespace esp {
             const uint64_t ageUs = nowUs >= source.timeUs ? (nowUs - source.timeUs) : 0;
             if (ageUs > kRecentEspEventWindowUs)
                 continue;
-            if (static_cast<EspEventType>(source.type) == EspEventType::BoneRejected &&
+            if ((static_cast<EspEventType>(source.type) == EspEventType::BoneRejected ||
+                 static_cast<EspEventType>(source.type) == EspEventType::CoreRejected) &&
                 ageUs > kBoneRejectEventWindowUs) {
                 continue;
             }
@@ -2339,7 +2390,9 @@ namespace esp {
             strncpy_s(
                 target.type,
                 sizeof(target.type),
-                EspEventTypeName(static_cast<EspEventType>(source.type)),
+                static_cast<EspEventType>(source.type) == EspEventType::CoreRejected
+                    ? esp::data::CoreRejectionReasonName(static_cast<esp::data::CoreRejectionReason>(source.param))
+                    : EspEventTypeName(static_cast<EspEventType>(source.type)),
                 _TRUNCATE);
             target.slot = source.slot;
             target.param = source.param;
@@ -2347,6 +2400,11 @@ namespace esp {
         }
         stats.espEventCount = static_cast<int>(collectedEspEvents);
         return stats;
+    }
+
+    uint64_t GetSnapshotTimeUs()
+    {
+        return TickNowUs();
     }
 
     bool GetTargetSnapshot(TargetSnapshot* outSnapshot)

@@ -69,9 +69,43 @@ namespace app::state {
         std::atomic<uintptr_t> engine2Base{ 0 };
         std::atomic<bool> running{ true };
         std::atomic<bool> menuOpen{ true };
+        std::atomic<uint64_t> targetKeyCaptureUntilMs{0};
+    };
+
+    struct EspPresentationSettings {
+        int healthSide = 0;
+        int armorSide = 0;
+        float healthWidth = 2.0f;
+        float armorWidth = 2.0f;
+        int healthValueMode = -1;
+        int armorValueMode = -1;
+        bool healthTrail = true;
+        int armorStyle = 0;
+        bool visibilityBox = true;
+        bool visibilitySkeleton = true;
+        bool visibilityArrows = true;
+        float unknownColor[4] = {0.85f, 0.70f, 0.35f, 1.0f};
+        int nameSide = 0;
+        float nameMaxWidth = 150.0f;
+        int flagsSide = 1;
+        int flagsStyle = 2;
+        int flagsLimit = 6;
+        std::array<int, 8> flagsOrder = {0, 1, 2, 3, 4, 5, 6, 7};
+        bool flagReload = true;
+        bool flagBomb = true;
+        bool compactMoney = true;
+        bool distanceHeight = false;
+        int snapOrigin = -1;
+        int snapEndpoint = 0;
+        float snapThickness = 1.0f;
+        float snapOpacity = 1.0f;
+        float snapMaxDistance = 150.0f;
+        int snapLimit = 64;
+        bool snapNearest = false;
     };
 
     struct EspSettings {
+        EspPresentationSettings presentation;
         bool enabled = true;
         bool box = true;
         bool health = true;
@@ -109,6 +143,8 @@ namespace app::state {
         float distanceSize = 0.0f;
         bool skeleton = true;
         bool skeletonDots = false;
+        bool skeletonHeadCircle = false;
+        float skeletonHeadScale = 1.0f;
         bool snaplines = false;
         bool snaplineFromTop = false;
         bool visibilityColoring = true;
@@ -204,10 +240,10 @@ namespace app::state {
     };
 
     struct TargetWeaponProfileSettings {
-        float fovRadius = 150.0f;
-        float aimSmoothing = 5.0f;
+        float fovRadius = 80.0f;
+        float aimSmoothing = 8.0f;
         float aimMinimumDamage = 25.0f;
-        bool aimAutowall = true;
+        bool aimAutowall = false;
         float triggerSmoothing = 4.0f;
         float hitchance = 80.0f;
         float minimumDamage = 25.0f;
@@ -215,42 +251,58 @@ namespace app::state {
         // Appended so legacy aggregate profiles keep their values and checks.
         bool hitchanceEnabled = true;
         bool seedWindowEnabled = true;
+        bool aimAdaptiveSmoothing = true;
+        bool triggerAdaptiveSmoothing = false;
+        bool aimWindMouse = false;
+        float aimWindGravity = 18.0f;
+        float aimWindFluctuation = 3.0f;
+        float aimWindMaxStep = 5.0f;
+        float aimWindDistance = 12.0f;
+        bool aimDamageCheck = false;
+        bool aimSoftAssist = true;
+        float aimAssistStrength = 25.0f;
+        float aimAssistMaxSpeed = 25.0f;
+        float aimAssistDeadzone = 0.15f;
+        float aimRecoilStrength = 100.0f;
+        int aimMotionStyle = -1;
+        int aimReactionMs = 80;
+        bool triggerForceCenter = false;
     };
 
     struct TargetSettings {
         bool enabled = false;
         bool fovEnabled = false;
         bool fovPerWeapon = false;
-        float fovRadius = 150.0f;
+        float fovRadius = 80.0f;
         float fovColor[4] = { 0.3137255f, 0.6f, 1.0f, 0.9f };
         bool aimbotEnabled = false;
         int aimKey = 0x06;
         int aimActivationMode = 0;
-        int aimBone = 0;
-        float aimSmoothing = 5.0f;
+        int aimBone = 5;
         bool aimVisibleOnly = true;
-        bool aimPredictive = true;
+        bool aimPredictive = false;
         bool aimRecoilControl = true;
         bool aimHumanization = true;
+        bool aimTargetLock = true;
         bool triggerbotEnabled = false;
         int triggerKey = 0x06;
         int triggerActivationMode = 0;
         bool triggerAimAssist = true;
         int triggerAimBone = 0;
-        float triggerAimSmoothing = 4.0f;
         bool triggerAimPredictive = false;
         bool triggerAimRecoilControl = true;
         bool triggerAimHumanization = false;
+        bool triggerTargetLock = true;
         int triggerDelayMs = 10;
         bool triggerVisibleOnly = true;
         bool triggerAutoShot = false;
         std::array<TargetWeaponProfileSettings, 6> weaponProfiles = {{
-            {140.0f, 5.0f, 20.0f, false, 4.0f, 78.0f, 20.0f, false},
-            {160.0f, 5.0f, 30.0f, true, 4.0f, 75.0f, 30.0f, true},
-            {120.0f, 6.0f, 70.0f, true, 5.0f, 88.0f, 70.0f, true},
-            {180.0f, 4.0f, 20.0f, true, 3.5f, 68.0f, 20.0f, true},
-            {150.0f, 5.0f, 35.0f, true, 4.0f, 72.0f, 35.0f, true},
-            {170.0f, 5.5f, 25.0f, true, 4.5f, 68.0f, 25.0f, true},
+            {70.0f, 7.0f, 20.0f, false, 4.0f, 78.0f, 20.0f, false},
+            {80.0f, 8.0f, 30.0f, false, 4.0f, 75.0f, 30.0f, true},
+            {60.0f, 9.0f, 70.0f, false, 5.0f, 88.0f, 70.0f, true},
+            {90.0f, 7.0f, 20.0f, false, 3.5f, 68.0f, 20.0f, true},
+            {70.0f, 8.0f, 35.0f, false, 4.0f, 72.0f, 35.0f, true},
+            {80.0f, 9.0f, 25.0f, false, 4.5f, 68.0f, 25.0f, true},
         }};
     };
 
@@ -292,6 +344,7 @@ namespace app::state {
         ImFont* fontUiTitle = nullptr;
         ImFont* fontEspName = nullptr;
         ImFont* fontOverlayText = nullptr;
+        ImFont* fontBarValues = nullptr;
         ImFont* fontUiIcons = nullptr;
         ImFont* fontWeaponIcons = nullptr;
         ImFont* fontWeaponIconsSmall = nullptr;

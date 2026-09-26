@@ -1,11 +1,71 @@
 #pragma once
 
 #include <algorithm>
+#include <array>
 #include <cstddef>
 #include <cstdint>
 
 namespace esp::data
 {
+    enum class DeferredLane : uint8_t { None, Auxiliary, ActiveInventory, FullInventory, Bones };
+
+    class DeferredLaneFairness {
+    public:
+        void Observe(DeferredLane lane, bool due, uint64_t nowUs) noexcept
+        {
+            auto& since = waiting_[static_cast<size_t>(lane)];
+            if (!due) since = 0;
+            else if (since == 0 || since > nowUs) since = nowUs;
+        }
+
+        void Served(DeferredLane lane) noexcept { waiting_[static_cast<size_t>(lane)] = 0; }
+
+        DeferredLane Select(uint64_t nowUs) noexcept
+        {
+            if (forcedLastTick_) {
+                forcedLastTick_ = false;
+                return DeferredLane::None;
+            }
+            constexpr std::array<uint64_t, 5> budgets{0, 100000, 40000, 100000, 20000};
+            DeferredLane chosen = DeferredLane::None;
+            uint64_t largestOverdue = 0;
+            for (size_t i = 1; i < waiting_.size(); ++i) {
+                const uint64_t since = waiting_[i];
+                if (since == 0 || since > nowUs || nowUs - since < budgets[i]) continue;
+                const uint64_t overdue = nowUs - since - budgets[i] + 1;
+                if (overdue > largestOverdue) {
+                    chosen = static_cast<DeferredLane>(i);
+                    largestOverdue = overdue;
+                }
+            }
+            forcedLastTick_ = chosen != DeferredLane::None;
+            return chosen;
+        }
+
+    private:
+        std::array<uint64_t, 5> waiting_{};
+        bool forcedLastTick_ = false;
+    };
+
+    inline constexpr bool ShouldPrioritizeBoneLane(bool requested, bool prioritizedLastTick,
+        uint64_t lastOpportunityUs, uint64_t nowUs) noexcept
+    {
+        return requested && !prioritizedLastTick && (lastOpportunityUs == 0 ||
+            nowUs < lastOpportunityUs || nowUs - lastOpportunityUs >= 20000u);
+    }
+
+    inline constexpr bool IsBoneServiceOverdue(uint64_t sampleUs, uint64_t nowUs) noexcept
+    {
+        return sampleUs == 0 || nowUs < sampleUs || nowUs - sampleUs > 100000u;
+    }
+
+    inline constexpr bool NeedsTargetWeaponTelemetry(bool targetEnabled,
+        bool aimbotEnabled, bool triggerbotEnabled, bool aimDamageCheck) noexcept
+    {
+        return targetEnabled &&
+            (triggerbotEnabled || (aimbotEnabled && aimDamageCheck));
+    }
+
     inline constexpr bool ShouldRunActiveInventoryLane(
         bool laneDue,
         bool playerAuxActive) noexcept

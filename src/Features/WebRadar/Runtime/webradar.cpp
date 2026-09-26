@@ -1551,7 +1551,7 @@ std::string WEBRadar::NormalizeMapName(const std::string& rawName)
     return radar::NormalizeMapName(trimmed);
 }
 
-std::string WEBRadar::ResolveMapName(const esp::WebRadarSnapshot& snapshot)
+std::string WEBRadar::ResolveMapName(const esp::WebRadarSnapshot& snapshot, const std::string& previousMap)
 {
     #include "webradar_parts/webradar_resolve_map_name_body.inl"
 }

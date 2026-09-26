@@ -3,6 +3,7 @@
 #include "Features/Settings/UI/settings_sections.h"
 #include "app/UI/MenuShell/menu_state.h"
 #include "app/UI/MenuShell/tab_page.h"
+#include "app/UI/MenuShell/version_notice.h"
 #include "app/Localization/localization.h"
 
 #include <imgui.h>
@@ -30,6 +31,8 @@ void ui::tabs::SettingsTab::Render(MenuState& state, IStatusSink& statusSink)
     settings_sections::RenderProfilesSection(state, statusSink);
     ImGui::Dummy(ImVec2(0.0f, 12.0f));
     settings_sections::RenderControlsSection(state, statusSink);
+    ImGui::Separator();
+    ui::RenderVersionNotice(app::updates::GetStatus(), true);
     ImGui::EndChild();
 
     ImGui::SameLine(0.0f, panelGap);

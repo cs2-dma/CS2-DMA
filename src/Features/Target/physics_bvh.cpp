@@ -1,4 +1,7 @@
 #include "Features/Target/physics_bvh.h"
+#include "Features/Target/physics_shape_policy.h"
+#include "Features/Target/physics_read_policy.h"
+#include "Features/ESP/Recovery/dma_read_session.h"
 
 #include <Windows.h>
 #include <DMALibrary/Memory/Memory.h>
@@ -67,7 +70,11 @@ namespace
     struct BuildContext
     {
         size_t bytesRead = 0;
+        size_t shiftedShapes = 0;
+        size_t legacyShapes = 0;
+        size_t rejectedShapes = 0;
         std::function<bool()> canceled;
+        target::physics::read_policy::BackgroundBudget readBudget;
 
         bool IsCanceled() const
         {
@@ -77,15 +84,33 @@ namespace
         bool Read(uintptr_t address, void* output, size_t size, bool cached = false)
         {
             if (!IsGamePointer(address) || !output || size == 0 ||
-                size > kMaximumBulkReadBytes || IsCanceled()) {
+                size > kMaximumBulkReadBytes || address > UINTPTR_MAX - size || IsCanceled()) {
                 return false;
             }
-            const bool ok = cached
-                ? mem.ReadCached(address, output, size)
-                : mem.Read(address, output, size);
-            if (ok)
-                bytesRead += size;
-            return ok;
+            for (size_t offset = 0; offset < size;) {
+                while (readBudget.DelayUs(NowUs()) > 0) {
+                    if (IsCanceled()) return false;
+                    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+                }
+                if (IsCanceled()) return false;
+                const size_t count = (std::min)(size - offset,
+                    target::physics::read_policy::kMaximumChunkBytes);
+                const auto startedAtUs = NowUs();
+                bool deferred = false;
+                const bool ok = mem.TryReadBackground(address + offset,
+                    static_cast<uint8_t*>(output) + offset, count, cached, deferred);
+                if (deferred) {
+                    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+                    continue;
+                }
+                const auto finishedAtUs = NowUs();
+                readBudget.Account(startedAtUs, finishedAtUs,
+                    Memory::READ_PRIORITY.UnderPressure(finishedAtUs));
+                if (!ok) return false;
+                bytesRead += count;
+                offset += count;
+            }
+            return !IsCanceled();
         }
 
         template <typename T>
@@ -930,6 +955,8 @@ namespace
         uintptr_t vertexPointer,
         uintptr_t trianglePointer,
         uint32_t nodeCount,
+        uint32_t declaredVertexCount,
+        uint32_t declaredTriangleCount,
         const Matrix3& rotation,
         const float scale[3],
         const float position[3],
@@ -956,16 +983,20 @@ namespace
         uint32_t maximumTriangle = 0;
         std::vector<std::pair<uint32_t, uint32_t>> ranges;
         std::vector<uint32_t> stack = { 0u };
+        std::vector<uint8_t> visited(nodeCount, 0);
         stack.reserve(256);
         while (!stack.empty()) {
             const uint32_t cursor = stack.back();
             stack.pop_back();
-            if (cursor >= nodeCount)
+            if (context.IsCanceled()) return false;
+            if (cursor >= nodeCount || visited[cursor])
                 continue;
+            visited[cursor] = 1;
             const InnerNode& node = nodes[cursor];
             const uint32_t payload = node.Payload();
             if (node.Type() == 3) {
-                if (payload == 0 || payload >= 0x1000000u)
+                if (payload == 0 || payload >= 0x1000000u ||
+                    node.packed1 >= declaredTriangleCount || payload > declaredTriangleCount - node.packed1)
                     continue;
                 ranges.emplace_back(node.packed1, payload);
                 minimumTriangle = (std::min)(minimumTriangle, node.packed1);
@@ -998,7 +1029,7 @@ namespace
         }
         int maximumVertex = 0;
         for (const int index : indices) {
-            if (index < 0)
+            if (index < 0 || static_cast<uint32_t>(index) >= declaredVertexCount)
                 return false;
             maximumVertex = (std::max)(maximumVertex, index);
         }
@@ -1088,16 +1119,11 @@ namespace
 
     bool ExtractHull(
         BuildContext& context,
-        uintptr_t hullData,
+        const std::array<uint8_t, 0x100>& header,
         float scale,
         SurfaceInfo surface,
         std::vector<Triangle>& output)
     {
-        if (!IsGamePointer(hullData))
-            return false;
-        std::array<uint8_t, 0x100> header = {};
-        if (!context.Read(hullData, header.data(), header.size()))
-            return false;
         int vertexCount = 0;
         uintptr_t vertexPointer = 0;
         int edgeCount = 0;
@@ -1150,25 +1176,36 @@ namespace
                 continue;
             faceVertices.clear();
             int edge = firstEdge;
+            bool closed = false;
             for (int safety = 0; edge >= 0 && edge < edgeCount && safety < 64;
                  ++safety) {
+                if (edges[edge].vertex >= vertexCount) break;
                 faceVertices.push_back(edges[edge].vertex);
                 edge = edges[edge].next;
-                if (edge == firstEdge)
+                if (edge == firstEdge) {
+                    closed = true;
                     break;
+                }
             }
-            if (faceVertices.size() < 3)
+            if (context.IsCanceled()) return false;
+            if (!closed || faceVertices.size() < 3)
                 continue;
             const Vector3 first = vertex(faceVertices[0]);
             for (size_t index = 1; index + 1 < faceVertices.size(); ++index) {
                 if (output.size() >= kMaximumTriangles)
                     return false;
-                output.push_back({
+                const Triangle triangle = {
                     first,
                     vertex(faceVertices[index]),
                     vertex(faceVertices[index + 1]),
                     surface,
-                });
+                };
+                const Vector3 a = triangle.v1 - triangle.v0;
+                const Vector3 b = triangle.v2 - triangle.v0;
+                const Vector3 cross{a.y * b.z - a.z * b.y, a.z * b.x - a.x * b.z, a.x * b.y - a.y * b.x};
+                if (IsFinitePosition(triangle.v0) && IsFinitePosition(triangle.v1) &&
+                    IsFinitePosition(triangle.v2) && cross.Length() > 1e-4f)
+                    output.push_back(triangle);
             }
         }
         return output.size() > before;
@@ -1182,44 +1219,39 @@ namespace
         const std::vector<GlobalSurfaceEntry>& surfaces,
         std::vector<Triangle>& output)
     {
-        uint64_t interactionFlags = 0;
-        uintptr_t vtable = 0;
-        if (!context.Read(shape + 0x50, interactionFlags) ||
-            !context.Read(shape, vtable) ||
+        namespace shapePolicy = target::physics::shape_policy;
+        std::array<uint8_t, 0xD0> shapeHeader{};
+        if (!context.Read(shape, shapeHeader.data(), shapeHeader.size())) return;
+        const auto interactionFlags = shapePolicy::Field<uint64_t>(shapeHeader, 0x50);
+        const auto vtable = shapePolicy::Field<uintptr_t>(shapeHeader, 0);
+        if ((vtable != hullVtable && vtable != meshVtable) ||
             (interactionFlags & 0xFFFFull) == 0 ||
             interactionFlags == 0x40000008ull ||
             interactionFlags == 0x40000030ull) {
             return;
         }
-        float penetration = 0.0f;
-        context.Read(shape + 0x28, penetration);
+        float penetration = shapePolicy::Field<float>(shapeHeader, 0x28);
         if (!std::isfinite(penetration) || penetration < 0.0f ||
             penetration > 100.0f) {
             penetration = 1.0f;
         }
 
-        if (vtable == hullVtable) {
-            uintptr_t hullData = 0;
-            float scale = 1.0f;
-            if (!context.Read(shape + 0xB8, hullData))
-                return;
-            context.Read(shape + 0xB0, scale);
-            if (!std::isfinite(scale) || scale <= 0.0f || scale > 1000.0f)
-                scale = 1.0f;
-            SurfaceInfo surface;
-            surface.penetration = penetration;
-            ExtractHull(context, hullData, scale, surface, output);
+        const auto kind = vtable == hullVtable ? shapePolicy::Kind::Hull : shapePolicy::Kind::Mesh;
+        const auto payload = shapePolicy::ReadPayload(shapeHeader, kind,
+            [&](uintptr_t address, void* bytes, size_t size) { return context.Read(address, bytes, size); });
+        if (!payload) {
+            ++context.rejectedShapes;
             return;
         }
-        if (vtable != meshVtable)
+        if (payload->scaleOffset == 0xB8) ++context.shiftedShapes;
+        else ++context.legacyShapes;
+        if (kind == shapePolicy::Kind::Hull) {
+            SurfaceInfo surface;
+            surface.penetration = penetration;
+            ExtractHull(context, payload->header, payload->scale[0], surface, output);
             return;
-
-        uintptr_t meshData = 0;
-        if (!context.Read(shape + 0xC0, meshData) || !IsGamePointer(meshData))
-            return;
-        std::array<uint8_t, 0xA0> header = {};
-        if (!context.Read(meshData, header.data(), header.size()))
-            return;
+        }
+        const auto& header = payload->header;
         int nodeCount = 0;
         int vertexCount = 0;
         int triangleCount = 0;
@@ -1239,22 +1271,15 @@ namespace
         if (nodeCount <= 0 || vertexCount <= 0 || triangleCount <= 0)
             return;
 
-        float scale[3] = {};
+        const auto& scale = payload->scale;
         float worldPosition[3] = {};
         Quaternion quaternion;
-        if (!context.Read(shape + 0xB0, static_cast<void*>(scale), sizeof(scale)) ||
-            !context.Read(
+        if (!context.Read(
                 shape + 0x100,
                 static_cast<void*>(worldPosition),
                 sizeof(worldPosition)) ||
             !context.Read(shape + 0x130, quaternion)) {
             return;
-        }
-        for (float& component : scale) {
-            if (!std::isfinite(component) || std::fabs(component) > 1000.0f)
-                return;
-            if (component == 0.0f)
-                component = 1.0f;
         }
         for (const float component : worldPosition) {
             if (!std::isfinite(component) || std::fabs(component) > 10'000'000.0f)
@@ -1268,8 +1293,10 @@ namespace
             vertexPointer,
             trianglePointer,
             static_cast<uint32_t>(nodeCount),
+            static_cast<uint32_t>(vertexCount),
+            static_cast<uint32_t>(triangleCount),
             Matrix3::FromQuaternion(quaternion),
-            scale,
+            scale.data(),
             worldPosition,
             materialPointer,
             materialCount,
@@ -1436,13 +1463,19 @@ namespace
             if (!context.Read(outerNodes, nodes.data(), nodes.size()))
                 continue;
             std::unordered_set<uintptr_t> seen;
+            std::vector<uint8_t> visited(outerCount, 0);
             std::vector<int> stack = { root };
             stack.reserve(128);
             while (!stack.empty()) {
+                if (context.IsCanceled()) {
+                    error = "build superseded";
+                    return {};
+                }
                 const int index = stack.back();
                 stack.pop_back();
-                if (index < 0 || index >= static_cast<int>(outerCount))
+                if (index < 0 || index >= static_cast<int>(outerCount) || visited[index])
                     continue;
+                visited[index] = 1;
                 const uint8_t* node =
                     nodes.data() + static_cast<size_t>(index) * 48u;
                 int left = -1;
@@ -1469,7 +1502,10 @@ namespace
                 std::this_thread::yield();
         }
         if (data->triangles.size() < 64) {
-            error = "physics geometry under-resolved";
+            char detail[160]{};
+            std::snprintf(detail, sizeof(detail), "geometry under-resolved: shifted=%zu legacy=%zu rejected=%zu",
+                context.shiftedShapes, context.legacyShapes, context.rejectedShapes);
+            error = detail;
             return {};
         }
         if (!data->BuildAcceleration(error))
@@ -1497,6 +1533,9 @@ namespace
             if (stopping_)
                 return;
             if (normalized.empty()) {
+                if (requestedMap_.empty() && stats_.state == BuildState::Idle)
+                    return;
+                data_.store({});
                 requestedMap_.clear();
                 ++requestedGeneration_;
                 stats_.state = BuildState::Idle;
@@ -1519,10 +1558,11 @@ namespace
                  (stats_.state == BuildState::Failed &&
                   lastFailureAtUs_ != 0 &&
                   nowUs >= lastFailureAtUs_ &&
-                  nowUs - lastFailureAtUs_ < kFailedBuildRetryUs))) {
+                  nowUs - lastFailureAtUs_ < failureRetryUs_))) {
                 return;
             }
             requestedMap_ = normalized;
+            data_.store({});
             ++requestedGeneration_;
             stats_.state = BuildState::Queued;
             stats_.generation = requestedGeneration_;
@@ -1537,6 +1577,12 @@ namespace
                 "%s",
                 "queued");
             condition_.notify_all();
+        }
+
+        bool IsReady(const char* mapKey) const
+        {
+            const auto current = data_.load();
+            return current && mapKey && mapKey[0] != '\0' && current->mapKey == mapKey;
         }
 
         bool Trace(
@@ -1603,6 +1649,8 @@ namespace
     private:
         void Worker(std::stop_token token)
         {
+            SetThreadDescription(GetCurrentThread(), L"KevqDMA Geometry");
+            SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_BELOW_NORMAL);
             while (!token.stop_requested()) {
                 std::string mapKey;
                 uint64_t generation = 0;
@@ -1626,15 +1674,21 @@ namespace
                 }
 
                 const uint64_t startedAt = NowUs();
+                esp::recovery::DmaReadSession session;
                 BuildContext context;
-                context.canceled = [this, generation, &token] {
+                context.canceled = [this, generation, &token, &session] {
                     std::lock_guard<std::mutex> lock(mutex_);
-                    return stopping_ || token.stop_requested() ||
+                    return !session.Valid() || stopping_ || token.stop_requested() ||
                            requestedGeneration_ != generation;
                 };
                 std::string error;
-                std::shared_ptr<BvhData> built =
-                    BuildPhysicsBvh(context, mapKey, error);
+                std::shared_ptr<BvhData> built;
+                if (session.Valid()) built = BuildPhysicsBvh(context, mapKey, error);
+                else error = "DMA session temporarily unavailable";
+                if (built && !session.Valid()) {
+                    built.reset();
+                    error = "DMA session changed during build";
+                }
                 const uint64_t finishedAt = NowUs();
 
                 std::lock_guard<std::mutex> lock(mutex_);
@@ -1652,6 +1706,7 @@ namespace
                 if (!built) {
                     stats_.state = BuildState::Failed;
                     lastFailureAtUs_ = finishedAt;
+                    failureRetryUs_ = session.Valid() ? kFailedBuildRetryUs : 500000u;
                     stats_.triangles = 0;
                     stats_.nodes = 0;
                     std::snprintf(
@@ -1669,8 +1724,8 @@ namespace
                 std::snprintf(
                     stats_.detail,
                     sizeof(stats_.detail),
-                    "%s",
-                    "validated and ready");
+                    "validated: shifted=%zu legacy=%zu rejected=%zu",
+                    context.shiftedShapes, context.legacyShapes, context.rejectedShapes);
                 data_.store(std::move(built));
             }
         }
@@ -1682,6 +1737,7 @@ namespace
         uint64_t requestedGeneration_ = 0;
         uint64_t readyAtUs_ = 0;
         uint64_t lastFailureAtUs_ = 0;
+        uint64_t failureRetryUs_ = kFailedBuildRetryUs;
         Stats stats_ = {};
         bool stopping_ = false;
         std::jthread worker_;
@@ -1697,6 +1753,11 @@ namespace
 void target::physics::RequestForMap(const char* mapKey)
 {
     Service().Request(mapKey);
+}
+
+bool target::physics::IsReadyForMap(const char* mapKey)
+{
+    return Service().IsReady(mapKey);
 }
 
 bool target::physics::TraceRay(

@@ -6,6 +6,8 @@
 #include "Features/Target/target_ballistics.h"
 #include "Features/Target/target_convars.h"
 #include "Features/Target/target_policy.h"
+#include "Features/Target/target_settings_policy.h"
+#include "Features/Target/wind_mouse.h"
 #include "app/Core/globals.h"
 #include "app/Input/input_device.h"
 #include "app/Input/primary_keyboard.h"
@@ -52,6 +54,8 @@ namespace
         int slot = -1;
         int requiredHitgroup = 0;
         Vector3 predictionOffset = {};
+        int hitboxIndex = -1;
+        bool fixedPoint = false;
     };
 
     bool ResolvePlannedAimShot(
@@ -72,11 +76,22 @@ namespace
 
     struct MotionRuntimeState
     {
+        target::MoveDiagnostics diagnostics;
         float mouseRemainderX = 0.0f;
         float mouseRemainderY = 0.0f;
         uintptr_t targetPawn = 0;
         uint64_t lastStepAtUs = 0;
+        uint64_t acquiredAtUs = 0;
+        uint32_t targetPawnHandle = 0;
+        int targetHitboxIndex = -1;
+        int targetSlot = -1;
         uint64_t lastViewIssuedAtUs = 0;
+        uint64_t lastMotionViewAtUs = 0;
+        target::policy::AimAngleDelta recoilRemainder = {};
+        target::policy::RecoilDeltaState recoil;
+        bool recoilRecovering = false;
+        target::wind::State windState;
+        uint64_t windUpdatedAtUs = 0;
         float humanSmoothNoise = 0.0f;
         float humanPitchNoise = 0.0f;
         float humanYawNoise = 0.0f;
@@ -89,6 +104,36 @@ namespace
     struct AimRuntimeState : MotionRuntimeState
     {
     };
+
+    void ResetMotionTarget(MotionRuntimeState& motion)
+    {
+        const auto recoil = motion.recoil;
+        const auto recoilRemainder = motion.recoilRemainder;
+        const bool recovering = motion.recoilRecovering;
+        const auto lastMotionView = motion.lastMotionViewAtUs;
+        motion = {};
+        motion.recoil = recoil;
+        motion.recoilRemainder = recoilRemainder;
+        motion.recoilRecovering = recovering;
+        motion.lastMotionViewAtUs = lastMotionView;
+    }
+
+    bool MatchesMotionTarget(const MotionRuntimeState& motion,
+        const esp::PlayerData& player, int slot)
+    {
+        return motion.targetPawn != 0 && motion.targetPawn == player.pawn &&
+            motion.targetSlot == slot && motion.targetPawnHandle == player.pawnHandle;
+    }
+
+    uintptr_t PreferredMotionPawn(const esp::TargetSnapshot& snapshot,
+        const MotionRuntimeState& motion)
+    {
+        if (motion.targetSlot < 0 || motion.targetSlot >= static_cast<int>(snapshot.players.size()))
+            return 0;
+        const auto& player = snapshot.players[motion.targetSlot];
+        return player.valid && player.health > 0 && MatchesMotionTarget(motion, player, motion.targetSlot)
+            ? player.pawn : 0;
+    }
 
     struct TriggerRuntimeState
     {
@@ -156,16 +201,27 @@ namespace
         uint32_t localWeaponHandle = 0;
         uintptr_t localWeaponEntity = 0;
         int observedShotsFired = -1;
+        uint64_t aimMotionKey = 0;
+        uint64_t triggerMotionKey = 0;
         AimRuntimeState aim = {};
         TriggerRuntimeState trigger = {};
     };
 
     RuntimeState s_runtime;
+    struct OutputFeedbackState
+    {
+        uint64_t issuedAtUs = 0;
+        Vector3 viewAngles = {};
+        float tolerance = 0.0f;
+        target::OutputFeedbackDiagnostics diagnostics;
+    };
+    OutputFeedbackState s_outputFeedback;
     target::RuntimeStatus s_status;
     target::SelectionDiagnostics s_aimSelection;
     target::SelectionDiagnostics s_triggerSelection;
     target::ShotDiagnostics s_shotDiagnostics;
     target::FireDiagnostics s_fireDiagnostics;
+    target::GeometryCapabilities s_geometryCapabilities;
     target::RuntimeStatus s_publishedStatus;
     std::mutex s_statusMutex;
     std::mutex s_runtimeMutex;
@@ -177,6 +233,7 @@ namespace
     float s_viewportWidth = 0.0f;
     float s_viewportHeight = 0.0f;
     std::atomic<int> s_activeWeaponProfile{0};
+    float s_recoilScale = 2.0f;
 
     void PublishCompletedStatus()
     {
@@ -192,6 +249,36 @@ namespace
                 std::chrono::steady_clock::now().time_since_epoch()).count());
     }
 
+    bool AwaitMotionFeedback(const esp::TargetSnapshot& snapshot)
+    {
+        auto& output = s_outputFeedback;
+        auto& diagnostics = output.diagnostics;
+        if (output.issuedAtUs == 0)
+            return false;
+        diagnostics.observedPitch = std::remainder(snapshot.viewAngles.x - output.viewAngles.x, 360.0f);
+        diagnostics.observedYaw = std::remainder(snapshot.viewAngles.y - output.viewAngles.y, 360.0f);
+        diagnostics.ageUs = snapshot.sampledAtUs >= output.issuedAtUs
+            ? static_cast<int64_t>(snapshot.sampledAtUs - output.issuedAtUs) : 0;
+        const auto reached = [&](float observed, float expected) {
+            return expected == 0.0f || (std::isfinite(observed) &&
+                observed * std::copysign(1.0f, expected) >= std::fabs(expected) - output.tolerance);
+        };
+        if (snapshot.viewUpdatedAtUs > output.issuedAtUs &&
+            reached(diagnostics.observedPitch, diagnostics.expectedPitch) &&
+            reached(diagnostics.observedYaw, diagnostics.expectedYaw)) {
+            output.issuedAtUs = 0;
+            diagnostics.pending = false;
+            return false;
+        }
+        if (diagnostics.ageUs >= static_cast<int64_t>(target::policy::kMaximumMotionFeedbackAgeUs)) {
+            output.issuedAtUs = 0;
+            diagnostics.pending = false;
+            ++diagnostics.timeouts;
+            return false;
+        }
+        return true;
+    }
+
     void PublishStatus(
         target::RuntimePhase phase,
         bool aimKeyDown = false,
@@ -205,10 +292,17 @@ namespace
         s_status.aimKeyDown = aimKeyDown;
         s_status.triggerKeyDown = triggerKeyDown;
         s_status.updatedAtUs = NowUs();
+        s_status.weaponId = s_runtime.localWeaponId;
+        s_status.weaponProfile = s_runtime.contextInitialized && s_runtime.localWeaponId != 0
+            ? s_activeWeaponProfile.load(std::memory_order_relaxed) : -1;
         s_status.aimSelection = s_aimSelection;
         s_status.triggerSelection = s_triggerSelection;
         s_status.shot = s_shotDiagnostics;
         s_status.fire = s_fireDiagnostics;
+        s_status.aimMove = s_runtime.aim.diagnostics;
+        s_status.triggerMove = s_runtime.trigger.assist.diagnostics;
+        s_status.geometry = s_geometryCapabilities;
+        s_status.outputFeedback = s_outputFeedback.diagnostics;
         s_status.moveX = moveX;
         s_status.moveY = moveY;
         if (candidate) {
@@ -237,21 +331,15 @@ namespace
         const esp::PlayerData& player,
         const Vector3& targetPoint)
     {
-        // Workshop maps are often unavailable to the remote BVH builder. The
-        // live spotted/visibility sample remains authoritative when geometry
-        // has not been built for such a map.
-        if (player.visible && target::policy::IsFreshSample(
-                player.visibilityUpdatedAtUs, snapshot.sampledAtUs,
-                target::policy::kMaximumTriggerTargetAgeUs))
-            return true;
         if (!IsUsablePoint(snapshot.localEyePos) ||
             !IsUsablePoint(targetPoint)) {
             return false;
         }
-        return target::physics::IsLineVisible(
-            snapshot.mapKey,
-            snapshot.localEyePos,
-            targetPoint);
+        if (target::physics::IsReadyForMap(snapshot.mapKey))
+            return target::physics::IsLineVisible(snapshot.mapKey, snapshot.localEyePos, targetPoint);
+        return player.visible && target::policy::IsFreshSample(
+            player.visibilityUpdatedAtUs, snapshot.sampledAtUs,
+            target::policy::kMaximumTriggerTargetAgeUs);
     }
 
     bool IsPlayerCoreFresh(
@@ -262,6 +350,15 @@ namespace
             player.coreUpdatedAtUs,
             snapshot.sampledAtUs,
             target::policy::kMaximumPlayerCoreAgeUs);
+    }
+
+    bool IsSpawnProtected(
+        const esp::TargetSnapshot& snapshot,
+        const esp::PlayerData& player)
+    {
+        return player.gunGameImmunityValid && player.gunGameImmunity &&
+            target::policy::IsFreshSample(player.gunGameImmunityUpdatedAtUs,
+                snapshot.sampledAtUs, target::policy::kMaximumTriggerTargetAgeUs);
     }
 
     bool ArePlayerBonesFresh(
@@ -284,6 +381,22 @@ namespace
         }
     }
 
+    bool HasCoherentHitboxes(const esp::PlayerData& player)
+    {
+        return player.hasBones && player.hasHitboxes && player.hitboxCount > 0 &&
+            player.hitboxCount <= esp::kMaximumPlayerHitboxes && player.hitboxesUpdatedAtUs != 0 &&
+            player.hitboxesUpdatedAtUs == player.bonesUpdatedAtUs;
+    }
+
+    bool IsUsableCapsule(const esp::HitboxCapsule& capsule)
+    {
+        return capsule.valid && IsUsablePoint(capsule.center) && IsFiniteVec(capsule.start) &&
+            IsFiniteVec(capsule.end) && std::isfinite(capsule.radius) &&
+            capsule.radius > 0.0f && capsule.radius <= 64.0f &&
+            (capsule.end - capsule.start).Length() <= 128.0f &&
+            (capsule.center - (capsule.start + capsule.end) * 0.5f).Length() <= 0.1f;
+    }
+
     Vector3 SelectNamedAimPoint(
         const esp::PlayerData& player,
         int aimBone)
@@ -292,22 +405,21 @@ namespace
         const int desiredHitgroup = sanitized == 0
             ? 1
             : (sanitized == 2 ? 2 : (sanitized == 3 ? 3 : 0));
-        if (desiredHitgroup != 0 && player.hasHitboxes) {
+        if (desiredHitgroup != 0 && HasCoherentHitboxes(player)) {
             const esp::HitboxCapsule* fallback = nullptr;
             const int count = std::min<int>(
                 player.hitboxCount,
                 esp::kMaximumPlayerHitboxes);
             for (int index = 0; index < count; ++index) {
                 const esp::HitboxCapsule& capsule = player.hitboxes[index];
-                if (!capsule.valid || capsule.hitgroup != desiredHitgroup ||
-                    !IsUsablePoint(capsule.center)) {
+                if (!IsUsableCapsule(capsule) || capsule.hitgroup != desiredHitgroup) {
                     continue;
                 }
                 if (!fallback)
                     fallback = &capsule;
                 if ((desiredHitgroup == 1 && capsule.index == 0) ||
                     (desiredHitgroup == 2 && capsule.index == 4) ||
-                    (desiredHitgroup == 3 && capsule.index == 6)) {
+                    (desiredHitgroup == 3 && capsule.index == 2)) {
                     return capsule.center;
                 }
             }
@@ -336,22 +448,15 @@ namespace
         Vector3 point,
         float leadSeconds)
     {
-        if (!player.velocityValid || leadSeconds <= 0.0f)
+        if (!player.velocityValid || !IsFiniteVec(player.velocity) ||
+            !std::isfinite(leadSeconds) || leadSeconds <= 0.0f)
             return point;
-        // The horizon is sampled age + ping/2 + interpolation. Horizontal
-        // movement is fully projected. Airborne Z follows Source gravity and
-        // is capped to the capsule scale, preventing the old above-head lead.
-        float verticalLead = 0.0f;
-        if (std::fabs(player.velocity.z) > 20.0f) {
-            constexpr float kSourceGravity = 800.0f;
-            verticalLead = player.velocity.z * leadSeconds -
-                0.5f * kSourceGravity * leadSeconds * leadSeconds;
-            verticalLead = std::clamp(verticalLead, -12.0f, 12.0f);
-        }
-        return point + Vector3(
-            player.velocity.x * leadSeconds,
-            player.velocity.y * leadSeconds,
-            verticalLead);
+        const float horizon = std::min(leadSeconds, 0.025f);
+        Vector3 offset{player.velocity.x * horizon, player.velocity.y * horizon, 0.0f};
+        const float length = offset.Length();
+        if (!std::isfinite(length)) return point;
+        if (length > 1.5f) offset = offset * (1.5f / length);
+        return point + offset;
     }
 
     Vector3 SelectAimPoint(
@@ -366,8 +471,8 @@ namespace
             return PredictAimPoint(player, point, leadSeconds);
         };
 
-        if (target::policy::SanitizeAimBone(aimBone) == 4) {
-            if (player.hasHitboxes) {
+        if (target::policy::SanitizeAimBone(aimBone) >= 4) {
+            if (HasCoherentHitboxes(player)) {
                 const float centerX = screenWidth * 0.5f;
                 const float centerY = screenHeight * 0.5f;
                 Vector3 best = {};
@@ -378,7 +483,8 @@ namespace
                     esp::kMaximumPlayerHitboxes);
                 for (int index = 0; index < count; ++index) {
                     const esp::HitboxCapsule& capsule = player.hitboxes[index];
-                    if (!capsule.valid)
+                    if (!IsUsableCapsule(capsule) || (aimBone == 5 &&
+                        (capsule.hitgroup < 1 || capsule.hitgroup > 3)))
                         continue;
                     const Vector3 point = predicted(capsule.center);
                     const ScreenPos screen = WorldToScreen(
@@ -398,6 +504,20 @@ namespace
                 }
                 if (IsUsablePoint(best))
                     return best;
+            }
+            if (aimBone == 5) {
+                Vector3 best{};
+                float distance = (std::numeric_limits<float>::max)();
+                for (const int namedPoint : {0, 2, 3}) {
+                    const auto point = predicted(SelectNamedAimPoint(player, namedPoint));
+                    const auto screen = WorldToScreen(point, matrix, screenWidth, screenHeight);
+                    const float next = std::hypot(screen.x - screenWidth * 0.5f, screen.y - screenHeight * 0.5f);
+                    if (IsUsablePoint(point) && screen.onScreen && std::isfinite(next) && next < distance) {
+                        best = point;
+                        distance = next;
+                    }
+                }
+                return best;
             }
             struct BoneSegment
             {
@@ -463,8 +583,17 @@ namespace
                 const float distanceSquared = dx * dx + dy * dy;
                 if (distanceSquared >= bestDistanceSquared)
                     return;
+                const auto clipW = [&](const Vector3& value) {
+                    return matrix[3][0] * value.x + matrix[3][1] * value.y +
+                        matrix[3][2] * value.z + matrix[3][3];
+                };
+                const float firstW = clipW(first);
+                const float secondW = clipW(second);
+                const float divisor = (1.0f - t) * secondW + t * firstW;
+                if (!std::isfinite(divisor) || divisor <= 0.0f) return;
+                const float worldT = t * firstW / divisor;
                 bestDistanceSquared = distanceSquared;
-                best = first + (second - first) * t;
+                best = first + (second - first) * worldT;
             };
 
             for (const BoneSegment& segment : kBodySegments)
@@ -475,6 +604,45 @@ namespace
         }
 
         return predicted(SelectNamedAimPoint(player, aimBone));
+    }
+
+    Candidate SelectAutomaticPoint(const esp::TargetSnapshot& snapshot,
+        const esp::PlayerData& player, float screenWidth, float screenHeight,
+        float radius, float leadSeconds, bool visibleOnly, int previousHitbox)
+    {
+        Candidate best;
+        Candidate retained;
+        const auto consider = [&](Vector3 point, int hitgroup, int index) {
+            if (!IsUsablePoint(point)) return;
+            const Vector3 predicted = PredictAimPoint(player, point, leadSeconds);
+            const auto screen = WorldToScreen(predicted, snapshot.viewMatrix, screenWidth, screenHeight);
+            const float distance = std::hypot(screen.x - screenWidth * 0.5f, screen.y - screenHeight * 0.5f);
+            if (!screen.onScreen || !std::isfinite(distance) || distance > radius ||
+                (visibleOnly && !IsTargetVisible(snapshot, player, predicted))) return;
+            Candidate next;
+            next.player = &player; next.point = predicted; next.screenDistance = distance;
+            next.predictionOffset = predicted - point;
+            next.requiredHitgroup = hitgroup; next.hitboxIndex = index;
+            if (index == previousHitbox) retained = next;
+            if (distance < best.screenDistance) best = next;
+        };
+        bool hasBodyCapsules = false;
+        if (HasCoherentHitboxes(player)) {
+            for (int i = 0; i < player.hitboxCount; ++i) {
+                const auto& capsule = player.hitboxes[i];
+                if (!IsUsableCapsule(capsule) || capsule.hitgroup < 1 || capsule.hitgroup > 3) continue;
+                hasBodyCapsules = true;
+                consider(capsule.center, capsule.hitgroup, capsule.index);
+            }
+        }
+        if (!hasBodyCapsules) {
+            for (const int namedPoint : {0, 2, 3})
+                consider(SelectNamedAimPoint(player, namedPoint), RequiredHitgroupForAimPoint(namedPoint), -2 - namedPoint);
+        }
+        if (retained.player && best.player &&
+            retained.screenDistance <= best.screenDistance + std::max(3.0f, best.screenDistance * 0.20f))
+            return retained;
+        return best;
     }
 
     Candidate SelectTarget(
@@ -493,7 +661,8 @@ namespace
         float minimumDamage = 1.0f,
         bool autowall = false,
         const target::convars::Values* convars = nullptr,
-        target::SelectionDiagnostics* diagnostics = nullptr)
+        target::SelectionDiagnostics* diagnostics = nullptr,
+        const MotionRuntimeState* previousMotion = nullptr)
     {
         Candidate best;
         Candidate locked;
@@ -509,7 +678,7 @@ namespace
                 player.pawn == snapshot.localPawn ||
                 static_cast<int>(slot) == snapshot.localPlayerIndex ||
                 (player.team != 2 && player.team != 3) ||
-                player.team == snapshot.localTeam) {
+                player.team == snapshot.localTeam || IsSpawnProtected(snapshot, player)) {
                 continue;
             }
             if (diagnostics) ++diagnostics->enemies;
@@ -531,13 +700,16 @@ namespace
                         interpolationSeconds),
                     target::policy::kMaximumAimPredictionSeconds)
                 : 0.0f;
-            const Vector3 point = SelectAimPoint(
-                player,
-                aimBone,
-                snapshot.viewMatrix,
-                screenWidth,
-                screenHeight,
-                leadSeconds);
+            Candidate considered;
+            if (aimBone == 5) {
+                const int previousHitbox = previousMotion && MatchesMotionTarget(*previousMotion, player, static_cast<int>(slot))
+                    ? previousMotion->targetHitboxIndex : -1;
+                considered = SelectAutomaticPoint(snapshot, player, screenWidth, screenHeight,
+                    radius, leadSeconds, visibleOnly, previousHitbox);
+                if (!considered.player) continue;
+            }
+            const Vector3 point = aimBone == 5 ? considered.point : SelectAimPoint(
+                player, aimBone, snapshot.viewMatrix, screenWidth, screenHeight, leadSeconds);
             if (!IsUsablePoint(point))
                 continue;
             ScreenPos screen = WorldToScreen(
@@ -560,15 +732,16 @@ namespace
                 if (diagnostics) ++diagnostics->outsideFov;
                 continue;
             }
-            Candidate considered;
             considered.player = &player;
             considered.point = point;
             considered.screenDistance = distance;
             considered.slot = static_cast<int>(slot);
-            considered.requiredHitgroup =
-                RequiredHitgroupForAimPoint(aimBone);
-            considered.predictionOffset = PredictAimPoint(player, {}, leadSeconds);
-            if (damageAware && (!player.hasHitboxes || !snapshot.localEyeValid ||
+            considered.fixedPoint = aimBone >= 0 && aimBone <= 3;
+            if (aimBone != 5) {
+                considered.requiredHitgroup = RequiredHitgroupForAimPoint(aimBone);
+                considered.predictionOffset = PredictAimPoint(player, {}, leadSeconds);
+            }
+            if (damageAware && (!HasCoherentHitboxes(player) || !snapshot.localEyeValid ||
                     !snapshot.localWeaponTelemetryValid ||
                     !target::policy::IsFreshSample(player.hitboxesUpdatedAtUs,
                         snapshot.sampledAtUs, target::policy::kMaximumPlayerBoneAgeUs) ||
@@ -643,32 +816,33 @@ namespace
         float& pitchDelta,
         float& yawDelta,
         float smoothing,
-        bool enabled)
+        bool enabled,
+        bool adaptive = false,
+        float gain = 1.0f,
+        float elapsedSeconds = -1.0f,
+        bool finishPoint = false)
     {
         const float targetPitchDelta = pitchDelta;
         const float targetYawDelta = yawDelta;
-        const float safeSmoothing =
-            target::policy::SanitizeSmoothing(smoothing);
         const float deltaLength = std::sqrt(
             pitchDelta * pitchDelta + yawDelta * yawDelta);
         const float precisionEnvelope = std::clamp(
             (deltaLength - 0.12f) / 0.70f,
             0.0f,
             1.0f);
-        const float distanceFactor = std::clamp(deltaLength / 10.0f, 0.0f, 1.0f);
-        const float ease = 1.0f - distanceFactor * distanceFactor;
-        float smoothFactor = safeSmoothing <= 1.0f
-            ? 1.0f
-            : (0.3f + ease * 0.7f) / safeSmoothing;
+        float smoothFactor = target::policy::ResolveSmoothingFraction(deltaLength, smoothing, adaptive);
+        smoothFactor *= target::policy::BoundedSetting(gain, 1.0f, 0.0f, 1.0f);
+        if (finishPoint)
+            smoothFactor *= target::policy::PointConvergenceGain(deltaLength);
         float pitchBias = 1.0f;
         float yawBias = 1.0f;
         if (enabled) {
             if (motion.humanInitialDistance <= 0.0f) {
                 motion.humanInitialDistance = std::max(0.1f, deltaLength);
                 motion.humanCurveStrength = std::clamp(
-                    deltaLength * RandomNormalClamped(0.14f, 0.035f, 0.07f, 0.22f),
-                    0.04f,
-                    1.35f);
+                    deltaLength * RandomNormalClamped(0.09f, 0.015f, 0.06f, 0.12f),
+                    0.025f,
+                    0.60f);
                 motion.humanCurveSign =
                     RandomNormalClamped(0.0f, 1.0f, -2.0f, 2.0f) < 0.0f
                         ? -1.0f
@@ -692,7 +866,8 @@ namespace
             }
 
             const uint64_t noiseNowUs = NowUs();
-            const float tickSeconds = motion.humanNoiseUpdatedAtUs != 0u &&
+            const float tickSeconds = elapsedSeconds > 0.0f ? std::clamp(elapsedSeconds, 0.0005f, 0.05f) :
+                                     motion.humanNoiseUpdatedAtUs != 0u &&
                                       noiseNowUs >= motion.humanNoiseUpdatedAtUs
                 ? std::clamp(
                     static_cast<float>(
@@ -707,7 +882,7 @@ namespace
             motion.humanSmoothNoise =
                 target::policy::UpdateCorrelatedNoise(
                     motion.humanSmoothNoise,
-                    RandomNormalClamped(0.0f, 0.06f, -0.15f, 0.15f),
+                    RandomNormalClamped(0.0f, 0.03f, -0.08f, 0.08f),
                     correlation);
             motion.humanPitchNoise =
                 target::policy::UpdateCorrelatedNoise(
@@ -741,18 +916,22 @@ namespace
             motion.humanCurveSign = 1.0f;
         }
         const uint64_t stepNowUs = NowUs();
-        const float stepSeconds = motion.lastStepAtUs != 0 && stepNowUs >= motion.lastStepAtUs
+        const float stepSeconds = elapsedSeconds >= 0.0f ? elapsedSeconds :
+            motion.lastStepAtUs != 0 && stepNowUs >= motion.lastStepAtUs
             ? static_cast<float>(stepNowUs - motion.lastStepAtUs) * 0.000001f
             : (1.0f / 128.0f);
         motion.lastStepAtUs = stepNowUs;
         pitchDelta *= target::policy::TimeAdjustedSmoothing(smoothFactor * pitchBias, stepSeconds);
         yawDelta *= target::policy::TimeAdjustedSmoothing(smoothFactor * yawBias, stepSeconds);
-        pitchDelta = target::policy::ClampAimStepToTarget(
-            pitchDelta,
-            targetPitchDelta);
-        yawDelta = target::policy::ClampAimStepToTarget(
-            yawDelta,
-            targetYawDelta);
+        if (enabled) {
+            const auto step = target::policy::ConstrainCurvedAimStep(
+                {pitchDelta, yawDelta, true}, {targetPitchDelta, targetYawDelta, true});
+            pitchDelta = step.pitch;
+            yawDelta = step.yaw;
+        } else {
+            pitchDelta = target::policy::ClampAimStepToTarget(pitchDelta, targetPitchDelta);
+            yawDelta = target::policy::ClampAimStepToTarget(yawDelta, targetYawDelta);
+        }
     }
 
     void ResetAimState()
@@ -771,6 +950,7 @@ namespace
     WeaponControlProfile ResolveWeaponControlProfile(uint16_t weaponId)
     {
         WeaponControlProfile profile;
+        profile.recoilPitchScale = profile.recoilYawScale = s_recoilScale;
         using Category = esp::weapons::DroppedWeaponCategory;
         switch (esp::weapons::DroppedWeaponCategoryFromItemId(weaponId)) {
         case Category::Pistols:
@@ -829,10 +1009,13 @@ namespace
         }
     }
 
-    Vector3 ResolveBallisticAngles(const esp::TargetSnapshot& snapshot)
+    bool IsMeasuredRecoilActive(const esp::TargetSnapshot& snapshot)
     {
-        Vector3 angles = snapshot.viewAngles;
-        const bool recoilFresh = snapshot.localAimPunchValid &&
+        return snapshot.localAimPunchValid && snapshot.localShotsFiredValid && snapshot.localShotsFired > 0 &&
+            target::policy::IsFreshSample(snapshot.localShotsUpdatedAtUs, snapshot.sampledAtUs,
+                target::policy::kMaximumRecoilSampleAgeUs) &&
+            target::policy::IsTimestampSkewAcceptable(snapshot.localShotsUpdatedAtUs,
+                snapshot.localAimPunchUpdatedAtUs, target::policy::kMaximumRecoilViewSkewUs) &&
             target::policy::IsFreshSample(
                 snapshot.localAimPunchUpdatedAtUs,
                 snapshot.sampledAtUs,
@@ -841,9 +1024,14 @@ namespace
                 snapshot.localAimPunchUpdatedAtUs,
                 snapshot.viewUpdatedAtUs,
                 target::policy::kMaximumRecoilViewSkewUs);
-        if (recoilFresh) {
-            angles.x += snapshot.localAimPunch.x * 2.0f;
-            angles.y += snapshot.localAimPunch.y * 2.0f;
+    }
+
+    Vector3 ResolveBallisticAngles(const esp::TargetSnapshot& snapshot)
+    {
+        Vector3 angles = snapshot.viewAngles;
+        if (IsMeasuredRecoilActive(snapshot)) {
+            angles.x += snapshot.localAimPunch.x * s_recoilScale;
+            angles.y += snapshot.localAimPunch.y * s_recoilScale;
         }
         angles.y = std::remainder(angles.y, 360.0f);
         angles.z = 0.0f;
@@ -927,11 +1115,21 @@ namespace
         const target::convars::Values& convars,
         float fireLeadSeconds,
         const Vector3* aimAnglesOverride = nullptr,
-        bool checkSeedWindow = true)
+        bool checkSeedWindow = true,
+        bool forceCenter = false)
     {
         ShotEvaluation evaluation;
         if (!candidate.player || !snapshot.localWeaponTelemetryValid ||
-            !snapshot.localEyeValid || !candidate.player->hasHitboxes) {
+            !snapshot.localEyeValid || !HasCoherentHitboxes(*candidate.player)) {
+            return evaluation;
+        }
+        if (checkSeedWindow &&
+            (snapshot.localRenderTick <= 0 || !std::isfinite(fireLeadSeconds) ||
+             !std::isfinite(snapshot.localIntervalPerTick) ||
+             snapshot.localIntervalPerTick < 0.001f || snapshot.localIntervalPerTick > 0.1f ||
+             !target::policy::IsFreshSample(snapshot.localWeaponTelemetryUpdatedAtUs,
+                 snapshot.sampledAtUs, target::policy::kMaximumWeaponStateAgeUs))) {
+            evaluation.reason = target::FireBlockReason::SeedClockUnavailable;
             return evaluation;
         }
         const Vector3 angles = aimAnglesOverride
@@ -966,12 +1164,16 @@ namespace
             snapshot.localIntervalPerTick <= 0.1f
                 ? snapshot.localIntervalPerTick
                 : (1.0f / 64.0f);
-        const int leadTicks = std::max(
+        const int leadTicks = !checkSeedWindow ? 0 : std::max(
             1,
             static_cast<int>(std::ceil(std::clamp(
                 fireLeadSeconds,
                 0.0f,
                 0.25f) / safeInterval)));
+        if (checkSeedWindow && snapshot.localRenderTick > INT_MAX - leadTicks - 2) {
+            evaluation.reason = target::FireBlockReason::SeedClockUnavailable;
+            return evaluation;
+        }
         const target::ballistics::SeedTickSelection seedSelection =
             checkSeedWindow
             ? target::ballistics::SelectSpreadSeedTick(
@@ -1033,6 +1235,20 @@ namespace
                 &capsuleHit)) {
             evaluation.reason = target::FireBlockReason::CapsuleMiss;
             return evaluation;
+        }
+        if (forceCenter) {
+            bool centered = false;
+            for (int i = 0; i < candidate.player->hitboxCount; ++i) {
+                const auto& capsule = candidate.player->hitboxes[i];
+                if (capsule.index != capsuleHit.hitbox || !IsUsableCapsule(capsule)) continue;
+                centered = target::ballistics::RayCapsuleIntersection(capsuleEye, forward,
+                    capsule.start, capsule.end, capsule.radius * 0.65f, snapshot.localWeaponRange);
+                break;
+            }
+            if (!centered) {
+                evaluation.reason = target::FireBlockReason::CapsuleEdge;
+                return evaluation;
+            }
         }
         // Dynamic player occlusion is not part of the static map BVH. Reject
         // the shot when any other live player capsule is in front, including
@@ -1188,18 +1404,34 @@ namespace
         const target::convars::Values& convars,
         float screenWidth, float screenHeight, float radius)
     {
-        if (!candidate.player || !candidate.player->hasHitboxes ||
+        if (!candidate.player || !HasCoherentHitboxes(*candidate.player) ||
             !snapshot.localEyeValid ||
             !snapshot.localWeaponTelemetryValid) {
             return false;
         }
         const Vector3 requestedPoint = candidate.point;
         const int requestedHitgroup = candidate.requiredHitgroup;
+        if (candidate.fixedPoint) {
+            const ScreenPos projected = WorldToScreen(requestedPoint,
+                snapshot.viewMatrix, screenWidth, screenHeight);
+            if (!projected.onScreen || std::hypot(projected.x - screenWidth * 0.5f,
+                    projected.y - screenHeight * 0.5f) > radius ||
+                (visibleOnly && !IsTargetVisible(snapshot, *candidate.player, requestedPoint)))
+                return false;
+            const Vector3 delta = requestedPoint - snapshot.localEyePos;
+            const float planar = std::hypot(delta.x, delta.y);
+            if (!std::isfinite(planar) || planar < 0.001f) return false;
+            const Vector3 angles = {-std::atan2(delta.z, planar) * (180.0f / kPi),
+                std::atan2(delta.y, delta.x) * (180.0f / kPi), 0.0f};
+            return EvaluateShot(snapshot, candidate, 0.0f, minimumDamage, autowall,
+                convars, 0.0f, &angles, false).damageReady;
+        }
         bool found = false;
         float bestDamage = -1.0f;
         float bestPointDistance = (std::numeric_limits<float>::max)();
         Vector3 bestPoint = {};
         int bestHitgroup = 0;
+        int bestHitbox = -1;
         const target::ballistics::WeaponSpread weaponSpread =
             ResolveWeaponSpread(snapshot, convars);
         const int count = std::min<int>(
@@ -1208,8 +1440,7 @@ namespace
         for (int index = 0; index < count; ++index) {
             const esp::HitboxCapsule& capsule =
                 candidate.player->hitboxes[index];
-            if (!capsule.valid || capsule.radius <= 0.0f ||
-                !IsUsablePoint(capsule.center) || capsule.hitgroup <= 0 ||
+            if (!IsUsableCapsule(capsule) || capsule.hitgroup <= 0 ||
                 (requestedHitgroup > 0 && capsule.hitgroup != requestedHitgroup)) {
                 continue;
             }
@@ -1285,12 +1516,14 @@ namespace
                 bestPointDistance = pointDistance;
                 bestPoint = predictedPoint;
                 bestHitgroup = capsule.hitgroup;
+                bestHitbox = capsule.index;
             }
         }
         if (!found)
             return false;
         candidate.point = bestPoint;
         candidate.requiredHitgroup = bestHitgroup;
+        candidate.hitboxIndex = bestHitbox;
         return true;
     }
 
@@ -1307,49 +1540,97 @@ namespace
         int* outMoveY,
         float* outAngularError = nullptr,
         float holdHitchanceThreshold = -1.0f,
-        const target::convars::Values* convars = nullptr)
+        const target::convars::Values* convars = nullptr,
+        bool adaptiveSmoothing = false,
+        const target::wind::Settings* windSettings = nullptr,
+        const app::state::TargetWeaponProfileSettings* aimSettings = nullptr)
     {
+        const bool closedLoopMotion = aimSettings != nullptr || recoilControl;
         if (outMoveX)
             *outMoveX = 0;
         if (outMoveY)
             *outMoveY = 0;
         if (outAngularError)
             *outAngularError = (std::numeric_limits<float>::max)();
+        motion.diagnostics = {};
+        motion.diagnostics.pointX = candidate.point.x;
+        motion.diagnostics.pointY = candidate.point.y;
+        motion.diagnostics.pointZ = candidate.point.z;
+        motion.diagnostics.predictionZ = candidate.predictionOffset.z;
+        motion.diagnostics.eyeZ = snapshot.localEyePos.z;
+        motion.diagnostics.rawPunchPitch = snapshot.localAimPunch.x;
+        motion.diagnostics.rawPunchYaw = snapshot.localAimPunch.y;
+        motion.diagnostics.shotsFired = snapshot.localShotsFired;
+        motion.diagnostics.pointHitbox = candidate.hitboxIndex;
+        motion.diagnostics.eyeValid = snapshot.localEyeValid;
+        motion.diagnostics.eyeAgeUs = snapshot.localEyeUpdatedAtUs != 0 &&
+            snapshot.sampledAtUs >= snapshot.localEyeUpdatedAtUs
+                ? static_cast<int64_t>(snapshot.sampledAtUs - snapshot.localEyeUpdatedAtUs) : -1;
+        const auto fail = [&](target::MoveBlockReason reason) {
+            motion.diagnostics.reason = reason;
+            motion.windState = {};
+            motion.windUpdatedAtUs = 0;
+            motion.recoil = {};
+            motion.recoilRemainder = {};
+            motion.lastMotionViewAtUs = 0;
+            return MoveResult::Failed;
+        };
+        const auto viewNowUs = esp::GetSnapshotTimeUs();
+        motion.diagnostics.viewAgeUs = snapshot.viewUpdatedAtUs != 0 && viewNowUs >= snapshot.viewUpdatedAtUs
+            ? static_cast<int64_t>(viewNowUs - snapshot.viewUpdatedAtUs) : -1;
+        if (!snapshot.viewValid || target::policy::RemainingSampleLifetimeUs(
+            snapshot.viewUpdatedAtUs, viewNowUs, target::policy::kMaximumTargetViewAgeUs) == 0)
+            return fail(target::MoveBlockReason::ViewExpired);
         if (!candidate.player || !snapshot.localEyeValid || !IsUsablePoint(snapshot.localEyePos) ||
             !target::policy::IsFreshSample(snapshot.localEyeUpdatedAtUs,
                 snapshot.sampledAtUs, target::policy::kMaximumTargetViewAgeUs))
-            return MoveResult::Failed;
+            return fail(target::MoveBlockReason::EyeUnavailable);
         const Vector3 eye = snapshot.localEyePos;
         const Vector3 delta = candidate.point - eye;
         const float planar = std::sqrt(delta.x * delta.x + delta.y * delta.y);
         if (!std::isfinite(planar) || planar < 0.001f)
-            return MoveResult::Failed;
+            return fail(target::MoveBlockReason::InvalidDirection);
 
         const float desiredPitch =
             -std::atan2(delta.z, planar) * (180.0f / kPi);
         const float desiredYaw =
             std::atan2(delta.y, delta.x) * (180.0f / kPi);
-        const bool recoilSamplesFresh =
-            snapshot.localAimPunchValid &&
-            snapshot.localShotsFiredValid &&
-            // A fresh residual punch still changes the ballistic direction
-            // after shotsFired resets to zero. Do not stop compensation early.
-            target::policy::IsFreshSample(
-                snapshot.localAimPunchUpdatedAtUs,
-                snapshot.sampledAtUs,
-                target::policy::kMaximumRecoilSampleAgeUs) &&
-            target::policy::IsFreshSample(
-                snapshot.localShotsUpdatedAtUs,
-                snapshot.sampledAtUs,
-                target::policy::kMaximumRecoilSampleAgeUs) &&
-            target::policy::IsTimestampSkewAcceptable(
-                snapshot.localAimPunchUpdatedAtUs,
-                snapshot.viewUpdatedAtUs,
-                target::policy::kMaximumRecoilViewSkewUs) &&
-            target::policy::IsTimestampSkewAcceptable(
-                snapshot.localAimPunchUpdatedAtUs,
-                snapshot.localShotsUpdatedAtUs,
-                target::policy::kMaximumRecoilViewSkewUs);
+        const bool recoilSamplesFresh = IsMeasuredRecoilActive(snapshot);
+        const bool weaponIdentityFresh = snapshot.localWeaponId != 0 &&
+            snapshot.localWeaponEntity != 0 && snapshot.localWeaponHandle != 0 &&
+            snapshot.localWeaponHandle != 0xFFFFFFFFu && target::policy::IsFreshSample(
+                snapshot.localWeaponUpdatedAtUs, snapshot.sampledAtUs,
+                target::policy::kMaximumWeaponStateAgeUs);
+        const float recoilStrength = aimSettings ? target::policy::BoundedSetting(
+            aimSettings->aimRecoilStrength, 100.0f, 0.0f, 100.0f) : 100.0f;
+        const bool recoilActive = recoilControl && recoilSamplesFresh &&
+            weaponIdentityFresh && recoilStrength > 0.0f;
+        motion.diagnostics.weaponId = snapshot.localWeaponId;
+        motion.diagnostics.recoilScale = weaponProfile.recoilPitchScale;
+        motion.diagnostics.recoilAvailable = recoilActive;
+        motion.diagnostics.recoilAgeUs = snapshot.localAimPunchUpdatedAtUs != 0 &&
+            snapshot.sampledAtUs >= snapshot.localAimPunchUpdatedAtUs
+                ? static_cast<int64_t>(snapshot.sampledAtUs - snapshot.localAimPunchUpdatedAtUs) : -1;
+        if (closedLoopMotion) {
+            const bool shotsFresh = snapshot.localShotsFiredValid &&
+                target::policy::IsFreshSample(snapshot.localShotsUpdatedAtUs, snapshot.sampledAtUs,
+                    target::policy::kMaximumRecoilSampleAgeUs);
+            if (recoilControl && recoilStrength > 0.0f &&
+                (!shotsFresh || snapshot.localShotsFired < 0 ||
+                 (snapshot.localShotsFired > 0 && !recoilActive))) {
+                if (std::hypot(motion.recoil.pitch, motion.recoil.yaw) > 0.001f)
+                    motion.recoilRecovering = true;
+                app::input::CancelPendingMoves();
+                motion.mouseRemainderX = motion.mouseRemainderY = 0.0f;
+                motion.recoil = {};
+                motion.recoilRemainder = {};
+                motion.windState = {};
+                motion.windUpdatedAtUs = 0;
+                motion.lastMotionViewAtUs = 0;
+                motion.diagnostics.reason = target::MoveBlockReason::RecoilUnavailable;
+                return MoveResult::Accumulating;
+            }
+        }
         const target::policy::AimAngleDelta compensated =
             target::policy::ResolveCompensatedAimDelta(
                 desiredPitch,
@@ -1358,11 +1639,11 @@ namespace
                 snapshot.viewAngles.y,
                 snapshot.localAimPunch.x,
                 snapshot.localAimPunch.y,
-                weaponProfile.recoilPitchScale,
-                weaponProfile.recoilYawScale,
-                recoilControl && recoilSamplesFresh);
+                weaponProfile.recoilPitchScale * recoilStrength * 0.01f,
+                weaponProfile.recoilYawScale * recoilStrength * 0.01f,
+                recoilActive);
         if (!compensated.valid)
-            return MoveResult::Failed;
+            return fail(target::MoveBlockReason::InvalidAngles);
         float pitchDelta = compensated.pitch;
         float yawDelta = compensated.yaw;
         const float angularError = std::sqrt(
@@ -1370,7 +1651,18 @@ namespace
         if (outAngularError)
             *outAngularError = angularError;
         if (!std::isfinite(angularError))
-            return MoveResult::Failed;
+            return fail(target::MoveBlockReason::InvalidAngles);
+        motion.diagnostics.angularErrorDegrees = angularError;
+
+        const auto output = app::input::GetDeviceStatus();
+        if (output.movePending || output.moveInFlight || output.probeInFlight) {
+            motion.diagnostics.reason = target::MoveBlockReason::OutputBusy;
+            return MoveResult::Accumulating;
+        }
+        if (AwaitMotionFeedback(snapshot)) {
+            motion.diagnostics.reason = target::MoveBlockReason::AwaitingView;
+            return MoveResult::Accumulating;
+        }
 
         if (holdHitchanceThreshold > 0.0f && convars &&
             snapshot.localWeaponTelemetryValid &&
@@ -1431,20 +1723,163 @@ namespace
                 : target::policy::ResolveAlignmentToleranceDegrees(
                     sensitivity,
                     fovAdjust);
-        if (angularError <= safeAlignmentTolerance) {
+        if (closedLoopMotion && motion.lastMotionViewAtUs != 0 &&
+            snapshot.viewUpdatedAtUs <= motion.lastMotionViewAtUs)
+            return MoveResult::Accumulating;
+        const float motionElapsed = motion.lastMotionViewAtUs != 0 &&
+            snapshot.viewUpdatedAtUs > motion.lastMotionViewAtUs
+                ? std::min(static_cast<float>(snapshot.viewUpdatedAtUs - motion.lastMotionViewAtUs) *
+                    0.000001f, 0.03125f) : 1.0f / 128.0f;
+        auto nextRecoil = motion.recoil;
+        target::policy::AimAngleDelta nextRecoilRemainder{};
+        target::policy::AimAngleDelta recoilStep{0.0f, 0.0f, true};
+        if (closedLoopMotion) {
+            const bool idleBaseline = recoilControl && weaponIdentityFresh && recoilStrength > 0.0f &&
+                snapshot.localShotsFiredValid && snapshot.localShotsFired == 0 &&
+                target::policy::IsFreshSample(snapshot.localShotsUpdatedAtUs, snapshot.sampledAtUs,
+                    target::policy::kMaximumRecoilSampleAgeUs);
+            if (idleBaseline && (std::hypot(nextRecoil.pitch, nextRecoil.yaw) > 0.001f ||
+                std::hypot(motion.recoilRemainder.pitch, motion.recoilRemainder.yaw) > 0.001f)) {
+                motion.recoilRecovering = true;
+                nextRecoil = {};
+                motion.recoilRemainder = {};
+                motion.mouseRemainderX = motion.mouseRemainderY = 0.0f;
+                motion.windState = {};
+                motion.windUpdatedAtUs = 0;
+            }
+            if (recoilActive || !recoilControl || recoilStrength <= 0.0f)
+                motion.recoilRecovering = false;
+            recoilStep = target::policy::AdvanceRecoilDelta(nextRecoil,
+                recoilActive ? snapshot.localAimPunch.x * weaponProfile.recoilPitchScale : 0.0f,
+                recoilActive ? snapshot.localAimPunch.y * weaponProfile.recoilYawScale : 0.0f,
+                idleBaseline ? snapshot.localShotsUpdatedAtUs : snapshot.localAimPunchUpdatedAtUs, snapshot.sampledAtUs,
+                recoilActive || idleBaseline, recoilStrength, 0.0f, 0.0f);
+            if (recoilActive && target::policy::IsFreshSample(motion.recoil.updatedAtUs,
+                    snapshot.sampledAtUs, target::policy::kMaximumMotionFeedbackAgeUs)) {
+                recoilStep.pitch += motion.recoilRemainder.pitch;
+                recoilStep.yaw += motion.recoilRemainder.yaw;
+            }
+            recoilStep.pitch = target::policy::ClampAimStepToTarget(recoilStep.pitch, compensated.pitch);
+            recoilStep.yaw = target::policy::ClampAimStepToTarget(recoilStep.yaw, compensated.yaw);
+            pitchDelta -= recoilStep.pitch;
+            yawDelta -= recoilStep.yaw;
+        }
+        const auto commitMotionSample = [&] {
+            if (closedLoopMotion) {
+                motion.recoil = nextRecoil;
+                motion.recoilRemainder = nextRecoilRemainder;
+                motion.lastMotionViewAtUs = snapshot.viewUpdatedAtUs;
+            }
+        };
+        const bool softAssist = aimSettings && aimSettings->aimSoftAssist;
+        const bool centerPoint = aimSettings && candidate.fixedPoint;
+        float deadzone = safeAlignmentTolerance;
+        if (softAssist && !centerPoint) {
+            float radius = 0.0f;
+            if (HasCoherentHitboxes(*candidate.player) && target::policy::IsFreshSample(
+                candidate.player->hitboxesUpdatedAtUs, snapshot.sampledAtUs,
+                target::policy::kMaximumPlayerBoneAgeUs)) {
+                for (int i = 0; i < std::min<int>(candidate.player->hitboxCount, esp::kMaximumPlayerHitboxes); ++i) {
+                    const auto& capsule = candidate.player->hitboxes[i];
+                    if (!IsUsableCapsule(capsule) ||
+                        (candidate.requiredHitgroup > 0 && capsule.hitgroup != candidate.requiredHitgroup)) continue;
+                    const Vector3 segment = capsule.end - capsule.start;
+                    const Vector3 offset = candidate.point - candidate.predictionOffset - capsule.start;
+                    const float lengthSquared = segment.x * segment.x + segment.y * segment.y + segment.z * segment.z;
+                    if (!std::isfinite(lengthSquared)) continue;
+                    const float t = lengthSquared > 0.000001f ? std::clamp(
+                        (offset.x * segment.x + offset.y * segment.y + offset.z * segment.z) / lengthSquared,
+                        0.0f, 1.0f) : 0.0f;
+                    const float margin = capsule.radius - (offset - segment * t).Length();
+                    if (std::isfinite(margin)) radius = std::max(radius, margin);
+                }
+            }
+            const float angularRadius = std::atan2(radius * 0.65f, delta.Length()) * (180.0f / kPi);
+            deadzone = std::max(deadzone, std::min(angularRadius, target::policy::BoundedSetting(
+                aimSettings->aimAssistDeadzone, 0.15f, 0.0f, 1.0f)));
+            const auto assistance = target::policy::RemoveAimDeadzone({pitchDelta, yawDelta, true}, deadzone);
+            pitchDelta = assistance.pitch;
+            yawDelta = assistance.yaw;
+            motion.diagnostics.assistanceResting = pitchDelta == 0.0f && yawDelta == 0.0f;
+        }
+        const float halfCount = sensitivity * fovAdjust * target::policy::kMouseYawDegrees * 0.5f;
+        const bool nearestMouseCount = std::fabs(compensated.pitch) <= halfCount &&
+            std::fabs(compensated.yaw) <= halfCount;
+        if (nearestMouseCount || ((!centerPoint &&
+            (softAssist ? motion.diagnostics.assistanceResting : angularError <= safeAlignmentTolerance)) &&
+            std::hypot(recoilStep.pitch, recoilStep.yaw) <= 0.00001f)) {
+            motion.diagnostics.assistanceResting = softAssist;
             motion.mouseRemainderX = 0.0f;
             motion.mouseRemainderY = 0.0f;
+            motion.windState = {};
+            motion.windUpdatedAtUs = 0;
+            motion.recoilRecovering = false;
+            if (nearestMouseCount && angularError > safeAlignmentTolerance)
+                motion.diagnostics.reason = target::MoveBlockReason::QuantizationLimit;
+            commitMotionSample();
             return MoveResult::Aligned;
         }
         if (motion.lastViewIssuedAtUs != 0 &&
             snapshot.viewUpdatedAtUs <= motion.lastViewIssuedAtUs)
             return MoveResult::Accumulating;
+        const float remainingPitch = pitchDelta;
+        const float remainingYaw = yawDelta;
         ApplyHumanizedSmoothing(
             motion,
             pitchDelta,
             yawDelta,
             smoothing,
-            humanization);
+            humanization && !windSettings,
+            adaptiveSmoothing,
+            softAssist ? target::policy::BoundedSetting(aimSettings->aimAssistStrength, 35.0f, 0.0f, 100.0f) * 0.01f : 1.0f,
+            closedLoopMotion ? motionElapsed : -1.0f,
+            centerPoint);
+        if (softAssist)
+            target::policy::LimitAimVelocity(pitchDelta, yawDelta, aimSettings->aimAssistMaxSpeed, motionElapsed);
+        if (windSettings) {
+            const uint64_t nowUs = NowUs();
+            const float elapsed = closedLoopMotion ? motionElapsed :
+                motion.windUpdatedAtUs != 0 && nowUs > motion.windUpdatedAtUs
+                ? static_cast<float>(nowUs - motion.windUpdatedAtUs) * 0.000001f : 1.0f / 128.0f;
+            motion.windUpdatedAtUs = nowUs;
+            const float degreesPerCount = sensitivity * target::policy::kMouseYawDegrees * fovAdjust;
+            const auto step = target::wind::Advance(motion.windState,
+                {-yawDelta / degreesPerCount, pitchDelta / degreesPerCount},
+                {-remainingYaw / degreesPerCount, remainingPitch / degreesPerCount},
+                elapsed, 0.12f / degreesPerCount, *windSettings,
+                RandomNormalClamped(0.0f, 0.5f, -1.0f, 1.0f),
+                RandomNormalClamped(0.0f, 0.5f, -1.0f, 1.0f));
+            yawDelta = -step.x * degreesPerCount;
+            pitchDelta = step.y * degreesPerCount;
+            if (closedLoopMotion) {
+                const auto constrained = target::policy::ConstrainCurvedAimStep(
+                    {pitchDelta, yawDelta, true}, {remainingPitch, remainingYaw, true});
+                pitchDelta = constrained.pitch;
+                yawDelta = constrained.yaw;
+                const float ticks = std::clamp(elapsed, 0.0005f, 0.05f) * 128.0f;
+                motion.windState.velocityX = -yawDelta / degreesPerCount / ticks;
+                motion.windState.velocityY = pitchDelta / degreesPerCount / ticks;
+            }
+        } else {
+            motion.windState = {};
+            motion.windUpdatedAtUs = 0;
+        }
+        motion.diagnostics.recoilPitchStep = recoilStep.pitch;
+        motion.diagnostics.recoilYawStep = recoilStep.yaw;
+        if (closedLoopMotion) {
+            const bool curvedMotion = humanization || windSettings;
+            pitchDelta += recoilStep.pitch;
+            yawDelta += recoilStep.yaw;
+            if (!curvedMotion || recoilStep.pitch != 0.0f)
+                pitchDelta = target::policy::ClampAimStepToTarget(pitchDelta, compensated.pitch);
+            if (!curvedMotion || recoilStep.yaw != 0.0f)
+                yawDelta = target::policy::ClampAimStepToTarget(yawDelta, compensated.yaw);
+            if (motion.recoilRecovering) {
+                target::policy::LimitAimVelocity(pitchDelta, yawDelta, 45.0f, motionElapsed);
+                if (angularError <= safeAlignmentTolerance)
+                    motion.recoilRecovering = false;
+            }
+        }
         const target::policy::MouseMove move = target::policy::ResolveMouseMove(
             pitchDelta,
             yawDelta,
@@ -1454,7 +1889,14 @@ namespace
             motion.mouseRemainderX,
             motion.mouseRemainderY);
         if (!move.valid)
-            return MoveResult::Failed;
+            return fail(target::MoveBlockReason::InvalidMouseDelta);
+        if (closedLoopMotion && recoilActive) {
+            const float degreesPerCount = sensitivity * target::policy::kMouseYawDegrees * fovAdjust;
+            const float deliveredPitch = (move.y + move.remainderY - motion.mouseRemainderY) * degreesPerCount;
+            const float deliveredYaw = -(move.x + move.remainderX - motion.mouseRemainderX) * degreesPerCount;
+            nextRecoilRemainder.pitch = recoilStep.pitch - target::policy::ClampAimStepToTarget(deliveredPitch, recoilStep.pitch);
+            nextRecoilRemainder.yaw = recoilStep.yaw - target::policy::ClampAimStepToTarget(deliveredYaw, recoilStep.yaw);
+        }
         const int moveX = move.x;
         const int moveY = move.y;
         if (outMoveX)
@@ -1464,13 +1906,34 @@ namespace
         if (moveX == 0 && moveY == 0) {
             motion.mouseRemainderX = move.remainderX;
             motion.mouseRemainderY = move.remainderY;
+            commitMotionSample();
             return MoveResult::Accumulating;
         }
-        if (!app::input::RequestMove(moveX, moveY))
-            return MoveResult::Failed;
+        const uint64_t snapshotNowUs = esp::GetSnapshotTimeUs();
+        motion.diagnostics.viewAgeUs = snapshot.viewUpdatedAtUs != 0 && snapshotNowUs >= snapshot.viewUpdatedAtUs
+            ? static_cast<int64_t>(snapshotNowUs - snapshot.viewUpdatedAtUs) : -1;
+        const uint64_t remainingUs = target::policy::RemainingSampleLifetimeUs(
+            snapshot.viewUpdatedAtUs, snapshotNowUs,
+            target::policy::kMaximumTargetViewAgeUs);
+        motion.diagnostics.validForUs = remainingUs;
+        if (remainingUs == 0)
+            return fail(target::MoveBlockReason::ViewExpired);
+        if (!app::input::RequestMove(moveX, moveY, remainingUs))
+            return fail(target::MoveBlockReason::OutputRejected);
         motion.mouseRemainderX = move.remainderX;
         motion.mouseRemainderY = move.remainderY;
         motion.lastViewIssuedAtUs = snapshot.viewUpdatedAtUs;
+        s_outputFeedback.issuedAtUs = std::max(snapshot.sampledAtUs, snapshotNowUs);
+        s_outputFeedback.viewAngles = snapshot.viewAngles;
+        const float degreesPerCount = sensitivity * fovAdjust * target::policy::kMouseYawDegrees;
+        s_outputFeedback.tolerance = degreesPerCount * 0.25f;
+        s_outputFeedback.diagnostics.pending = true;
+        s_outputFeedback.diagnostics.ageUs = 0;
+        s_outputFeedback.diagnostics.expectedPitch = moveY * degreesPerCount;
+        s_outputFeedback.diagnostics.expectedYaw = -moveX * degreesPerCount;
+        s_outputFeedback.diagnostics.observedPitch = 0.0f;
+        s_outputFeedback.diagnostics.observedYaw = 0.0f;
+        commitMotionSample();
         return MoveResult::Queued;
     }
 
@@ -1484,9 +1947,9 @@ namespace
         int virtualKey,
         int mode,
         target::policy::ActivationState& state,
-        bool paused)
+        bool paused,
+        app::input::KeyState key)
     {
-        const auto key = app::input::ReadActivationKeyState(virtualKey);
         return target::policy::UpdateActivation(state, enabled, virtualKey, mode,
             key.down, key.available, paused);
     }
@@ -1497,10 +1960,10 @@ namespace
         // This gate describes the shared frame and does not own activation.
         return snapshot.viewValid && !snapshot.localIsDead &&
                snapshot.snapshotAgeUs <= kMaximumTargetSnapshotAgeUs &&
-               target::policy::IsFreshSample(
+               target::policy::RemainingSampleLifetimeUs(
                    snapshot.viewUpdatedAtUs,
                    snapshot.sampledAtUs,
-                   target::policy::kMaximumTargetViewAgeUs);
+                   target::policy::kMaximumTargetViewAgeUs) != 0;
     }
 
     bool IsSupportedFirearm(const esp::TargetSnapshot& snapshot)
@@ -1557,25 +2020,6 @@ namespace
         return true;
     }
 
-    const esp::PlayerData* FindLocalPlayer(
-        const esp::TargetSnapshot& snapshot)
-    {
-        if (snapshot.localPlayerIndex >= 0 &&
-            snapshot.localPlayerIndex <
-                static_cast<int>(snapshot.players.size())) {
-            const esp::PlayerData& indexed =
-                snapshot.players[snapshot.localPlayerIndex];
-            if (indexed.valid && indexed.pawn == snapshot.localPawn)
-                return &indexed;
-        }
-        for (const esp::PlayerData& player : snapshot.players) {
-            if (player.valid && player.pawn != 0 &&
-                player.pawn == snapshot.localPawn) {
-                return &player;
-            }
-        }
-        return nullptr;
-    }
 
     bool IsLocalPrecisionStateReady(
         const esp::TargetSnapshot& snapshot,
@@ -1623,7 +2067,7 @@ namespace
         const float distance =
             (candidate.point - snapshot.localEyePos).Length();
         float safeRadius = SafeAimPointRadius(aimBone);
-        if (candidate.player->hasHitboxes) {
+        if (HasCoherentHitboxes(*candidate.player)) {
             float nearestCenterDistance =
                 (std::numeric_limits<float>::max)();
             const int count = std::min<int>(
@@ -1632,13 +2076,13 @@ namespace
             for (int index = 0; index < count; ++index) {
                 const esp::HitboxCapsule& capsule =
                     candidate.player->hitboxes[index];
-                if (!capsule.valid || capsule.radius <= 0.0f ||
+                if (!IsUsableCapsule(capsule) ||
                     (candidate.requiredHitgroup > 0 &&
                      capsule.hitgroup != candidate.requiredHitgroup)) {
                     continue;
                 }
                 const float centerDistance =
-                    (capsule.center - candidate.point).Length();
+                    (capsule.center - (candidate.point - candidate.predictionOffset)).Length();
                 if (centerDistance < nearestCenterDistance) {
                     nearestCenterDistance = centerDistance;
                     safeRadius = capsule.radius * 0.78f;
@@ -1652,16 +2096,17 @@ namespace
             safeRadius);
     }
 
-    bool AreTriggerSamplesFresh(const esp::TargetSnapshot& snapshot)
+    bool AreTriggerSamplesFresh(const esp::TargetSnapshot& snapshot,
+        uint64_t nowUs = esp::GetSnapshotTimeUs())
     {
         return snapshot.localEyeValid &&
             target::policy::IsFreshSample(
                 snapshot.localEyeUpdatedAtUs,
-                snapshot.sampledAtUs,
+                nowUs,
                 target::policy::kMaximumTriggerCrosshairAgeUs) &&
             target::policy::IsFreshSample(
                 snapshot.viewUpdatedAtUs,
-                snapshot.sampledAtUs,
+                nowUs,
                 target::policy::kMaximumTriggerCrosshairAgeUs) &&
             target::policy::IsTimestampSkewAcceptable(
                 snapshot.localEyeUpdatedAtUs,
@@ -1671,20 +2116,21 @@ namespace
 
     bool AreTriggerTargetSamplesFresh(
         const esp::TargetSnapshot& snapshot,
-        const esp::PlayerData& player)
+        const esp::PlayerData& player,
+        uint64_t nowUs = esp::GetSnapshotTimeUs())
     {
-        return player.hasBones && player.hasHitboxes &&
+        return HasCoherentHitboxes(player) &&
             target::policy::IsFreshSample(
                 player.coreUpdatedAtUs,
-                snapshot.sampledAtUs,
+                nowUs,
                 target::policy::kMaximumTriggerTargetAgeUs) &&
             target::policy::IsFreshSample(
                 player.bonesUpdatedAtUs,
-                snapshot.sampledAtUs,
+                nowUs,
                 target::policy::kMaximumTriggerTargetAgeUs) &&
             target::policy::IsFreshSample(
                 player.hitboxesUpdatedAtUs,
-                snapshot.sampledAtUs,
+                nowUs,
                 target::policy::kMaximumTriggerTargetAgeUs) &&
             target::policy::IsTimestampSkewAcceptable(
                 player.coreUpdatedAtUs,
@@ -1702,6 +2148,25 @@ namespace
                 player.bonesUpdatedAtUs,
                 snapshot.localEyeUpdatedAtUs,
                 target::policy::kMaximumTriggerViewSkewUs);
+    }
+
+    uint64_t TriggerSampleLifetimeUs(const esp::TargetSnapshot& snapshot,
+        const esp::PlayerData& player)
+    {
+        const uint64_t nowUs = esp::GetSnapshotTimeUs();
+        if (!AreTriggerSamplesFresh(snapshot, nowUs) ||
+            !AreTriggerTargetSamplesFresh(snapshot, player, nowUs))
+            return 0;
+        using namespace target::policy;
+        return std::min({
+            RemainingSampleLifetimeUs(snapshot.localEyeUpdatedAtUs, nowUs, kMaximumTriggerCrosshairAgeUs),
+            RemainingSampleLifetimeUs(snapshot.viewUpdatedAtUs, nowUs, kMaximumTriggerCrosshairAgeUs),
+            RemainingSampleLifetimeUs(player.coreUpdatedAtUs, nowUs, kMaximumTriggerTargetAgeUs),
+            RemainingSampleLifetimeUs(player.bonesUpdatedAtUs, nowUs, kMaximumTriggerTargetAgeUs),
+            RemainingSampleLifetimeUs(player.hitboxesUpdatedAtUs, nowUs, kMaximumTriggerTargetAgeUs),
+            RemainingSampleLifetimeUs(snapshot.localWeaponUpdatedAtUs, nowUs, kMaximumWeaponStateAgeUs),
+            RemainingSampleLifetimeUs(snapshot.localWeaponTelemetryUpdatedAtUs, nowUs, kMaximumWeaponStateAgeUs)
+        });
     }
 
     bool DoesCurrentBallisticRayHitCandidate(
@@ -1733,17 +2198,11 @@ namespace
         const esp::TargetSnapshot& snapshot,
         const esp::PlayerData& player)
     {
-        const bool spawnProtected = player.gunGameImmunityValid &&
-            player.gunGameImmunity &&
-            target::policy::IsFreshSample(
-                player.gunGameImmunityUpdatedAtUs,
-                snapshot.sampledAtUs,
-                target::policy::kMaximumTriggerTargetAgeUs);
         return player.valid && player.pawn != 0 && player.health > 0 &&
             player.pawn != snapshot.localPawn &&
             player.team != snapshot.localTeam &&
             (player.team == 2 || player.team == 3) &&
-            IsPlayerCoreFresh(snapshot, player) && !spawnProtected;
+            IsPlayerCoreFresh(snapshot, player) && !IsSpawnProtected(snapshot, player);
     }
 
     void RequestTriggerRelease()
@@ -1998,6 +2457,7 @@ namespace
 
     void ResetRuntimeState()
     {
+        app::input::CancelPendingMoves();
         RequestTriggerRelease();
         s_runtime = {};
     }
@@ -2010,6 +2470,7 @@ namespace
 
     void SuspendRuntimeMotion()
     {
+        app::input::CancelPendingMoves();
         // Keep the shot observation/cooldown ledger across a read gap: losing
         // it could allow another click before the preceding shot is observed.
         RequestTriggerRelease();
@@ -2022,66 +2483,6 @@ namespace
         s_runtime.trigger.accuracyStableSince = {};
     }
 
-    Candidate SelectCrosshairTarget(
-        const esp::TargetSnapshot& snapshot,
-        int aimBone,
-        float screenWidth,
-        float screenHeight,
-        bool visibleOnly,
-        bool predictive)
-    {
-        Candidate candidate;
-        const int slot = snapshot.crosshairPlayerIndex;
-        if (slot < 0 || slot >= static_cast<int>(snapshot.players.size()))
-            return candidate;
-        const esp::PlayerData& player = snapshot.players[slot];
-        if (!IsEnemyTarget(snapshot, player) ||
-            !ArePlayerBonesFresh(snapshot, player) ||
-            snapshot.crosshairPawn == 0 ||
-            snapshot.crosshairPawn != player.pawn) {
-            return candidate;
-        }
-
-        const uint64_t boneAgeUs =
-            player.bonesUpdatedAtUs > 0 &&
-            snapshot.sampledAtUs >= player.bonesUpdatedAtUs
-                ? snapshot.sampledAtUs - player.bonesUpdatedAtUs
-                : UINT64_MAX;
-        const float leadSeconds = predictive
-            ? std::min(
-                target::policy::ResolvePredictionSeconds(
-                    boneAgeUs,
-                    0),
-                target::policy::kMaximumTriggerPredictionSeconds)
-            : 0.0f;
-        const Vector3 point = SelectAimPoint(
-            player,
-            aimBone,
-            snapshot.viewMatrix,
-            screenWidth,
-            screenHeight,
-            leadSeconds);
-        if (!IsUsablePoint(point) ||
-            (visibleOnly && !IsTargetVisible(snapshot, player, point))) {
-            return candidate;
-        }
-        const ScreenPos screen = WorldToScreen(
-            point,
-            snapshot.viewMatrix,
-            screenWidth,
-            screenHeight);
-        if (!screen.onScreen)
-            return candidate;
-
-        const float dx = screen.x - screenWidth * 0.5f;
-        const float dy = screen.y - screenHeight * 0.5f;
-        candidate.player = &player;
-        candidate.point = point;
-        candidate.screenDistance = std::sqrt(dx * dx + dy * dy);
-        candidate.slot = slot;
-        candidate.requiredHitgroup = RequiredHitgroupForAimPoint(aimBone);
-        return candidate;
-    }
 
     Candidate SelectGeometricCrosshairTarget(
         const esp::TargetSnapshot& snapshot,
@@ -2123,11 +2524,13 @@ namespace
                     &hit)) {
                 continue;
             }
+            if (aimBone == 5 && (hit.hitgroup < 1 || hit.hitgroup > 3))
+                continue;
             if (visibleOnly &&
                 !IsTargetVisible(snapshot, player, hit.position)) {
                 continue;
             }
-            const Vector3 point = SelectAimPoint(
+            const Vector3 point = aimBone == 5 ? hit.position : SelectAimPoint(
                 player,
                 aimBone,
                 snapshot.viewMatrix,
@@ -2150,7 +2553,8 @@ namespace
                 screen.x - screenWidth * 0.5f,
                 screen.y - screenHeight * 0.5f);
             best.slot = static_cast<int>(slot);
-            best.requiredHitgroup = requiredHitgroup;
+            best.requiredHitgroup = aimBone == 5 ? hit.hitgroup : requiredHitgroup;
+            best.hitboxIndex = hit.hitbox;
         }
         return best;
     }
@@ -2159,15 +2563,50 @@ namespace
         float screenWidth,
         float screenHeight,
         const g::TargetSettings& settings,
-        bool menuOpen)
+        bool inputCaptured)
     {
+        struct WorkScope
+        {
+            uint64_t startedAtUs = NowUs();
+            ~WorkScope()
+            {
+                static uint64_t windowStart = 0, peak = 0, samples = 0, overBudget = 0;
+                const uint64_t now = NowUs();
+                if (windowStart == 0 || now - windowStart >= 1000000) {
+                    windowStart = now;
+                    peak = samples = overBudget = 0;
+                }
+                const uint64_t duration = now - startedAtUs;
+                peak = std::max(peak, duration);
+                ++samples;
+                if (duration > static_cast<uint64_t>(kRuntimeTickInterval.count())) ++overBudget;
+                s_status.workUs = duration;
+                s_status.recentPeakWorkUs = peak;
+                s_status.workSamples = samples;
+                s_status.workWindowUs = now - windowStart;
+                s_status.overBudgetSamples = overBudget;
+            }
+        } workScope;
+        struct MovementScope
+        {
+            bool retained = false;
+            void Observe(MoveResult result)
+            {
+                retained = retained || result == MoveResult::Queued || result == MoveResult::Accumulating;
+            }
+            ~MovementScope() { if (!retained) app::input::CancelPendingMoves(); }
+        } movementScope;
+        s_geometryCapabilities = {};
         ReleaseTriggerIfNeeded();
         // Poll before any frame/device early return. A key press must not be
         // lost just because the data worker missed the same Target tick.
+        const auto aimInput = app::input::ReadActivationKeyState(settings.aimKey);
+        const auto triggerInput = settings.triggerKey == settings.aimKey
+            ? aimInput : app::input::ReadActivationKeyState(settings.triggerKey);
         bool aimKeyDown = ResolveActivation(settings.enabled && settings.aimbotEnabled,
-            settings.aimKey, settings.aimActivationMode, s_aimActivation, menuOpen);
+            settings.aimKey, settings.aimActivationMode, s_aimActivation, inputCaptured, aimInput);
         bool triggerKeyDown = ResolveActivation(settings.enabled && settings.triggerbotEnabled,
-            settings.triggerKey, settings.triggerActivationMode, s_triggerActivation, menuOpen);
+            settings.triggerKey, settings.triggerActivationMode, s_triggerActivation, inputCaptured, triggerInput);
         const bool triggerIntent = settings.triggerActivationMode == 1
             ? s_triggerActivation.toggled : s_triggerActivation.wasDown;
         if (!settings.enabled || !settings.triggerbotEnabled || !triggerIntent)
@@ -2178,14 +2617,11 @@ namespace
             PublishStatus(target::RuntimePhase::Disabled);
             return;
         }
-        if (menuOpen) {
+        if (inputCaptured) {
             SuspendRuntimeMotion();
-            // Retain the last operational diagnostics so opening the menu
-            // does not erase the reason the feature was blocked.
             s_status.pausedByMenu = true;
-            s_status.aimKeyDown = s_aimActivation.toggled;
-            s_status.triggerKeyDown = settings.triggerbotEnabled &&
-                s_triggerActivation.toggled;
+            s_status.aimKeyDown = false;
+            s_status.triggerKeyDown = false;
             s_status.updatedAtUs = NowUs();
             return;
         }
@@ -2257,7 +2693,9 @@ namespace
         const float configuredFov = target::policy::ResolveConfiguredFov(
             settings.fovRadius, settings.fovPerWeapon, activeWeaponSettings.fovRadius);
         const target::convars::Values dynamicConVars =
-            target::convars::Read();
+            target::convars::Read(snapshot.sceneSerial);
+        const float recoilScale = dynamicConVars.recoilScaleValid
+            ? target::policy::BoundedSetting(dynamicConVars.recoilScale, 2.0f, 0.0f, 10.0f) : 2.0f;
         int localPingMs = 0;
         if (snapshot.localPlayerIndex >= 0 &&
             snapshot.localPlayerIndex <
@@ -2284,17 +2722,27 @@ namespace
                 0.0f,
                 0.1f);
         }
-        // Direct damage checks also need geometry. Disabling Visible Only
-        // and Autowall must not prevent the required map build from starting.
-        const bool needsGeometry = settings.aimbotEnabled || settings.triggerbotEnabled;
+        const bool needsGeometry = settings.triggerbotEnabled ||
+            (settings.aimbotEnabled && (settings.aimVisibleOnly || activeWeaponSettings.aimDamageCheck));
         if (needsGeometry)
             target::physics::RequestForMap(snapshot.mapKey);
+        const bool geometryReady = target::physics::IsReadyForMap(snapshot.mapKey);
+        const bool aimDamageActive = activeWeaponSettings.aimDamageCheck && geometryReady;
+        s_geometryCapabilities = {
+            true, geometryReady,
+            settings.aimbotEnabled && settings.aimVisibleOnly && !geometryReady,
+            settings.triggerbotEnabled && settings.triggerAimAssist && settings.triggerVisibleOnly && !geometryReady,
+            settings.aimbotEnabled && activeWeaponSettings.aimDamageCheck && !geometryReady,
+            settings.aimbotEnabled && aimDamageActive && activeWeaponSettings.aimAutowall,
+            settings.triggerbotEnabled && geometryReady && activeWeaponSettings.autowall
+        };
 
         const bool weaponIdentityFresh = snapshot.localWeaponId != 0 &&
             snapshot.localWeaponEntity != 0 && snapshot.localWeaponHandle != 0 &&
             snapshot.localWeaponHandle != 0xFFFFFFFFu && target::policy::IsFreshSample(
                 snapshot.localWeaponUpdatedAtUs, snapshot.sampledAtUs,
                 target::policy::kMaximumWeaponStateAgeUs);
+        const bool recoilScaleChanged = s_recoilScale != recoilScale;
         const bool contextChanged =
             s_runtime.contextInitialized &&
             (s_runtime.sceneSerial != snapshot.sceneSerial ||
@@ -2313,6 +2761,23 @@ namespace
                 s_runtime.localWeaponEntity = snapshot.localWeaponEntity;
             }
         }
+        s_recoilScale = recoilScale;
+
+        const uint64_t aimMotionKey = target::settings_policy::MotionKey(settings, activeWeaponSettings, false);
+        const uint64_t triggerMotionKey = target::settings_policy::MotionKey(settings, activeWeaponSettings, true);
+        const bool aimSettingsChanged = recoilScaleChanged || (s_runtime.aimMotionKey != 0 && s_runtime.aimMotionKey != aimMotionKey);
+        const bool triggerSettingsChanged = recoilScaleChanged || (s_runtime.triggerMotionKey != 0 && s_runtime.triggerMotionKey != triggerMotionKey);
+        if (aimSettingsChanged || triggerSettingsChanged) app::input::CancelPendingMoves();
+        if (aimSettingsChanged) s_runtime.aim = {};
+        if (triggerSettingsChanged) {
+            s_runtime.trigger.assist = {};
+            s_runtime.trigger.waiting = false;
+            s_runtime.trigger.alignedPawn = 0;
+            s_runtime.trigger.alignedTicks = 0;
+            s_runtime.trigger.movementIssuedGeneration = 0;
+        }
+        s_runtime.aimMotionKey = aimMotionKey;
+        s_runtime.triggerMotionKey = triggerMotionKey;
 
         target::RuntimePhase runtimePhase = target::RuntimePhase::Ready;
         Candidate aimCandidate;
@@ -2499,17 +2964,26 @@ namespace
                     !trigger.clickReserved &&
                     ((postClickWeaponEvidenceFresh && weaponCycleReady) ||
                      hardObservationTimeoutElapsed)) {
-                    const uintptr_t blockedPawn = trigger.latchedPawn;
-                    trigger.blockedUnobservedPawn = blockedPawn;
-                    trigger.blockedAfterConfirmedDeath = false;
-                    trigger.blockedPawnCoreUpdatedAtUs =
-                        trigger.latchedCoreUpdatedAtBefore;
-                    trigger.blockedRevivalCoreUpdatedAtUs = 0;
-                    trigger.blockedRevivalSamples = 0;
-                    ClearLatchedShotState();
-                    DmaLogPrintf(
-                        "[WARN] Target click remained unobserved after bounded retry; blocking pawn=0x%llX until identity changes.",
-                        static_cast<unsigned long long>(blockedPawn));
+                    const bool verifiedNoShot = postClickWeaponEvidenceFresh && weaponCycleReady &&
+                        targetOutcome == target::policy::TriggerTargetOutcome::AliveConfirmed &&
+                        trigger.ammoBefore >= 0 && snapshot.localAmmoValid &&
+                        snapshot.localAmmoClip == trigger.ammoBefore &&
+                        trigger.lastShotTimeBeforeValid &&
+                        std::fabs(snapshot.localLastShotTime - trigger.lastShotTimeBefore) < 0.00001f &&
+                        (!trigger.shotsBeforeValid || snapshot.localShotsFired == trigger.shotsBefore);
+                    if (verifiedNoShot && trigger.unobservedRetryCount < target::policy::kMaximumUnobservedClickRetries) {
+                        ++trigger.unobservedRetryCount;
+                        ClearLatchedShotState();
+                        trigger.nextAutoShotAt = now + std::chrono::milliseconds(300);
+                        s_triggerActivationShotIssued = false;
+                    } else {
+                        trigger.blockedUnobservedPawn = trigger.latchedPawn;
+                        trigger.blockedAfterConfirmedDeath = false;
+                        trigger.blockedPawnCoreUpdatedAtUs = trigger.latchedCoreUpdatedAtBefore;
+                        trigger.blockedRevivalCoreUpdatedAtUs = 0;
+                        trigger.blockedRevivalSamples = 0;
+                        ClearLatchedShotState();
+                    }
                 }
             }
         }
@@ -2517,24 +2991,25 @@ namespace
         RefreshBlockedPawnRevival(snapshot);
 
         if (triggerRequested && settings.triggerAimAssist) {
+            const uintptr_t trackedTriggerPawn = settings.triggerTargetLock
+                ? PreferredMotionPawn(snapshot, s_runtime.trigger.assist) : 0;
             const uintptr_t preferredTriggerPawn =
-                s_runtime.trigger.assist.targetPawn != 0 &&
-                s_runtime.trigger.assist.targetPawn !=
+                trackedTriggerPawn != 0 && trackedTriggerPawn !=
                     s_runtime.trigger.blockedUnobservedPawn
-                    ? s_runtime.trigger.assist.targetPawn
-                    : snapshot.crosshairPawn;
+                    ? trackedTriggerPawn
+                    : (settings.triggerTargetLock ? snapshot.crosshairPawn : 0);
             triggerCandidate = SelectTarget(
                 snapshot,
                 settings.triggerAimBone,
                 screenWidth,
                 screenHeight,
                 radius,
-                settings.triggerVisibleOnly,
+                settings.triggerVisibleOnly && geometryReady,
                 settings.triggerAimPredictive,
                 preferredTriggerPawn,
                 s_runtime.trigger.blockedUnobservedPawn,
                 localPingMs,
-                interpolationSeconds, false, 1.0f, false, nullptr, &s_triggerSelection);
+                interpolationSeconds, false, 1.0f, false, nullptr, &s_triggerSelection, &s_runtime.trigger.assist);
         } else if (triggerRequested) {
             triggerCandidate = SelectGeometricCrosshairTarget(
                 snapshot,
@@ -2578,11 +3053,16 @@ namespace
                 s_runtime.trigger.alignedPawn = 0;
                 s_runtime.trigger.alignedTicks = 0;
             } else {
-                if (s_runtime.trigger.assist.targetPawn !=
-                    triggerCandidate.player->pawn) {
-                    s_runtime.trigger.assist = {};
+                if (!MatchesMotionTarget(s_runtime.trigger.assist,
+                    *triggerCandidate.player, triggerCandidate.slot) ||
+                    s_runtime.trigger.assist.targetHitboxIndex != triggerCandidate.hitboxIndex) {
+                    app::input::CancelPendingMoves();
+                    ResetMotionTarget(s_runtime.trigger.assist);
                     s_runtime.trigger.assist.targetPawn =
                         triggerCandidate.player->pawn;
+                    s_runtime.trigger.assist.targetPawnHandle = triggerCandidate.player->pawnHandle;
+                    s_runtime.trigger.assist.targetSlot = triggerCandidate.slot;
+                    s_runtime.trigger.assist.targetHitboxIndex = triggerCandidate.hitboxIndex;
                     s_runtime.trigger.waiting = false;
                     s_runtime.trigger.alignedPawn = 0;
                     s_runtime.trigger.alignedTicks = 0;
@@ -2603,8 +3083,11 @@ namespace
                     &lastMoveX,
                     &lastMoveY,
                     &triggerAngularError,
-                    activeWeaponSettings.hitchanceEnabled ? activeWeaponSettings.hitchance : 0.0f,
-                    &dynamicConVars);
+                    activeWeaponSettings.hitchanceEnabled && !activeWeaponSettings.triggerForceCenter
+                        ? activeWeaponSettings.hitchance : 0.0f,
+                    &dynamicConVars,
+                    activeWeaponSettings.triggerAdaptiveSmoothing);
+                movementScope.Observe(triggerMovementResult);
                 if (triggerMovementResult == MoveResult::Queued) {
                     s_runtime.trigger.movementIssuedGeneration =
                         triggerEvidenceGeneration;
@@ -2617,7 +3100,16 @@ namespace
                     : target::RuntimePhase::Tracking;
             }
         } else {
-            s_runtime.trigger.assist = {};
+            if (triggerRequested && (s_runtime.trigger.held || s_runtime.trigger.clickReserved ||
+                s_runtime.trigger.shotLatched)) {
+                auto& assist = s_runtime.trigger.assist;
+                assist.diagnostics = {};
+                assist.mouseRemainderX = assist.mouseRemainderY = 0.0f;
+                assist.windState = {};
+                assist.windUpdatedAtUs = 0;
+            } else {
+                s_runtime.trigger.assist = {};
+            }
             s_runtime.trigger.movementIssuedGeneration = 0;
         }
 
@@ -2639,44 +3131,66 @@ namespace
                 screenWidth,
                 screenHeight,
                 radius,
-                settings.aimVisibleOnly,
+                settings.aimVisibleOnly && geometryReady,
                 settings.aimPredictive,
-                s_runtime.aim.targetPawn,
+                settings.aimTargetLock ? PreferredMotionPawn(snapshot, s_runtime.aim) : 0,
                 0,
                 localPingMs,
                 interpolationSeconds,
-                true,
+                aimDamageActive,
                 activeWeaponSettings.aimMinimumDamage,
                 activeWeaponSettings.aimAutowall,
-                &dynamicConVars, &s_aimSelection);
+                &dynamicConVars, &s_aimSelection, &s_runtime.aim);
             if (!aimCandidate.player) {
                 ResetAimState();
                 runtimePhase = target::RuntimePhase::NoTarget;
             } else {
-                if (s_runtime.aim.targetPawn != aimCandidate.player->pawn) {
-                    s_runtime.aim = {};
+                if (!MatchesMotionTarget(s_runtime.aim, *aimCandidate.player, aimCandidate.slot) ||
+                    s_runtime.aim.targetHitboxIndex != aimCandidate.hitboxIndex) {
+                    const auto acquiredAt = MatchesMotionTarget(s_runtime.aim, *aimCandidate.player, aimCandidate.slot)
+                        ? s_runtime.aim.acquiredAtUs : 0;
+                    if (!triggerMovementOwned) app::input::CancelPendingMoves();
+                    ResetMotionTarget(s_runtime.aim);
+                    s_runtime.aim.acquiredAtUs = acquiredAt;
                 }
+                if (s_runtime.aim.acquiredAtUs == 0 || s_runtime.aim.acquiredAtUs > snapshot.sampledAtUs)
+                    s_runtime.aim.acquiredAtUs = snapshot.sampledAtUs;
                 s_runtime.aim.targetPawn = aimCandidate.player->pawn;
+                s_runtime.aim.targetPawnHandle = aimCandidate.player->pawnHandle;
+                s_runtime.aim.targetSlot = aimCandidate.slot;
+                s_runtime.aim.targetHitboxIndex = aimCandidate.hitboxIndex;
                 const bool aimMayCorrectObservedShot = !triggerAssistMayOwnMovement &&
                     settings.aimRecoilControl && s_runtime.trigger.shotLatched &&
                     s_runtime.trigger.shotObserved && !s_runtime.trigger.held &&
                     !s_runtime.trigger.clickReserved &&
                     aimCandidate.player->pawn == s_runtime.trigger.latchedPawn;
-                if (!triggerMovementOwned || aimMayCorrectObservedShot) {
+                const bool reactionReady = snapshot.sampledAtUs - s_runtime.aim.acquiredAtUs >=
+                    static_cast<uint64_t>(target::policy::SanitizeDelayMs(activeWeaponSettings.aimReactionMs, 0)) * 1000u;
+                if (!reactionReady && !triggerMovementOwned) runtimePhase = target::RuntimePhase::Reacting;
+                if (reactionReady && (!triggerMovementOwned || aimMayCorrectObservedShot)) {
+                    const int motionStyle = target::settings_policy::AimMotionStyle(settings, activeWeaponSettings);
+                    const target::wind::Settings windSettings{activeWeaponSettings.aimWindGravity,
+                        activeWeaponSettings.aimWindFluctuation, activeWeaponSettings.aimWindMaxStep,
+                        activeWeaponSettings.aimWindDistance};
                     const MoveResult movementResult = MoveToward(
                         snapshot,
                         aimCandidate,
                         weaponProfile,
                         s_runtime.aim,
                         activeWeaponSettings.aimSmoothing,
-                        settings.aimHumanization,
+                        motionStyle == 1,
                         settings.aimRecoilControl,
                         ResolveCandidateAlignmentTolerance(
                             snapshot,
                             aimCandidate,
                             settings.aimBone),
                         &lastMoveX,
-                        &lastMoveY);
+                        &lastMoveY,
+                        nullptr, -1.0f, nullptr,
+                        activeWeaponSettings.aimAdaptiveSmoothing,
+                        motionStyle == 2 ? &windSettings : nullptr,
+                        &activeWeaponSettings);
+                    movementScope.Observe(movementResult);
                     runtimePhase = movementResult == MoveResult::Failed
                         ? target::RuntimePhase::OutputFailed
                         : target::RuntimePhase::Tracking;
@@ -2684,7 +3198,7 @@ namespace
             }
         } else {
             ResetAimState();
-            if (settings.aimbotEnabled || settings.triggerbotEnabled)
+            if (!triggerRequested && (settings.aimbotEnabled || settings.triggerbotEnabled))
                 runtimePhase = target::RuntimePhase::WaitingForKey;
         }
 
@@ -2714,12 +3228,13 @@ namespace
             !settings.triggerAimAssist ||
             (triggerMovementResult == MoveResult::Aligned &&
              std::isfinite(triggerAngularError) &&
-             triggerAngularError <= triggerTolerance);
-        const bool confirmedAfterMovement =
+             (triggerAngularError <= triggerTolerance ||
+              s_runtime.trigger.assist.diagnostics.reason == target::MoveBlockReason::QuantizationLimit));
+        const bool confirmedAfterMovement = !AwaitMotionFeedback(snapshot) && (
             !settings.triggerAimAssist ||
             (triggerEvidenceGeneration != 0u &&
              triggerEvidenceGeneration >
-                s_runtime.trigger.movementIssuedGeneration);
+                s_runtime.trigger.movementIssuedGeneration));
         const bool triggerSamplesFresh = AreTriggerSamplesFresh(snapshot);
         const bool triggerTargetSamplesFresh =
             triggerTargetValid && AreTriggerTargetSamplesFresh(
@@ -2759,11 +3274,12 @@ namespace
                     triggerCandidate,
                     activeWeaponSettings.hitchanceEnabled ? activeWeaponSettings.hitchance : 0.0f,
                     activeWeaponSettings.minimumDamage,
-                    activeWeaponSettings.autowall,
+                    activeWeaponSettings.autowall && geometryReady,
                     dynamicConVars,
                     fireLeadSeconds,
                     nullptr,
-                    activeWeaponSettings.seedWindowEnabled)
+                    activeWeaponSettings.seedWindowEnabled,
+                    activeWeaponSettings.triggerForceCenter)
                 : ShotEvaluation{};
         const bool shotTraceMatchesTarget =
             shotEvaluation.geometryHit && crosshairConsistent;
@@ -2849,6 +3365,10 @@ namespace
                  s_runtime.trigger.clickReserved) fireReason = FireReason::ShotPending;
         else if (!triggerShotBudgetReady) fireReason = FireReason::ActivationSpent;
         else if (!triggerTargetValid) fireReason = FireReason::NoTarget;
+        else if (s_runtime.trigger.assist.diagnostics.reason == target::MoveBlockReason::OutputBusy)
+            fireReason = FireReason::OutputBusy;
+        else if (s_runtime.trigger.assist.diagnostics.reason == target::MoveBlockReason::AwaitingView)
+            fireReason = FireReason::AwaitingView;
         else if (!pointAligned) fireReason = FireReason::Aligning;
         else if (!confirmedAfterMovement) fireReason = FireReason::AwaitingView;
         else if (!triggerSamplesFresh) fireReason = FireReason::StaleLocal;
@@ -2909,8 +3429,13 @@ namespace
             // stale by the end of the configured delay.
             if (IsKeyDown(0x01)) {
                 s_runtime.trigger.waiting = false;
-            } else if (app::input::RequestLeftClick(
-                    static_cast<uint32_t>(kTriggerHoldTime.count()))) {
+            } else if (TriggerSampleLifetimeUs(snapshot, *triggerCandidate.player) == 0) {
+                s_runtime.trigger.waiting = false;
+                fireReason = FireReason::StaleTarget;
+            } else if (const auto clickResult = app::input::TryRequestLeftClick(
+                    static_cast<uint32_t>(kTriggerHoldTime.count()),
+                    TriggerSampleLifetimeUs(snapshot, *triggerCandidate.player));
+                clickResult == app::input::ClickRequestResult::Queued) {
                 fireReason = FireReason::Queued;
                 s_triggerActivationShotIssued = true;
                 s_runtime.trigger.waiting = false;
@@ -3024,11 +3549,17 @@ namespace
                             std::chrono::duration<float>(
                                 outputLatencySeconds));
             } else {
-                s_runtime.trigger.waiting = false;
-                s_runtime.trigger.nextAutoShotAt =
-                    now + kTriggerRetryBackoff;
-                fireReason = FireReason::OutputFailed;
-                runtimePhase = target::RuntimePhase::OutputFailed;
+                if (clickResult == app::input::ClickRequestResult::Busy) {
+                    fireReason = FireReason::OutputBusy;
+                } else if (clickResult == app::input::ClickRequestResult::ManualInput) {
+                    s_runtime.trigger.waiting = false;
+                    fireReason = FireReason::ManualFire;
+                } else {
+                    s_runtime.trigger.waiting = false;
+                    s_runtime.trigger.nextAutoShotAt = now + kTriggerRetryBackoff;
+                    fireReason = FireReason::OutputFailed;
+                    runtimePhase = target::RuntimePhase::OutputFailed;
+                }
             }
         }
 
@@ -3139,15 +3670,16 @@ namespace
                 std::lock_guard<std::recursive_mutex> lock(g::settingsMutex);
                 settings = g::targetSettings;
             }
-            const bool menuOpen =
-                g::menuOpen.load(std::memory_order_relaxed);
+            const bool inputCaptured = target::policy::IsInputCaptureActive(
+                g::menuOpen.load(std::memory_order_relaxed),
+                g::targetKeyCaptureUntilMs.load(std::memory_order_acquire), GetTickCount64());
             {
                 std::lock_guard<std::mutex> lock(s_runtimeMutex);
                 TickTarget(
                     screenWidth,
                     screenHeight,
                     settings,
-                    menuOpen);
+                    inputCaptured);
                 PublishCompletedStatus();
             }
 
@@ -3169,6 +3701,7 @@ void target::Start()
     std::lock_guard<std::mutex> lock(s_workerMutex);
     if (s_workerStarted)
         return;
+    convars::Start();
     s_workerStopping = false;
     s_worker = std::thread(RuntimeWorkerLoop);
     s_workerStarted = true;

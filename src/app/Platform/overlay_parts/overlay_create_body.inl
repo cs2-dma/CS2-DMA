@@ -265,6 +265,7 @@
     g::fontUiTitle = nullptr;
     g::fontEspName = nullptr;
     g::fontOverlayText = nullptr;
+    g::fontBarValues = nullptr;
     g::fontUiIcons = nullptr;
     g::fontWeaponIcons = nullptr;
     g::fontWeaponIconsSmall = nullptr;
@@ -324,6 +325,7 @@
     if (!g::fontOverlayText)
         g::fontOverlayText = g::fontDefault;
     io.FontDefault = g::fontDefault;
+    g::fontBarValues = esp::render::LoadBarValueFont(*io.Fonts, segoeBoldPath.c_str());
 
     if (!std::filesystem::exists(cjkRegularPath))
         cjkRegularPath.clear();

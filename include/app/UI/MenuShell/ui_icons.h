@@ -25,7 +25,14 @@ namespace ui::icons
         Rulers = 0xF523,
         Shield = 0xF53F,
         Sliders = 0xF56B,
-        Stopwatch = 0xF597
+        Stopwatch = 0xF597,
+        EyeSlash = 62272,
+        Tools = 62939,
+        CashStack = 62022,
+        ArrowRepeat = 61744,
+        ShieldCheck = 62767,
+        BoxSeam = 61895,
+        HourglassSplit = 62495
     };
 
     [[nodiscard]] constexpr ImWchar Codepoint(Icon icon) noexcept
@@ -33,7 +40,9 @@ namespace ui::icons
         return static_cast<ImWchar>(icon);
     }
 
-    inline constexpr std::array<Icon, 15> kAllIcons = {
+    inline constexpr std::array<Icon, 22> kAllIcons = {
+        Icon::EyeSlash, Icon::Tools, Icon::CashStack, Icon::ArrowRepeat,
+        Icon::ShieldCheck, Icon::BoxSeam, Icon::HourglassSplit,
         Icon::ArrowsFullscreen,
         Icon::BoundingBoxCircles,
         Icon::Crosshair,
@@ -52,17 +61,24 @@ namespace ui::icons
     };
 
     inline constexpr ImWchar kGlyphRanges[] = {
+        Codepoint(Icon::ArrowRepeat), Codepoint(Icon::ArrowRepeat),
         Codepoint(Icon::ArrowsFullscreen), Codepoint(Icon::ArrowsFullscreen),
         Codepoint(Icon::BoundingBoxCircles), Codepoint(Icon::BoundingBoxCircles),
+        Codepoint(Icon::BoxSeam), Codepoint(Icon::BoxSeam),
+        Codepoint(Icon::CashStack), Codepoint(Icon::CashStack),
         Codepoint(Icon::Display), Codepoint(Icon::Display),
+        Codepoint(Icon::EyeSlash), Codepoint(Icon::EyeSlash),
         Codepoint(Icon::Eye), Codepoint(Icon::Eye),
         Codepoint(Icon::Flag), Codepoint(Icon::Flag),
         Codepoint(Icon::Globe), Codepoint(Icon::Globe),
+        Codepoint(Icon::HourglassSplit), Codepoint(Icon::HourglassSplit),
         Codepoint(Icon::People), Codepoint(Icon::People),
         Codepoint(Icon::Rulers), Codepoint(Icon::Rulers),
+        Codepoint(Icon::ShieldCheck), Codepoint(Icon::ShieldCheck),
         Codepoint(Icon::Shield), Codepoint(Icon::Shield),
         Codepoint(Icon::Sliders), Codepoint(Icon::Sliders),
         Codepoint(Icon::Stopwatch), Codepoint(Icon::Stopwatch),
+        Codepoint(Icon::Tools), Codepoint(Icon::Tools),
         Codepoint(Icon::HeartPulse), Codepoint(Icon::HeartPulse),
         Codepoint(Icon::Crosshair), Codepoint(Icon::Crosshair),
         Codepoint(Icon::Radar), Codepoint(Icon::Radar),

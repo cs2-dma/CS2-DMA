@@ -87,6 +87,7 @@ namespace esp {
         bool radarShowBomb = false;
         bool espWeapon = false;
         bool espWeaponAmmo = false;
+        bool espWeaponPresentation = false;
         bool espWeaponIcon = false;
         bool espName = false;
         bool radarSpectatorList = false;
@@ -104,6 +105,8 @@ namespace esp {
         bool targetNeedsRecoil = false;
         bool targetNeedsVelocity = false;
         bool targetNeedsWeaponState = false;
+        bool targetNeedsWeaponTelemetry = false;
+        bool grenadeHelperNeedsWeaponState = false;
         bool webRadarEnabled = false;
         bool webRadarRemoteEnabled = false;
         std::bitset<1200> espItemEnabledMask;
@@ -222,6 +225,7 @@ namespace esp {
     struct PlayerVisibilitySample {
         uintptr_t pawn = 0;
         bool visible = false;
+        uint64_t updatedAtUs = 0;
     };
 
     struct PlayerVisibilityFrame {
@@ -292,6 +296,7 @@ namespace esp {
         SlotEvictedDead,
         BulkRecoveryEntered,  
         BoneRejected,
+        CoreRejected,
     };
 
     struct EspEventDescriptor
@@ -705,6 +710,8 @@ namespace esp {
     extern std::atomic<uint64_t> s_stageWorldScanUs;
     extern std::atomic<uint64_t> s_stageWorldScanLastUs;
     extern std::atomic<uint64_t> s_stageCommitEnrichUs;
+    extern std::atomic<uint64_t> s_stageWeaponTelemetryUs;
+    extern std::atomic<uint64_t> s_stageHelmetReadsUs;
     extern std::atomic<uint64_t> s_stagePlayerAuxLastUs;
     extern std::atomic<uint64_t> s_stageInventoryLastUs;
     extern std::atomic<uint64_t> s_stageBoneReadsLastUs;
@@ -767,6 +774,7 @@ namespace esp {
     void PublishCameraFrame(const CameraFrame& frame);
     void ResetCameraSnapshot();
     void PublishDataSettingsSnapshot();
+    void PublishPlayerFlagDiagnostics(const esp::PlayerFlagDiagnostics& frame);
     bool TryReadDataSettingsSnapshot(DataSettingsSnapshot& out);
     void ResetWorldUtilityTrackingState();
     void ResetRuntimeStateHard(const char* reason, bool publishClearedSnapshot = false);

@@ -1,5 +1,6 @@
     if (activeWeaponLaneDue) {
         DWORD activeWeaponHandleBytesRead[64] = {};
+        DWORD activeWeaponIdBytesRead[64] = {};
         auto resolveActiveWeaponEntity = [&](int idx) -> uintptr_t {
             if (idx < 0 || idx >= 64)
                 return 0;
@@ -55,7 +56,8 @@
                     ofs.C_EconEntity_m_AttributeManager +
                     ofs.C_AttributeContainer_m_Item +
                     ofs.C_EconItemView_m_iItemDefinitionIndex;
-                mem.AddScatterReadRequest(handle, itemDefAddr, &activeMetaWeaponIds[i], sizeof(uint16_t));
+                mem.AddScatterReadRequest(handle, itemDefAddr, &activeMetaWeaponIds[i], sizeof(uint16_t),
+                    &activeWeaponIdBytesRead[i]);
                 activeMetaRefreshSlots[i] = true;
             }
             if (ofs.C_BasePlayerWeapon_m_iClip1 > 0)
@@ -87,6 +89,7 @@
                 for (int inventorySlotIdx = 0; inventorySlotIdx < inventoryPlayerSlotCount; ++inventorySlotIdx) {
                     const int i = inventoryPlayerSlots[inventorySlotIdx];
                     if (activeMetaRefreshSlots[i] &&
+                        activeWeaponIdBytesRead[i] == sizeof(uint16_t) &&
                         activeMetaWeaponIds[i] > 0 &&
                         activeMetaWeaponIds[i] < 20000u) {
                         weaponIds[i] = activeMetaWeaponIds[i];
@@ -280,7 +283,7 @@
                                 for (int inventorySlotIdx = 0; inventorySlotIdx < inventoryPlayerSlotCount; ++inventorySlotIdx) {
                                     const int i = inventoryPlayerSlots[inventorySlotIdx];
                                     if (entriesDirty[i])
-                                        activeWeapons[i] = s_cachedActiveWeaponsResolved[i];
+                                        activeWeapons[i] = 0;
                                 }
                             }
                             for (int inventorySlotIdx = 0; inventorySlotIdx < inventoryPlayerSlotCount; ++inventorySlotIdx) {
@@ -323,7 +326,9 @@
                                     ofs.C_EconEntity_m_AttributeManager +
                                     ofs.C_AttributeContainer_m_Item +
                                     ofs.C_EconItemView_m_iItemDefinitionIndex;
-                                mem.AddScatterReadRequest(handle, itemDefAddr, &weaponIds[i], sizeof(uint16_t));
+                                activeWeaponIdBytesRead[i] = 0;
+                                mem.AddScatterReadRequest(handle, itemDefAddr, &weaponIds[i], sizeof(uint16_t),
+                                    &activeWeaponIdBytesRead[i]);
                                 queuedMetaRefresh = true;
                                 if (ofs.C_BasePlayerWeapon_m_iClip1 > 0)
                                     mem.AddScatterReadRequest(
@@ -338,11 +343,16 @@
                                 for (int inventorySlotIdx = 0; inventorySlotIdx < inventoryPlayerSlotCount; ++inventorySlotIdx) {
                                     const int i = inventoryPlayerSlots[inventorySlotIdx];
                                     if (entitiesDirty[i]) {
-                                        weaponIds[i] = s_cachedWeaponIdsResolved[i];
-                                        ammoClips[i] = s_cachedAmmoClipsResolved[i];
+                                        weaponIds[i] = 0;
+                                        ammoClips[i] = -1;
                                         activeAmmoClipBytesRead[i] = 0;
                                     }
                                 }
+                            }
+                            for (int inventorySlotIdx = 0; inventorySlotIdx < inventoryPlayerSlotCount; ++inventorySlotIdx) {
+                                const int i = inventoryPlayerSlots[inventorySlotIdx];
+                                if (entitiesDirty[i] && activeWeaponIdBytesRead[i] != sizeof(uint16_t))
+                                    weaponIds[i] = 0;
                             }
                         }
                     }

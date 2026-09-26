@@ -1,0 +1,3 @@
+WEAPON_ICON_ATLAS_PNG RCDATA "../../../src/assets/weapon_icons/weapon_icon_atlas.png"
+"/test/asset.png" RCDATA "../../../src/assets/weapon_icons/weapon_icon_atlas.png"
+/test/legacy.png RCDATA "../../../src/assets/weapon_icons/weapon_icon_atlas.png"

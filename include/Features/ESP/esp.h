@@ -218,6 +218,8 @@ namespace esp {
         uint64_t worldScanUs = 0;
         uint64_t worldScanLastUs = 0;
         uint64_t commitEnrichUs = 0;
+        uint64_t weaponTelemetryUs = 0;
+        uint64_t helmetReadsUs = 0;
         uint64_t playerAuxLastUs = 0;
         uint64_t inventoryLastUs = 0;
         uint64_t boneReadsLastUs = 0;
@@ -313,7 +315,22 @@ namespace esp {
         bool cameraWorkerPaused = false;
     };
 
+    struct PlayerFlagDiagnostics {
+        uint64_t sceneSerial = 0;
+        uint64_t sampledAtUs = 0;
+        uint32_t requestedMask = 0;
+        int fresh[3] = {};
+        int active[3] = {};
+        int published[3] = {};
+        int flashSlot = -1;
+        float flashBangTime = 0.0f;
+        float flashDuration = 0.0f;
+        float gameTime = 0.0f;
+        bool gameTimeFresh = false;
+    };
+
     struct DebugStats {
+        PlayerFlagDiagnostics playerFlags;
         static constexpr int kMaxEspEvents = 8;
 
         uint64_t publishCount = 0;
@@ -486,6 +503,7 @@ namespace esp {
         bool     hasHelmetValid = false;
         int      team = 0;
         int      money = 0;
+        bool     moneyKnown = false;
         int      ping = 0;
         Vector3  position;
         Vector3  velocity;
@@ -508,8 +526,18 @@ namespace esp {
         uint16_t weaponId = 0;
         uint16_t weaponIconId = 0;
         int      ammoClip = -1;
+        int      displayAmmoClip = -1;
+        int      displayAmmoReserve = -1;
+        int      displayAmmoCapacity = -1;
+        bool     displayReserveAsClips = false;
+        bool     displayReserveUnitsKnown = false;
+        bool     isReloading = false;
+        uint64_t weaponPresentationUpdatedUs = 0;
         bool     hasBomb = false;
         float    flashDuration = 0.0f;
+        uint64_t flashUpdatedUs = 0;
+        uint64_t scopedUpdatedUs = 0;
+        uint64_t defusingUpdatedUs = 0;
         float    eyeYaw = 0.0f;
         int      staleFrames = 0;
         uint64_t coreUpdatedAtUs = 0;
@@ -566,6 +594,7 @@ namespace esp {
         int localTeam = 0;
         bool hasMinimapBounds = false;
         uint64_t captureTickMs = 0;
+        uint64_t localPosUpdatedAtUs = 0;
         static constexpr int kMaxWorldMarkers = 64;
         WebRadarWorldMarker worldMarkers[kMaxWorldMarkers] = {};
         int worldMarkerCount = 0;
@@ -662,4 +691,5 @@ namespace esp {
     uint64_t    GetPublishCount();
     bool        GetWebRadarSnapshot(WebRadarSnapshot* outSnapshot);
     bool        GetTargetSnapshot(TargetSnapshot* outSnapshot);
+    uint64_t    GetSnapshotTimeUs();
 }

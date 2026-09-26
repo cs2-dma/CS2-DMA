@@ -1,6 +1,10 @@
     const std::string resolvedMapKey = NormalizeMapName(snapshot.mapKey);
-    if (!resolvedMapKey.empty())
+    if (!resolvedMapKey.empty()) {
+        if (const auto* overview = radar::FindMapForPosition(resolvedMapKey,
+                snapshot.localPos.x, snapshot.localPos.y, snapshot.localPos.z, previousMap))
+            return overview->name;
         return resolvedMapKey;
+    }
 
     if (!snapshot.hasMinimapBounds)
         return "unknown";
@@ -21,7 +25,9 @@
             runtimeMaxX,
             runtimeMaxY,
             false)) {
-        return map->name;
+        const auto* layer = radar::FindMapForPosition(map->name, snapshot.localPos.x,
+            snapshot.localPos.y, snapshot.localPos.z, previousMap);
+        return layer ? layer->name : map->name;
     }
 
     return "unknown";
