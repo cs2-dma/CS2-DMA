@@ -1,5 +1,6 @@
 #include "Features/ESP/Render/style.h"
 #include "Features/World/grenade_helper.h"
+#include "app/UI/viewport_draw_scope.h"
 
 
 void esp::EspRenderer::Draw()
@@ -16,11 +17,11 @@ void esp::EspRenderer::Draw()
         return;
     }
 
-    if (!g::espEnabled && !g::espWorld && !g::radarEnabled && !g::radarSpectatorList &&
-        !g::espBombTime && !g::grenadeHelperEnabled) return;
+    if (!esp::render::HasOverlayDrawDemand(g::espEnabled, g::espWorld, g::espItem,
+        g::radarEnabled, g::radarSpectatorList, g::espBombTime, g::grenadeHelperEnabled)) return;
 
-    const float screenW = static_cast<float>(g::screenWidth);
-    const float screenH = static_cast<float>(g::screenHeight);
+    const float screenW = g::gameViewport.width;
+    const float screenH = g::gameViewport.height;
     if (screenW <= 0 || screenH <= 0) return;
 
     static thread_local EntitySnapshot snap;
@@ -34,6 +35,11 @@ void esp::EspRenderer::Draw()
     // Sample time after acquiring every frame: a concurrent publication must
     // not make a freshly acquired frame appear to come from the future.
     const uint64_t nowUs = TickNowUs();
+    if (!state::IsSceneSnapshotFresh(snap.sceneSerial,
+        s_sceneResetSerial.load(std::memory_order_relaxed), snap.captureTimeUs, nowUs)) {
+        bombInterpolator.Reset();
+        return;
+    }
     if (hasVisibilityFrame &&
         state::ShouldApplyPlayerVisibilityFrame(
             visibilityFrame.sceneSerial,
@@ -161,6 +167,9 @@ void esp::EspRenderer::Draw()
         return;
 
     const bool usableViewMatrix = isLikelyViewMatrix(viewMatrix);
+
+    {
+    app::display::ViewportDrawScope viewportScope(*drawList, g::gameViewport);
 
     const uint64_t nominalIntervalUs = 1000000u / DATA_WORKER_HZ;
     const esp::render::SnapshotTimingResult localSnapshotTiming =
@@ -736,6 +745,7 @@ void esp::EspRenderer::Draw()
     }
 
 #include "Features/Radar/Render/radar_overlay.inl"
+    }
 #include "../Render/bomb_timer_overlay.inl"
 #include "../Render/spectator_list_overlay.inl"
 

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "app/Core/memory_address.h"
+#include "Features/ESP/weapon_catalog.h"
 
 #include <algorithm>
 #include <cstddef>
@@ -98,13 +99,23 @@ namespace esp::data
         }
     }
 
-    inline uint16_t CanonicalWorldItemId(uint16_t rawItemId, WorldEntityClass entityClass) noexcept
+    inline bool IsDroppedWorldItem(uint16_t itemId, WorldEntityClass entityClass) noexcept
+    {
+        return entityClass == WorldEntityClass::DroppedWeapon &&
+            esp::weapons::IsDroppedWeaponItemId(itemId);
+    }
+
+    inline uint16_t CanonicalWorldItemId(uint16_t rawItemId, WorldEntityClass entityClass,
+        uint16_t designerItemId = 0) noexcept
     {
         // Inferno/projectiles are not C_EconEntity. Bytes at an item-definition
         // offset can be fire positions or other unrelated payload.
         const uint16_t utilityId = UtilityItemIdFromWorldClass(entityClass);
         if (entityClass == WorldEntityClass::MolotovProjectile && rawItemId == 48)
             return 48;
+        if (entityClass == WorldEntityClass::DroppedWeapon &&
+            esp::weapons::WeaponNameFromItemId(rawItemId) == nullptr)
+            return designerItemId;
         return utilityId != 0 ? utilityId : rawItemId;
     }
 
@@ -140,7 +151,7 @@ namespace esp::data
         if (wantsDroppedItems && isDroppedItem &&
             entityClass == WorldEntityClass::DroppedWeapon)
             return true;
-        return wantsUtility &&
+        return wantsUtility && entityClass != WorldEntityClass::DroppedWeapon &&
                (isUtilityItem ||
                 IsWorldUtilityClass(entityClass) ||
                 knownUtilitySubclass ||

@@ -6,6 +6,13 @@ namespace esp::state
 {
     inline constexpr int kSnapshotRingSlotCount = 8;
 
+    inline bool IsSceneSnapshotFresh(uint64_t snapshotScene, uint64_t currentScene,
+        uint64_t captureUs, uint64_t nowUs, uint64_t maxAgeUs = 500000u) noexcept
+    {
+        return snapshotScene == currentScene && captureUs > 0 && nowUs >= captureUs &&
+            nowUs - captureUs <= maxAgeUs;
+    }
+
     inline int NormalizeSnapshotSlotIndex(int idx, int slotCount = kSnapshotRingSlotCount)
     {
         if (slotCount <= 0)

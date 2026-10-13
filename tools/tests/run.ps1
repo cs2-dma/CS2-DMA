@@ -2,8 +2,8 @@
 param([string]$PlatformToolset = 'v145', [switch]$Sanitizer, [string]$MsBuild = 'msbuild')
 $ErrorActionPreference = 'Stop'
 $root = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..'))
-$suites = @('debug_logic','ui_smoke','target_runtime','physics_shapes','primary_keyboard','release_update','dma_runtime','config_runtime','maps','asset_runtime')
-if ($Sanitizer) { $suites = @('debug_logic','target_runtime','config_runtime','maps') }
+$suites = @('debug_logic','ui_smoke','target_runtime','physics_shapes','primary_keyboard','release_update','dma_runtime','config_runtime','maps','asset_runtime','webradar_runtime')
+if ($Sanitizer) { $suites = @('debug_logic','target_runtime','config_runtime','maps','webradar_runtime') }
 Push-Location $root
 try {
     foreach ($suite in $suites) {

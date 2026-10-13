@@ -140,6 +140,24 @@ namespace esp::data
         return !entityStrideValidated;
     }
 
+    inline uintptr_t SelectHierarchyPawnReadEntry(
+        uint32_t currentHandle,
+        uint32_t cachedHandle,
+        uintptr_t cachedEntry,
+        uintptr_t firstEntry,
+        uint32_t entityHandleMask)
+    {
+        if (!IsHierarchyEntityHandleValid(currentHandle, entityHandleMask))
+            return 0;
+        const uint32_t block = (currentHandle & entityHandleMask) >> 9;
+        if (cachedEntry != 0 &&
+            IsHierarchyEntityHandleValid(cachedHandle, entityHandleMask) &&
+            ((cachedHandle & entityHandleMask) >> 9) == block) {
+            return cachedEntry;
+        }
+        return block == 0 ? firstEntry : 0;
+    }
+
     inline ControllerBacklinkState EvaluateControllerBacklink(
         int zeroBasedControllerSlot,
         uint32_t pawnControllerHandle,

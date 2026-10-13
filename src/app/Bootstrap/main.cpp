@@ -9,6 +9,7 @@
 #include "app/Bootstrap/crash_handler.h"
 #include "app/Bootstrap/runtime_console.h"
 #include "app/Bootstrap/startup_offsets.h"
+#include "app/Bootstrap/startup_process.h"
 #include "app/Bootstrap/startup_update.h"
 #include "app/Bootstrap/version_update.h"
 #include "app/Config/config.h"
@@ -28,10 +29,12 @@
 
 #include <atomic>
 #include <chrono>
+#include <condition_variable>
 #include <conio.h>
 #include <cstring>
 #include <format>
 #include <iostream>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <thread>
@@ -182,7 +185,8 @@ namespace
     void PrintCommunityLinks(const bootstrap::RuntimeConsole& console)
     {
         console.PrintInfoLine(app::build_info::VersionTag() + " | " +
-            app::localization::Get("Menu: P | Screen F2 | Telegram: @ne_sravnim | Discord: Corakevq"));
+            app::localization::Get("Menu: P | Screen F2"));
+        console.PrintInfoLine("Telegram: @ne_sravnim | Discord: Corakevq");
     }
 
     std::optional<std::string> ReadStartupReply()
@@ -252,12 +256,16 @@ namespace
         const DmaLogLevel savedLogLevel = DmaGetLogLevel();
         DmaSetLogLevel(DmaLogLevel::Silent);
 
-        std::jthread animator([&console, &label, &text](const std::stop_token& stopToken) noexcept {
+        std::mutex animationMutex;
+        std::condition_variable_any animationWake;
+        std::jthread animator([&](const std::stop_token& stopToken) noexcept {
             try {
                 int phase = 0;
                 while (!stopToken.stop_requested()) {
                     console.PrintPending(label, text, phase++);
-                    std::this_thread::sleep_for(std::chrono::milliseconds(90));
+                    std::unique_lock waitLock(animationMutex);
+                    animationWake.wait_for(waitLock, stopToken,
+                        std::chrono::milliseconds(90), [] { return false; });
                 }
             } catch (...) {
                 app::diagnostics::WriteFallbackError(
@@ -415,10 +423,6 @@ int RunApplication(int argc, char* argv[])
     }
     console.PrintInfoOk("DMA subsystem initialized");
 
-    // Resolve the target keyboard before latency-sensitive workers start.
-    // Failure is non-fatal and is retried after a DMA session rebuild.
-    (void)app::input::InitializePrimaryKeyboard();
-
     if (!esp::ApplyDmaRuntimeCacheProfile(esp::DmaCacheMode::ProcessDiscovery, true))
         console.PrintLine("DMA", "Cache profile could not be verified; default refresh timing remains active.");
 
@@ -432,6 +436,8 @@ int RunApplication(int argc, char* argv[])
         std::atomic<bool> csCanceled{false};
 
         console.PrintInfoPending("Waiting for cs2.exe", 0);
+        std::mutex animationMutex;
+        std::condition_variable_any animationWake;
         std::jthread animator([&](const std::stop_token& stopToken) noexcept {
             try {
                 int phase = 1;
@@ -439,7 +445,9 @@ int RunApplication(int argc, char* argv[])
                        !csReady.load(std::memory_order_acquire) &&
                        !csCanceled.load(std::memory_order_acquire)) {
                     console.PrintInfoPending("Waiting for cs2.exe", phase++);
-                    std::this_thread::sleep_for(std::chrono::milliseconds(90));
+                    std::unique_lock waitLock(animationMutex);
+                    animationWake.wait_for(waitLock, stopToken,
+                        std::chrono::milliseconds(90), [] { return false; });
                 }
             } catch (...) {
                 app::diagnostics::WriteFallbackError(
@@ -450,16 +458,6 @@ int RunApplication(int argc, char* argv[])
         
         
         using Clock = std::chrono::steady_clock;
-        constexpr auto kProcessPollInterval = std::chrono::milliseconds(100);
-        constexpr auto kProcessCatalogRefreshInterval =
-            std::chrono::milliseconds(250);
-        constexpr uint32_t kProcessCatalogFullRefreshMisses = 4u;
-        constexpr uint32_t kProcessCatalogReinitializeMisses = 12u;
-        constexpr auto kAttachRetryInterval = std::chrono::milliseconds(750);
-        constexpr auto kModuleResolveInterval = std::chrono::milliseconds(100);
-        constexpr auto kModuleFullRefreshDelay = std::chrono::milliseconds(750);
-        constexpr auto kModuleReattachDelay = std::chrono::seconds(8);
-        constexpr auto kDmaReinitializeCooldown = std::chrono::seconds(10);
 
         esp::recovery::ProcessIdentityTracker processTracker = {};
         DWORD selectedPid = 0;
@@ -468,12 +466,7 @@ int RunApplication(int argc, char* argv[])
         bool moduleFullRefreshIssued = false;
         uint32_t catalogRefreshFailures = 0;
         uint32_t catalogDiscoveryMisses = 0;
-        auto nextProcessPoll = Clock::time_point{};
-        auto nextProcessCatalogRefresh = Clock::time_point{};
-        auto nextAttachAttempt = Clock::time_point{};
-        auto nextModuleResolve = Clock::time_point{};
-        auto attachedAt = Clock::time_point{};
-        auto lastDmaReinitialize = Clock::time_point{};
+        bootstrap::ProcessWaitSchedule schedule;
 
         while (true) {
             if (GetAsyncKeyState(VK_END) & 1) {
@@ -489,17 +482,18 @@ int RunApplication(int argc, char* argv[])
             
             
             
-            const auto now = Clock::now();
+            auto now = Clock::now();
             try {
                 bool moduleResolveTimedOut = false;
-                if (now >= nextProcessPoll) {
+                bool catalogUnavailable = false;
+                if (schedule.PollDue(now)) {
                     bool catalogRefreshAttempted = false;
                     bool catalogRefreshed = false;
                     // Startup has no latency-sensitive render/data workers yet.
                     // Keep the remote process catalog current until both target
                     // modules are validated; otherwise a successful-but-stale
                     // lookup can pin the wait loop to an obsolete PID forever.
-                    if (now >= nextProcessCatalogRefresh) {
+                    if (now >= schedule.nextProcessCatalogRefresh) {
                         catalogRefreshAttempted = true;
                         catalogRefreshed = mem.vHandle &&
                             VMMDLL_ConfigSet(
@@ -509,23 +503,23 @@ int RunApplication(int argc, char* argv[])
                         catalogRefreshFailures =
                             catalogRefreshed
                                 ? 0u
-                                : catalogRefreshFailures + 1u;
+                                : (std::min)(catalogRefreshFailures + 1u,
+                                    bootstrap::kProcessCatalogFailureLimit);
                         if (!catalogRefreshed)
                             selectedPidObservedStable = false;
-                        nextProcessCatalogRefresh =
-                            now + kProcessCatalogRefreshInterval;
+                        schedule.nextProcessCatalogRefresh =
+                            Clock::now() + bootstrap::kProcessCatalogRefreshInterval;
                     }
 
                     DWORD observedPid =
                         mem.vHandle ? mem.GetPidFromName("cs2.exe") : 0;
                     if (observedPid != 0) {
                         catalogDiscoveryMisses = 0;
-                        catalogRefreshFailures = 0;
                     } else if (catalogRefreshAttempted) {
                         ++catalogDiscoveryMisses;
                         if (catalogRefreshed &&
                             catalogDiscoveryMisses %
-                                kProcessCatalogFullRefreshMisses == 0u) {
+                                bootstrap::kProcessCatalogFullRefreshMisses == 0u) {
                             VMMDLL_ConfigSet(
                                 mem.vHandle,
                                 VMMDLL_OPT_REFRESH_ALL,
@@ -533,10 +527,17 @@ int RunApplication(int argc, char* argv[])
                             observedPid = mem.GetPidFromName("cs2.exe");
                             if (observedPid != 0) {
                                 catalogDiscoveryMisses = 0;
-                                catalogRefreshFailures = 0;
                             }
                         }
                     }
+                    if (catalogRefreshAttempted &&
+                        catalogDiscoveryMisses >= bootstrap::kProcessCatalogHealthProbeMisses) {
+                        size_t processCount = 0;
+                        catalogUnavailable = !mem.vHandle ||
+                            !VMMDLL_PidList(mem.vHandle, nullptr, &processCount) || processCount == 0;
+                        catalogDiscoveryMisses = 0;
+                    }
+                    now = Clock::now();
                     const uint64_t nowUs = static_cast<uint64_t>(
                         std::chrono::duration_cast<std::chrono::microseconds>(
                             now.time_since_epoch()).count());
@@ -576,34 +577,36 @@ int RunApplication(int argc, char* argv[])
                         processAttached = false;
                         selectedPidObservedStable = true;
                         moduleFullRefreshIssued = false;
-                        nextAttachAttempt = now;
+                        schedule.nextAttachAttempt = now;
                     }
 
-                    nextProcessPoll = now + kProcessPollInterval;
+                    schedule.nextProcessPoll = now + bootstrap::kProcessPollInterval;
                 }
 
                 if (selectedPid != 0 &&
                     !processAttached &&
-                    now >= nextAttachAttempt) {
+                    now >= schedule.nextAttachAttempt) {
                     mem.ResetProcessState();
                     if (mem.vHandle &&
                         mem.AttachToProcessId("cs2.exe", selectedPid, true)) {
                         processAttached = true;
-                        attachedAt = now;
-                        nextModuleResolve = now;
+                        now = Clock::now();
+                        schedule.attachedAt = now;
+                        schedule.nextModuleResolve = now;
                         moduleFullRefreshIssued = false;
                         esp::SetAttachedCs2ProcessId(selectedPid);
                     } else {
-                        nextAttachAttempt = now + kAttachRetryInterval;
+                        now = Clock::now();
+                        schedule.nextAttachAttempt = now + bootstrap::kAttachRetryInterval;
                     }
                 }
 
-                if (processAttached && now >= nextModuleResolve) {
+                if (processAttached && now >= schedule.nextModuleResolve) {
                     g::clientBase = mem.GetModuleBase("client.dll");
                     g::engine2Base = mem.GetModuleBase("engine2.dll");
                     uint16_t clientMz = 0;
                     uint16_t engine2Mz = 0;
-                    const bool modulesReady =
+                    bool modulesReady =
                         selectedPidObservedStable &&
                         g::clientBase &&
                         g::engine2Base &&
@@ -614,36 +617,43 @@ int RunApplication(int argc, char* argv[])
                             &engine2Mz,
                             sizeof(engine2Mz)) &&
                         engine2Mz == 0x5A4D;
+                    now = Clock::now();
+                    if (modulesReady && now >= schedule.nextProcessPoll) {
+                        const bool catalogRefreshed = mem.vHandle &&
+                            VMMDLL_ConfigSet(mem.vHandle, VMMDLL_OPT_REFRESH_FREQ_MEDIUM, 1);
+                        catalogRefreshFailures = catalogRefreshed ? 0u :
+                            (std::min)(catalogRefreshFailures + 1u, bootstrap::kProcessCatalogFailureLimit);
+                        modulesReady = catalogRefreshed && mem.GetPidFromName("cs2.exe") == selectedPid;
+                        selectedPidObservedStable = modulesReady;
+                        now = Clock::now();
+                        schedule.nextProcessPoll = now + bootstrap::kProcessPollInterval;
+                        schedule.nextProcessCatalogRefresh = now + bootstrap::kProcessCatalogRefreshInterval;
+                    }
                     if (modulesReady)
                         break;
 
                     g::clientBase = 0;
                     g::engine2Base = 0;
-                    const auto moduleWaitAge = now - attachedAt;
+                    const auto moduleWaitAge = now - schedule.attachedAt;
                     if (!moduleFullRefreshIssued &&
-                        moduleWaitAge >= kModuleFullRefreshDelay) {
+                        moduleWaitAge >= bootstrap::kModuleFullRefreshDelay) {
                         VMMDLL_ConfigSet(mem.vHandle, VMMDLL_OPT_REFRESH_ALL, 1);
                         moduleFullRefreshIssued = true;
                     }
-                    if (moduleWaitAge >= kModuleReattachDelay) {
+                    if (moduleWaitAge >= bootstrap::kModuleReattachDelay) {
                         mem.ResetProcessState();
                         processAttached = false;
                         esp::SetAttachedCs2ProcessId(0);
-                        nextAttachAttempt = now + kAttachRetryInterval;
+                        schedule.nextAttachAttempt = now + bootstrap::kAttachRetryInterval;
                         moduleResolveTimedOut = true;
                     }
-                    nextModuleResolve = now + kModuleResolveInterval;
+                    schedule.nextModuleResolve = Clock::now() + bootstrap::kModuleResolveInterval;
                 }
 
-                const bool processDiscoveryExhausted =
-                    !processAttached &&
-                    selectedPid == 0 &&
-                    (catalogRefreshFailures >= 8u ||
-                     catalogDiscoveryMisses >=
-                         kProcessCatalogReinitializeMisses);
-                if ((processDiscoveryExhausted || moduleResolveTimedOut) &&
-                    (lastDmaReinitialize == Clock::time_point{} ||
-                     now - lastDmaReinitialize >= kDmaReinitializeCooldown)) {
+                now = Clock::now();
+                if (bootstrap::ShouldReinitializeProcessDiscovery(mem.vHandle != nullptr,
+                        processAttached, selectedPid, catalogRefreshFailures,
+                        catalogUnavailable, moduleResolveTimedOut) && schedule.CanReinitialize(now)) {
                     mem.CloseDma();
                     if (!mem.InitDma(true, false)) {
                         mem.CloseDma();
@@ -662,8 +672,8 @@ int RunApplication(int argc, char* argv[])
                     esp::recovery::ResetProcessIdentityCandidate(processTracker);
                     catalogRefreshFailures = 0;
                     catalogDiscoveryMisses = 0;
-                    nextProcessCatalogRefresh = Clock::time_point{};
-                    lastDmaReinitialize = now;
+                    schedule = {};
+                    schedule.lastDmaReinitialize = Clock::now();
                 }
             } catch (...) {
                 g::clientBase = 0;
@@ -672,10 +682,13 @@ int RunApplication(int argc, char* argv[])
                 processAttached = false;
                 selectedPidObservedStable = false;
                 esp::SetAttachedCs2ProcessId(0);
-                nextAttachAttempt = now + kAttachRetryInterval;
+                schedule.nextAttachAttempt = Clock::now() + bootstrap::kAttachRetryInterval;
+                schedule.nextProcessPoll = Clock::now() + bootstrap::kProcessPollInterval;
+                schedule.nextProcessCatalogRefresh = schedule.nextProcessPoll;
             }
 
-            std::this_thread::sleep_for(kProcessPollInterval);
+            std::this_thread::sleep_until(schedule.NextWake(
+                Clock::now(), processAttached, selectedPid != 0));
         }
 
         esp::ApplyDmaRuntimeCacheProfile(esp::DmaCacheMode::Live, true);
@@ -684,9 +697,6 @@ int RunApplication(int argc, char* argv[])
         if (animator.joinable()) animator.join();
         DmaSetLogLevel(attachWaitLogLevel);
     }
-
-    if (!app::input::GetPrimaryKeyboardStatus().ready)
-        (void)app::input::InitializePrimaryKeyboard();
 
     console.PrintInfoOk("Waiting for cs2.exe");
     console.PrintBlankLine();
@@ -907,6 +917,9 @@ int RunApplication(int argc, char* argv[])
     console.PrintBlankLine();
 
     std::string overlayError;
+    if (!app::input::GetPrimaryKeyboardStatus().ready)
+        (void)app::input::InitializePrimaryKeyboard();
+
     if (!overlay::Create(g::screenWidth, g::screenHeight, &overlayError)) {
         console.PrintErrorLine("D3D11 overlay creation failed:");
         if (!overlayError.empty()) {

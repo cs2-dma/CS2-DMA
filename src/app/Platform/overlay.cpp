@@ -6,6 +6,7 @@
 #include "app/Localization/localization.h"
 #include "app/Input/input_device.h"
 #include "app/Platform/win_handle.h"
+#include "app/Platform/graphics_recovery.h"
 #include "Features/ESP/esp.h"
 #include "Features/ESP/Render/weapon_icon_atlas.h"
 #include "Features/ESP/Render/bar_labels.h"
@@ -66,6 +67,20 @@ static std::atomic<uint64_t>   s_overlaySyncUs = 0;
 static std::atomic<uint64_t>   s_overlayDrawUs = 0;
 static std::atomic<uint64_t>   s_overlayPresentUs = 0;
 static std::atomic<uint64_t>   s_overlayPacingWaitUs = 0;
+static std::atomic<uint64_t>   s_graphicsRecoveries = 0;
+static std::atomic<int32_t>    s_graphicsLastError = 0;
+static app::platform::GraphicsRecovery s_graphicsRecovery;
+
+static void GraphicsFailed(HRESULT error)
+{
+    if (s_device) {
+        const HRESULT removedReason = s_device->GetDeviceRemovedReason();
+        if (FAILED(removedReason))
+            error = removedReason;
+    }
+    s_graphicsLastError.store(static_cast<int32_t>(error), std::memory_order_relaxed);
+    s_graphicsRecovery.Request();
+}
 
 class OverlayDeadlineTimer
 {
@@ -137,22 +152,36 @@ static bool RecreateRenderTarget(UINT width, UINT height)
         (s_waitableSwapChainEnabled ? DXGI_SWAP_CHAIN_FLAG_FRAME_LATENCY_WAITABLE_OBJECT : 0u);
     const HRESULT resizeResult =
         s_swapChain->ResizeBuffers(0, width, height, DXGI_FORMAT_UNKNOWN, flags);
-    if (FAILED(resizeResult))
+    if (FAILED(resizeResult)) {
+        GraphicsFailed(resizeResult);
         return false;
+    }
 
     ComPtr<ID3D11Texture2D> backBuffer;
-    if (FAILED(s_swapChain->GetBuffer(0, IID_PPV_ARGS(&backBuffer))) || !backBuffer)
+    const HRESULT bufferResult = s_swapChain->GetBuffer(0, IID_PPV_ARGS(&backBuffer));
+    if (FAILED(bufferResult) || !backBuffer) {
+        GraphicsFailed(FAILED(bufferResult) ? bufferResult : E_FAIL);
         return false;
+    }
 
     const HRESULT viewResult =
         s_device->CreateRenderTargetView(backBuffer.Get(), nullptr, &s_rtv);
-    return SUCCEEDED(viewResult) && s_rtv;
+    if (FAILED(viewResult) || !s_rtv) {
+        GraphicsFailed(FAILED(viewResult) ? viewResult : E_FAIL);
+        return false;
+    }
+    return true;
 }
 
 static void ApplyOverlayWindowMode(bool show)
 {
-    if (!s_hwnd || !s_swapChain)
+    if (!s_hwnd)
         return;
+    s_overlayVisible = show;
+    if (!s_swapChain) {
+        ShowWindow(s_hwnd, show ? SW_SHOWNA : SW_HIDE);
+        return;
+    }
 
     if (show) {
         ShowWindow(s_hwnd, SW_SHOW);
@@ -172,8 +201,11 @@ static void ApplyOverlayWindowMode(bool show)
         s_rtv.Reset();
         s_context->OMSetRenderTargets(0, nullptr, nullptr);
         ComPtr<ID3D11Texture2D> backBuffer;
-        if (SUCCEEDED(s_swapChain->GetBuffer(0, IID_PPV_ARGS(&backBuffer))))
-            s_device->CreateRenderTargetView(backBuffer.Get(), nullptr, &s_rtv);
+        HRESULT result = s_swapChain->GetBuffer(0, IID_PPV_ARGS(&backBuffer));
+        if (SUCCEEDED(result) && backBuffer)
+            result = s_device->CreateRenderTargetView(backBuffer.Get(), nullptr, &s_rtv);
+        if (FAILED(result) || !s_rtv)
+            GraphicsFailed(FAILED(result) ? result : E_FAIL);
     } else {
         ComPtr<IDXGISwapChain> baseSwapChain;
         if (SUCCEEDED(s_swapChain.As(&baseSwapChain)))
@@ -555,6 +587,165 @@ static LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lPara
     return DefWindowProcW(hWnd, msg, wParam, lParam);
 }
 
+static void ReleaseGraphics()
+{
+    if (s_imguiDx11Initialized) {
+        ImGui_ImplDX11_Shutdown();
+        s_imguiDx11Initialized = false;
+    }
+    esp::render::weapon_icons::Shutdown();
+    s_frameLatencyWaitableObject.Reset();
+    s_waitableSwapChainEnabled = false;
+    if (s_context)
+        s_context->ClearState();
+    if (s_swapChain)
+        s_swapChain->SetFullscreenState(FALSE, nullptr);
+    s_rtv.Reset();
+    s_swapChain2.Reset();
+    s_swapChain.Reset();
+    if (s_context)
+        s_context->Flush();
+    s_context.Reset();
+    s_device.Reset();
+}
+
+static bool CreateGraphics(int width, int height, std::string* outErrorMessage)
+{
+    s_tearingSupported = CheckTearingSupport();
+
+    D3D_FEATURE_LEVEL featureLevel;
+    HRESULT hr = D3D11CreateDevice(
+        nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr, 0,
+        nullptr, 0, D3D11_SDK_VERSION,
+        &s_device, &featureLevel, &s_context);
+    if (FAILED(hr)) {
+        s_device.Reset();
+        s_context.Reset();
+        hr = D3D11CreateDevice(
+            nullptr, D3D_DRIVER_TYPE_WARP, nullptr, 0,
+            nullptr, 0, D3D11_SDK_VERSION,
+            &s_device, &featureLevel, &s_context);
+    }
+    if (FAILED(hr)) {
+        if (outErrorMessage)
+            *outErrorMessage = "Failed to initialize DirectX 11 device. Install current NVIDIA, AMD, or Intel graphics drivers and verify DirectX 11 support.";
+        GraphicsFailed(hr);
+        return false;
+    }
+
+    esp::render::weapon_icons::Initialize(s_device.Get());
+
+    ComPtr<IDXGIDevice> dxgiDevice;
+    ComPtr<IDXGIAdapter> dxgiAdapter;
+    ComPtr<IDXGIFactory2> dxgiFactory;
+
+    hr = s_device.As(&dxgiDevice);
+    if (FAILED(hr)) {
+        if (outErrorMessage) *outErrorMessage = "Failed to query DXGI device interface from D3D11 device.";
+        GraphicsFailed(hr);
+        return false;
+    }
+
+    hr = dxgiDevice->GetAdapter(&dxgiAdapter);
+    if (FAILED(hr)) {
+        if (outErrorMessage) *outErrorMessage = "Failed to retrieve DXGI adapter.";
+        GraphicsFailed(hr);
+        return false;
+    }
+
+    hr = dxgiAdapter->GetParent(IID_PPV_ARGS(&dxgiFactory));
+    if (FAILED(hr)) {
+        if (outErrorMessage) *outErrorMessage = "Failed to retrieve DXGI factory.";
+        GraphicsFailed(hr);
+        return false;
+    }
+
+    DXGI_SWAP_CHAIN_DESC1 sd1 = {};
+    sd1.Width       = width;
+    sd1.Height      = height;
+    sd1.Format      = DXGI_FORMAT_R8G8B8A8_UNORM;
+    sd1.SampleDesc  = { 1, 0 };
+    sd1.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
+    sd1.BufferCount = 2;
+    sd1.SwapEffect  = DXGI_SWAP_EFFECT_FLIP_DISCARD;
+    UINT swapChainFlags =
+        (s_tearingSupported ? DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING : 0u) |
+        DXGI_SWAP_CHAIN_FLAG_FRAME_LATENCY_WAITABLE_OBJECT;
+    sd1.Flags = swapChainFlags;
+    hr = dxgiFactory->CreateSwapChainForHwnd(s_device.Get(), s_hwnd, &sd1, nullptr, nullptr, &s_swapChain);
+    if (FAILED(hr)) {
+        swapChainFlags &= ~DXGI_SWAP_CHAIN_FLAG_FRAME_LATENCY_WAITABLE_OBJECT;
+        sd1.Flags = swapChainFlags;
+        hr = dxgiFactory->CreateSwapChainForHwnd(s_device.Get(), s_hwnd, &sd1, nullptr, nullptr, &s_swapChain);
+    }
+    if (FAILED(hr)) {
+        if (outErrorMessage) *outErrorMessage = "Failed to create DXGI swap chain.";
+        GraphicsFailed(hr);
+        return false;
+    }
+
+    if (dxgiFactory) {
+        dxgiFactory->MakeWindowAssociation(s_hwnd, DXGI_MWA_NO_ALT_ENTER);
+    }
+
+    s_swapChain2.Reset();
+    s_waitableSwapChainEnabled = false;
+    s_frameLatencyWaitableObject.Reset();
+    if ((swapChainFlags & DXGI_SWAP_CHAIN_FLAG_FRAME_LATENCY_WAITABLE_OBJECT) != 0u &&
+        SUCCEEDED(s_swapChain.As(&s_swapChain2)) &&
+        s_swapChain2 &&
+        SUCCEEDED(s_swapChain2->SetMaximumFrameLatency(1))) {
+        s_frameLatencyWaitableObject.Reset(s_swapChain2->GetFrameLatencyWaitableObject());
+        s_waitableSwapChainEnabled = static_cast<bool>(s_frameLatencyWaitableObject);
+        if (!s_waitableSwapChainEnabled)
+            s_swapChain2.Reset();
+    }
+
+    ComPtr<ID3D11Texture2D> backBuffer;
+    hr = s_swapChain->GetBuffer(0, IID_PPV_ARGS(&backBuffer));
+    if (FAILED(hr) || !backBuffer) {
+        if (outErrorMessage) *outErrorMessage = "Failed to retrieve back buffer from swap chain.";
+        GraphicsFailed(hr);
+        return false;
+    }
+
+    hr = s_device->CreateRenderTargetView(backBuffer.Get(), nullptr, &s_rtv);
+    if (FAILED(hr)) {
+        if (outErrorMessage) *outErrorMessage = "Failed to create render target view.";
+        GraphicsFailed(hr);
+        return false;
+    }
+    return true;
+}
+
+static bool RecoverGraphics()
+{
+    if (!s_graphicsRecovery.Pending())
+        return true;
+    const uint64_t nowMs = GetTickCount64();
+    if (!s_graphicsRecovery.Ready(nowMs))
+        return false;
+    ReleaseGraphics();
+    const auto bounds = ResolveOverlayTargetBounds();
+    if (bounds.width <= 0 || bounds.height <= 0 ||
+        !CreateGraphics(bounds.width, bounds.height, nullptr)) {
+        ReleaseGraphics();
+        s_graphicsRecovery.Failed(GetTickCount64());
+        return false;
+    }
+    if (!ImGui_ImplDX11_Init(s_device.Get(), s_context.Get())) {
+        GraphicsFailed(E_FAIL);
+        ReleaseGraphics();
+        s_graphicsRecovery.Failed(GetTickCount64());
+        return false;
+    }
+    s_imguiDx11Initialized = true;
+    s_graphicsRecovery.Recovered();
+    s_graphicsRecoveries.fetch_add(1, std::memory_order_relaxed);
+    ApplyOverlayWindowMode(s_overlayVisible);
+    return true;
+}
+
 bool overlay::Create(int width, int height, std::string* outErrorMessage)
 {
     #include "overlay_parts/overlay_create_body.inl"
@@ -574,17 +765,14 @@ overlay::PerfStats overlay::GetPerfStats()
     stats.drawUs = s_overlayDrawUs.load(std::memory_order_relaxed);
     stats.presentUs = s_overlayPresentUs.load(std::memory_order_relaxed);
     stats.pacingWaitUs = s_overlayPacingWaitUs.load(std::memory_order_relaxed);
+    stats.graphicsRecoveries = s_graphicsRecoveries.load(std::memory_order_relaxed);
+    stats.graphicsLastError = s_graphicsLastError.load(std::memory_order_relaxed);
     return stats;
 }
 
 void overlay::Destroy()
 {
-    esp::render::weapon_icons::Shutdown();
-
-    if (s_imguiDx11Initialized) {
-        ImGui_ImplDX11_Shutdown();
-        s_imguiDx11Initialized = false;
-    }
+    ReleaseGraphics();
     if (s_imguiWin32Initialized) {
         ImGui_ImplWin32_Shutdown();
         s_imguiWin32Initialized = false;
@@ -594,20 +782,7 @@ void overlay::Destroy()
         s_imguiContextCreated = false;
     }
 
-    s_frameLatencyWaitableObject.Reset();
-    s_waitableSwapChainEnabled = false;
-
-    if (s_swapChain) {
-        ComPtr<IDXGISwapChain> baseSwapChain;
-        if (SUCCEEDED(s_swapChain.As(&baseSwapChain)))
-            baseSwapChain->SetFullscreenState(FALSE, nullptr);
-    }
-
-    s_rtv.Reset();
-    s_swapChain.Reset();
-    s_swapChain2.Reset();
-    s_context.Reset();
-    s_device.Reset();
+    s_graphicsRecovery.Recovered();
 
     if (s_hwnd) {
         DestroyWindow(s_hwnd);

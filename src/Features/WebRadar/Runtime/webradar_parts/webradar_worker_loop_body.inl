@@ -1,15 +1,17 @@
     std::string stickyMapName;
     uint64_t stickyMapStampMs = 0;
     uint64_t frameSeq = 0;
+    static std::atomic<uint64_t> streamGeneration{0};
+    const std::string streamSession = std::to_string(GetCurrentProcessId()) + "-" +
+        std::to_string(UnixNowMs()) + "-" + std::to_string(++streamGeneration);
     int nextWaitMs = cfg::kMinRealtimeIntervalMs;
     uint64_t lastBroadcastPayloadVersion = 0;
     uint64_t lastPublishedSnapshotVersion = 0;
     uint64_t lastSeenSettingsVersion = 0;
+    bool lastPublishedSnapshotExpired = false;
     std::string lastPublishedLanguageCode;
     uint64_t lastPublishMs = 0;
     uint64_t earliestPublishMs = 0;
-    uint64_t lastEntityPayloadMs = 0;
-    std::string lastEntityPayloadMap;
     std::string dynamicOverviewMap;
     nlohmann::json cachedDynamicOverview;
     constexpr uint32_t kPlayerFlagDead = 1u << 0;
@@ -108,19 +110,21 @@
     while (running_.load(std::memory_order_relaxed)) {
         SettingsSnapshot settings = {};
         static thread_local esp::WebRadarSnapshot snapshot;
+        static const esp::WebRadarSnapshot emptySnapshot;
         bool hasSnapshot = false;
+        bool snapshotExpired = false;
         uint64_t snapshotVersion = 0;
         uint64_t settingsVersion = 0;
         uint64_t legacyDemandUntilMs = 0;
 
         {
             std::unique_lock<std::mutex> lock(mutex_);
-            const uint64_t waitNowMs = UnixNowMs();
+            const uint64_t waitNowMs = MonotonicNowMs();
             const bool publishThrottleActive = earliestPublishMs > waitNowMs;
             const int waitMs = publishThrottleActive
                 ? std::clamp(static_cast<int>(earliestPublishMs - waitNowMs), 1, cfg::kMaxRealtimeIntervalMs)
                 : std::clamp(nextWaitMs, 1, cfg::kMaxRealtimeIntervalMs);
-            cv_.wait_for(lock, std::chrono::milliseconds(waitMs), [this, lastSeenSettingsVersion, lastPublishedSnapshotVersion, publishThrottleActive] {
+            cv_.wait_for(lock, std::chrono::milliseconds(std::min(waitMs, 250)), [this, lastSeenSettingsVersion, lastPublishedSnapshotVersion, publishThrottleActive] {
                 return !running_.load(std::memory_order_relaxed) ||
                     settingsVersion_ != lastSeenSettingsVersion ||
                     (!publishThrottleActive && hasSnapshot_ && snapshotVersion_ != lastPublishedSnapshotVersion);
@@ -139,6 +143,16 @@
                 snapshot = latestSnapshot_;
                 snapshotVersion = snapshotVersion_;
                 hasSnapshot = true;
+                const uint64_t receivedNowMs = MonotonicNowMs();
+                snapshotExpired = !runtime::IsSnapshotReceiptFresh(snapshotReceivedMs_, receivedNowMs);
+                if (snapshotExpired) {
+                    const uint64_t elapsedMs = receivedNowMs >= snapshotReceivedMs_
+                        ? receivedNowMs - snapshotReceivedMs_ : 0;
+                    const uint64_t captureMs = snapshot.captureTickMs + elapsedMs;
+                    snapshot = emptySnapshot;
+                    snapshot.localPos = {NAN, NAN, NAN};
+                    snapshot.captureTickMs = captureMs;
+                }
             }
         }
         const bool settingsChanged = settingsVersion != lastSeenSettingsVersion;
@@ -146,9 +160,11 @@
         const std::string languageCode =
             app::localization::LanguageCode(app::localization::GetLanguage());
         const bool languageChanged = languageCode != lastPublishedLanguageCode;
-        const bool publicationStateChanged = settingsChanged || languageChanged;
+        const bool publicationStateChanged = settingsChanged || languageChanged ||
+            snapshotExpired != lastPublishedSnapshotExpired;
 
-        const uint64_t nowMs = UnixNowMs();
+        const uint64_t nowMs = MonotonicNowMs();
+        const uint64_t unixNowMs = UnixNowMs();
         nextWaitMs = std::clamp(settings.intervalMs, cfg::kMinRealtimeIntervalMs, cfg::kMaxRealtimeIntervalMs);
         const bool publishEnabled = settings.enabled || remote::HasActiveConsumerDemand();
 
@@ -227,22 +243,13 @@
         }
 
         if (!hasSnapshot) {
-            const bool holdRecentLivePayload =
-                lastEntityPayloadMs > 0 &&
-                nowMs >= lastEntityPayloadMs &&
-                (nowMs - lastEntityPayloadMs) <= 3500 &&
-                (mapName == "unknown" || mapName == lastEntityPayloadMap);
-            if (!publicationStateChanged && holdRecentLivePayload) {
-                nextWaitMs = cfg::kMinRealtimeIntervalMs;
-                continue;
-            }
             const uint64_t elapsedSincePublish = lastPublishMs > 0 && nowMs >= lastPublishMs ? (nowMs - lastPublishMs) : 0;
             if (!publicationStateChanged && lastPublishMs > 0 && elapsedSincePublish < cfg::kFallbackPublishIntervalMs) {
                 nextWaitMs = cfg::kMinRealtimeIntervalMs;
                 continue;
             }
-            const std::string payloadJson = hasLegacyConsumers ? BuildFallbackLiveJson(mapName, nowMs) : std::string();
-            const std::string payloadJsonV2 = BuildFallbackLiveJsonV2(mapName, nowMs);
+            const std::string payloadJson = hasLegacyConsumers ? BuildFallbackLiveJson(mapName, unixNowMs) : std::string();
+            const std::string payloadJsonV2 = BuildFallbackLiveJsonV2(mapName, unixNowMs);
             const size_t legacyPayloadBytes = payloadJson.size();
             const size_t compactPayloadBytes = payloadJsonV2.size();
             const size_t payloadBytes = compactPayloadBytes;
@@ -288,7 +295,7 @@
         const auto serializeStart = std::chrono::steady_clock::now();
         const bool buildLegacyPayload = hasLegacyConsumers;
         nlohmann::json live;
-        const uint64_t captureTimeMs = snapshot.captureTickMs > 0 ? snapshot.captureTickMs : nowMs;
+        const uint64_t captureTimeMs = snapshot.captureTickMs > 0 ? snapshot.captureTickMs : unixNowMs;
         nlohmann::json dynamicOverview;
         if (dynamicOverviewMap != mapName || !snapshotHasLiveEntities) {
             dynamicOverviewMap = mapName;
@@ -331,6 +338,7 @@
         if (buildLegacyPayload) {
             const double serverTimeMs = static_cast<double>(captureTimeMs);
             live["m_seq"] = frameSeq;
+            live["m_session"] = streamSession;
             live["m_ts"] = captureTimeMs;
             live["m_server_time"] = serverTimeMs;
             live["m_capture_time"] = captureTimeMs;
@@ -338,7 +346,7 @@
             live["m_map"] = mapName;
             if (!dynamicOverview.is_null()) live["m_overview"] = dynamicOverview;
             live["m_local_team"] = snapshot.localTeam;
-            live["m_updated_at"] = nowMs;
+            live["m_updated_at"] = unixNowMs;
             live["m_players"] = nlohmann::json::array();
             live["m_bomb"] = BuildLegacyBombJson(LegacyBombJsonState {
                 .sequence = frameSeq,
@@ -620,6 +628,8 @@
         payloadJsonV2.reserve(128 + compactPlayers.size() + compactBomb.size() + compactWorld.size());
         payloadJsonV2 += "{\"v\":2,\"seq\":";
         AppendJsonInt(payloadJsonV2, frameSeq);
+        payloadJsonV2 += ",\"sid\":";
+        AppendJsonString(payloadJsonV2, streamSession);
         payloadJsonV2 += ",\"ts\":";
         AppendJsonInt(payloadJsonV2, captureTimeMs);
         payloadJsonV2 += ",\"lang\":";
@@ -662,7 +672,7 @@
                 latestPayloadJson_ = payloadJson;
             latestPayloadJsonV2_ = payloadJsonV2;
             publishedPayloadVersion = ++latestPayloadVersion_;
-            stats_.lastUpdateUnixMs = nowMs;
+            stats_.lastUpdateUnixMs = unixNowMs;
             stats_.lastPayloadRows = entityCount;
             stats_.lastPayloadBytes = payloadBytes;
             stats_.lastLegacyPayloadBytes = legacyPayloadBytes;
@@ -681,13 +691,10 @@
             ++stats_.sentPackets;
         }
         lastPublishedSnapshotVersion = snapshotVersion;
+        lastPublishedSnapshotExpired = snapshotExpired;
         lastPublishedLanguageCode = languageCode;
         lastPublishMs = nowMs;
         earliestPublishMs = nowMs + static_cast<uint64_t>(std::max(1, nextWaitMs));
-        if (entityCount > 0) {
-            lastEntityPayloadMs = nowMs;
-            lastEntityPayloadMap = mapName;
-        }
         cv_.notify_all();
         broadcastPayloadIfChanged(publishedPayloadVersion, payloadJson, payloadJsonV2);
     }

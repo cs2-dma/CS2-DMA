@@ -123,6 +123,27 @@ int main()
     CHECK(PollPrimaryKeyboard());
     CHECK(ReadPrimaryKeyState(2).available && !ReadPrimaryKeyState(2).down);
 
+    const auto attemptsBeforeStale = GetPrimaryKeyboardStatus().resolveAttempts;
+    s_publishedAtMs.store(GetTickCount64() - 300);
+    CHECK(!ReadPrimaryKeyState(2).available && !GetPrimaryKeyboardStatus().sampleFresh);
+    fixture::firstByte.store(0x10);
+    StartPrimaryKeyboardRecovery();
+    CHECK(fixture::Wait([] { return ReadPrimaryKeyState(2).available && ReadPrimaryKeyState(2).down; }));
+    CHECK(GetPrimaryKeyboardStatus().sampleFresh);
+    CHECK(GetPrimaryKeyboardStatus().resolveAttempts == attemptsBeforeStale);
+    fixture::firstByte.store(0);
+    CHECK(fixture::Wait([] { const auto key = ReadPrimaryKeyState(2); return key.available && !key.down; }));
+    StopPrimaryKeyboardRecovery();
+
+    fixture::bitmapReadable.store(false);
+    CHECK(!PollPrimaryKeyboard());
+    fixture::bitmapReadable.store(true);
+    const auto attemptsBeforeTransient = GetPrimaryKeyboardStatus().resolveAttempts;
+    StartPrimaryKeyboardRecovery();
+    CHECK(fixture::Wait([] { return ReadPrimaryKeyState(2).available; }));
+    StopPrimaryKeyboardRecovery();
+    CHECK(GetPrimaryKeyboardStatus().resolveAttempts == attemptsBeforeTransient);
+
     s_readFailures.store(10);
     s_failedSinceMs.store(GetTickCount64() - 501);
     const auto before = GetPrimaryKeyboardStatus().resolveAttempts;
@@ -160,5 +181,5 @@ int main()
     ResetPrimaryKeyboard();
     mem.vHandle = nullptr;
     if (fixture::failures.load() != 0) return 1;
-    std::cout << "Primary keyboard tests passed: startup recovery, read failure, re-resolution, nonblocking poll, cancellation, restart and partial-page scan.\n";
+    std::cout << "Primary keyboard tests passed: startup recovery, stale sampling, transient failure, re-resolution, nonblocking poll, cancellation, restart and partial-page scan.\n";
 }

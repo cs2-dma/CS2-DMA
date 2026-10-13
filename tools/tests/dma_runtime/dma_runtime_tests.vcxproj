@@ -39,7 +39,7 @@
   <ItemGroup><ClCompile Include="dma_runtime_tests.cpp" /></ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <Target Name="VerifyTestVendor" BeforeTargets="PrepareForBuild">
-    <Exec Command="powershell.exe -NoProfile -ExecutionPolicy Bypass -File &quot;$(ProjectDir)..\..\vendor\check_dma_vendor.ps1&quot;" />
+    <Exec Command="powershell.exe -NoProfile -ExecutionPolicy Bypass -File &quot;$(ProjectDir)..\..\dependencies\verify_dma.ps1&quot;" />
   </Target>
   <Target Name="CopyTestRuntime" AfterTargets="Build">
     <Copy SourceFiles="$(VendorRoot)runtime\win-x64\vmm.dll;$(VendorRoot)runtime\win-x64\leechcore.dll" DestinationFolder="$(OutDir)" SkipUnchangedFiles="false" />

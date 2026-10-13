@@ -14,6 +14,7 @@
 #include "Features/ESP/DataReader/player_core_policy.h"
 #include "Features/ESP/DataReader/player_flag_policy.h"
 #include "Features/ESP/DataReader/player_hierarchy_policy.h"
+#include "Features/ESP/DataReader/observer_policy.h"
 #include "Features/ESP/DataReader/population_watchdog_policy.h"
 #include "Features/ESP/DataReader/player_repair_policy.h"
 #include "Features/ESP/DataReader/player_slot_policy.h"
@@ -228,15 +229,8 @@ namespace {
         uint32_t spottedMasks[64][2] = {};
         DWORD spottedMaskBytesRead[64] = {};
         bool spottedReadFresh[64] = {};
-        uintptr_t observerServices[64] = {};
-        uint32_t observerTargets[64] = {};
-        uint32_t observerModes[64] = {};
-        uint32_t observerPawnHandles[64] = {};
-        uint32_t observerPlayerPawnHandles[64] = {};
-        uint32_t observerBasePawnHandles[64] = {};
         bool moneyServiceRefreshMask[64] = {};
         bool itemServiceRefreshMask[64] = {};
-        bool observerServiceRefreshMask[64] = {};
         SpectatorEntry resolvedSpectators[64] = {};
         int inventoryPlayerSlots[64] = {};
         bool inventoryPlayerSlotAdded[64] = {};

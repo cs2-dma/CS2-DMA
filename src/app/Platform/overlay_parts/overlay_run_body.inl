@@ -51,10 +51,16 @@
             g::menuOpen = !g::menuOpen;
         if (GetAsyncKeyState(VK_END) & 1)
             g::running = false;
+        if (!g::running)
+            break;
+        if (!RecoverGraphics()) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(16));
+            continue;
+        }
         const auto syncStart = Clock::now();
         SyncOverlayBounds();
         const auto syncEnd = Clock::now();
-        if (!s_rtv) {
+        if (s_graphicsRecovery.Pending() || !s_rtv) {
             std::this_thread::sleep_for(std::chrono::milliseconds(16));
             continue;
         }
@@ -106,6 +112,10 @@
 
         {
             std::lock_guard<std::recursive_mutex> lock(g::settingsMutex);
+            const float cameraAspect = g::displaySettings.mapping.autoAspect
+                ? esp::GetCameraAspect() : 0.0f;
+            g::gameViewport = app::display::Resolve(g::displaySettings.mapping,
+                ImGui::GetIO().DisplaySize.x, ImGui::GetIO().DisplaySize.y, cameraAspect);
             esp::Draw();
             target::DrawOverlay();
             ui::RenderMenu();
@@ -127,12 +137,17 @@
         const auto drawEnd = Clock::now();
 
         const auto presentStart = Clock::now();
+        HRESULT presentResult = S_OK;
         if (vsyncEnabled) {
-            s_swapChain->Present(1, 0);
+            presentResult = s_swapChain->Present(1, 0);
         } else {
             const UINT flags = s_tearingSupported ? DXGI_PRESENT_ALLOW_TEARING : 0u;
-            s_swapChain->Present(0, flags);
+            presentResult = s_swapChain->Present(0, flags);
         }
+        if (FAILED(presentResult))
+            GraphicsFailed(presentResult);
+        else if (presentResult == DXGI_STATUS_OCCLUDED)
+            std::this_thread::sleep_for(std::chrono::milliseconds(16));
         const auto presentEnd = Clock::now();
         const auto frameEnd = Clock::now();
         const uint64_t frameUs = static_cast<uint64_t>(

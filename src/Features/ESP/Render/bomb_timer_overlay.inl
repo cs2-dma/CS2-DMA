@@ -157,8 +157,8 @@ if (g::espBombInfo && g::espBombTime) {
         if (!g::menuOpen)
             windowFlags |= ImGuiWindowFlags_NoInputs | ImGuiWindowFlags_NoMove;
 
-        g::espBombTimerX = std::clamp(g::espBombTimerX, 0.0f, std::max(0.0f, screenW - 230.0f));
-        g::espBombTimerY = std::clamp(g::espBombTimerY, 0.0f, std::max(0.0f, screenH - 90.0f));
+        g::espBombTimerX = std::clamp(g::espBombTimerX, 0.0f, std::max(0.0f, static_cast<float>(g::screenWidth) - 230.0f));
+        g::espBombTimerY = std::clamp(g::espBombTimerY, 0.0f, std::max(0.0f, static_cast<float>(g::screenHeight) - 90.0f));
 
         if (g::configJustLoaded)
             s_bombTimerPositionApplied = false;

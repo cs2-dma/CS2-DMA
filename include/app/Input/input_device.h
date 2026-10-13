@@ -7,6 +7,20 @@
 
 namespace app::input
 {
+    enum class MoveDeliveryState : uint8_t { Unknown, Queued, Dispatching, Sent, Cancelled, Replaced, Expired, Failed };
+
+    struct MoveReceipt
+    {
+        uint64_t token = 0;
+        MoveDeliveryState state = MoveDeliveryState::Unknown;
+        uint64_t queuedAtUs = 0;
+        uint64_t dispatchAtUs = 0;
+        uint64_t sentAtUs = 0;
+        int x = 0;
+        int y = 0;
+        uint64_t sampledAtUs = 0;
+    };
+
     enum class ConnectionState : uint8_t
     {
         Disconnected,
@@ -50,6 +64,8 @@ namespace app::input
         bool physicalButtonsAvailable = false;
         PhysicalKeyboardState physicalKeyboard;
         uint64_t physicalInputUpdatedAtMs = 0;
+        uint64_t physicalInputValidatedAtMs = 0;
+        uint64_t inputMonitorPollAtMs = 0;
         uint16_t inputMonitorPort = 0;
         uint64_t inputMonitorPackets = 0;
         uint64_t inputMonitorRejectedPackets = 0;
@@ -129,6 +145,8 @@ namespace app::input
     bool RequestDisconnect();
     bool RequestMovementTest();
     bool RequestMove(int deltaX, int deltaY, uint64_t validForUs = kMaximumQueuedMoveAgeUs);
+    uint64_t RequestTrackedMove(int deltaX, int deltaY, uint64_t validForUs = kMaximumQueuedMoveAgeUs);
+    MoveReceipt GetMoveReceipt(uint64_t token);
     void CancelPendingMoves();
     bool RequestLeftButton(bool pressed);
     // Reserves one worker-owned DOWN/UP pulse. Returns false while another
@@ -139,5 +157,6 @@ namespace app::input
     KeyState ReadActivationKeyState(int virtualKey);
     bool IsActivationKeyDown(int virtualKey);
     bool IsControlKeyDown(int virtualKey);
+    ControlKeySnapshot ReadControlKeySnapshot();
     void Shutdown();
 }

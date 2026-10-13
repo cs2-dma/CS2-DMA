@@ -29,7 +29,6 @@ void ui::tabs::radar_sections::RenderCalibrationSection(IStatusSink& statusSink)
         return;
 
     ImGui::Dummy(ImVec2(0.0f, 6.0f));
-    ui::widgets::SliderFloatRow("size", "Size", &g::radarSize, 100.0f, 400.0f, "%.0f");
     ui::widgets::SliderFloatRow("dot_size", "Dot Size", &g::radarDotSize, 2.0f, 8.0f, "%.1f");
     ui::widgets::SliderFloatRow("rotation", "Map Rotation", &g::radarWorldRotationDeg, -180.0f, 180.0f, "%.1f deg");
     ui::widgets::SliderFloatRow("scale", "Map Scale", &g::radarWorldScale, 0.50f, 1.50f, "%.2fx");
@@ -81,6 +80,45 @@ void ui::tabs::radar_sections::RenderDisplaySection()
                 &g::radarSpectatorListShowWithMenu);
             ImGui::EndDisabled();
         });
+}
+
+void ui::tabs::radar_sections::RenderHudSection()
+{
+    ui::widgets::SectionTitle("HUD Alignment");
+    auto& hud = g::radarSettings.hud;
+    ui::widgets::ToggleRow("hud_manual", "Manual HUD rectangle", &hud.manual);
+    if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("%s", KEVQ_TR("Automatic layout follows Settings > Screen. Manual coordinates are pixels inside the game image."));
+    ImGui::TextDisabled("%s", KEVQ_TR("Radar Shape"));
+    ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x);
+    if (ImGui::BeginCombo("##hud_shape", KEVQ_TR(hud.shape == 1 ? "Circle" : "Square"))) {
+        if (ImGui::Selectable(KEVQ_TR("Square"), hud.shape == 0)) hud.shape = 0;
+        if (ImGui::Selectable(KEVQ_TR("Circle"), hud.shape == 1)) hud.shape = 1;
+        ImGui::EndCombo();
+    }
+    if (hud.manual) {
+        const auto pair = [](const char* id, const auto& left, const auto& right) {
+            if (ImGui::GetContentRegionAvail().x >= 660.0f)
+                ui::widgets::TwoColumnRows(id, left, right);
+            else { left(); right(); }
+        };
+        pair("##hud_position",
+            [&] { ui::widgets::SliderFloatRow("hud_x", "HUD left", &hud.x, 0.0f, g::gameViewport.width, "%.0f px"); },
+            [&] { ui::widgets::SliderFloatRow("hud_y", "HUD top", &hud.y, 0.0f, g::gameViewport.height, "%.0f px"); });
+        pair("##hud_dimensions",
+            [&] { ui::widgets::SliderFloatRow("hud_w", "HUD width", &hud.width, 32.0f, (std::max)(32.0f, g::gameViewport.width), "%.0f px"); },
+            [&] { ui::widgets::SliderFloatRow("hud_h", "HUD height", &hud.height, 32.0f, (std::max)(32.0f, g::gameViewport.height), "%.0f px"); });
+    } else {
+        ui::widgets::SliderFloatRow("size", "HUD size", &g::radarSize, 100.0f, 400.0f, "%.0f");
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", KEVQ_TR("Size in 1080p reference units; follows the game image scaling."));
+        if (ImGui::TreeNode(KEVQ_TR("HUD calibration"))) {
+            ui::widgets::SliderFloatRow("hud_scale", "HUD scale", &hud.scale, 0.5f, 2.0f, "%.2fx");
+            ui::widgets::SliderFloatRow("hud_safe_x", "Safe area X", &hud.safeX, 0.5f, 1.0f, "%.3f");
+            ui::widgets::SliderFloatRow("hud_safe_y", "Safe area Y", &hud.safeY, 0.5f, 1.0f, "%.3f");
+            ImGui::TreePop();
+        }
+    }
+    if (ui::widgets::FullButton("Reset HUD Alignment", 30.0f)) { hud = {}; g::radarSize = 290.0f; }
 }
 
 void ui::tabs::radar_sections::RenderColorsSection()

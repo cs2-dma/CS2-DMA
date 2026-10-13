@@ -524,6 +524,8 @@ namespace esp {
     std::atomic<int32_t>  s_worldUtilityCandidateCountStat{0};
     std::atomic<int32_t>  s_worldClassifiedCandidateCountStat{0};
     std::atomic<int32_t>  s_worldIdentityPendingCountStat{0};
+    std::atomic<uint64_t> s_worldReadCountsStat{0};
+    std::atomic<uint32_t> s_worldReadDemandStat{0};
     std::atomic<uint64_t> s_worldMarkerCapacityDropsStat{0};
     std::atomic<uint64_t> s_worldMarkerReadGapHoldsStat{0};
     std::atomic<uint64_t> s_worldPositionReadMissesStat{0};
@@ -745,7 +747,11 @@ namespace esp {
             s_sceneWarmupState.load(std::memory_order_relaxed));
         const bool exposePlayerRoster = esp::data::ShouldExposePlayerRoster(
             warmupState == esp::SceneWarmupState::Stable,
-            warmupState == esp::SceneWarmupState::Recovery);
+            warmupState == esp::SceneWarmupState::Recovery,
+            warmupState == esp::SceneWarmupState::HierarchyWarming &&
+                s_engineStatusResolved.load(std::memory_order_relaxed) &&
+                s_engineInGame.load(std::memory_order_relaxed) &&
+                !s_engineMenu.load(std::memory_order_relaxed));
         if (exposePlayerRoster) {
             memcpy(snap.players, s_players, sizeof(snap.players));
             memcpy(snap.prevPlayers, s_prevPlayers, sizeof(snap.prevPlayers));
@@ -883,6 +889,22 @@ namespace esp {
             });
         if (!published)
             s_visibilityPublishDropCount.fetch_add(1, std::memory_order_relaxed);
+    }
+
+    float GetCameraAspect()
+    {
+        if (!s_engineStatusResolved.load(std::memory_order_relaxed) ||
+            !s_engineInGame.load(std::memory_order_relaxed) ||
+            s_engineMenu.load(std::memory_order_relaxed))
+            return 0.0f;
+        CameraFrame camera;
+        if (!ReadCameraFrame(camera) || !camera.viewValid)
+            return 0.0f;
+        const uint64_t nowUs = TickNowUs();
+        if (camera.viewUpdatedUs == 0 || nowUs < camera.viewUpdatedUs ||
+            nowUs - camera.viewUpdatedUs > 250000u)
+            return 0.0f;
+        return app::display::CameraAspect(camera.viewMatrix);
     }
 
     bool ReadCameraFrame(CameraFrame& out)
@@ -1097,6 +1119,8 @@ namespace esp {
             s_worldUtilityCandidateCountStat.store(0, std::memory_order_relaxed);
             s_worldClassifiedCandidateCountStat.store(0, std::memory_order_relaxed);
             s_worldIdentityPendingCountStat.store(0, std::memory_order_relaxed);
+            s_worldReadCountsStat.store(0, std::memory_order_relaxed);
+            s_worldReadDemandStat.store(0, std::memory_order_relaxed);
             s_worldMarkerCapacityDropsStat.store(0, std::memory_order_relaxed);
             s_worldMarkerReadGapHoldsStat.store(0, std::memory_order_relaxed);
             s_worldPositionReadMissesStat.store(0, std::memory_order_relaxed);
@@ -2036,6 +2060,8 @@ namespace esp {
         stats.worldUtilityCandidateCount = s_worldUtilityCandidateCountStat.load(std::memory_order_relaxed);
         stats.worldClassifiedCandidateCount = s_worldClassifiedCandidateCountStat.load(std::memory_order_relaxed);
         stats.worldIdentityPendingCount = s_worldIdentityPendingCountStat.load(std::memory_order_relaxed);
+        stats.worldReadCounts = s_worldReadCountsStat.load(std::memory_order_relaxed);
+        stats.worldReadDemand = s_worldReadDemandStat.load(std::memory_order_relaxed);
         stats.worldMarkerCapacityDrops = s_worldMarkerCapacityDropsStat.load(std::memory_order_relaxed);
         stats.worldMarkerReadGapHolds = s_worldMarkerReadGapHoldsStat.load(std::memory_order_relaxed);
         stats.worldPositionReadMisses = s_worldPositionReadMissesStat.load(std::memory_order_relaxed);
@@ -2279,6 +2305,8 @@ namespace esp {
         stats.overlay.drawUs = overlayStats.drawUs;
         stats.overlay.presentUs = overlayStats.presentUs;
         stats.overlay.pacingWaitUs = overlayStats.pacingWaitUs;
+        stats.overlay.graphicsRecoveries = overlayStats.graphicsRecoveries;
+        stats.overlay.graphicsLastError = overlayStats.graphicsLastError;
         {
             CameraFrame cameraFrame = {};
             if (ReadCameraFrame(cameraFrame)) {
@@ -2412,7 +2440,9 @@ namespace esp {
         if (!outSnapshot)
             return false;
 
-        TargetSnapshot result = {};
+        static thread_local TargetSnapshot result;
+        static const TargetSnapshot emptySnapshot;
+        result = emptySnapshot;
         Vector3 snapshotViewOffset = {};
         bool snapshotViewOffsetValid = false;
         uint64_t snapshotViewOffsetUpdatedAtUs = 0;

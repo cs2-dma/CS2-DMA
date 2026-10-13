@@ -5,6 +5,9 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
+
+#include "app/Core/memory_address.h"
 
 namespace esp::data
 {
@@ -15,6 +18,68 @@ namespace esp::data
     inline constexpr int kWorldMarkerScratchCapacity = kMaxDroppedWeaponMarkers +
         kMaxUtilityEffectMarkers + kMaxProjectileMarkers + kMaxDroppedBombMarkers;
     inline constexpr uint64_t kWorldMarkerReadGapHoldUs = 350000u;
+
+    template<class Vector, class ValidPosition>
+    bool ResolveSmokeOrigin(const Vector& position, size_t positionBytes,
+        uint8_t active, size_t activeBytes, uint8_t spawned, size_t spawnedBytes,
+        Vector& output, ValidPosition validPosition)
+    {
+        if (positionBytes != sizeof(Vector) || !validPosition(position) ||
+            !((activeBytes == sizeof(active) && active == 1u) ||
+              (spawnedBytes == sizeof(spawned) && spawned == 1u)))
+            return false;
+        output = position;
+        return true;
+    }
+
+    struct WorldVectorReadChunk {
+        size_t first = 0;
+        size_t count = 0;
+    };
+
+    template<class Vector, size_t N>
+    std::array<WorldVectorReadChunk, 3> PlanWorldVectorReads(uintptr_t address) noexcept
+    {
+        static_assert(N <= 64 && sizeof(Vector) * N <= 4096);
+        std::array<WorldVectorReadChunk, 3> chunks{};
+        if (!app::memory_address::IsCanonicalUserPointer(address) ||
+            address > app::memory_address::kMaximumUserAddress - sizeof(Vector) * N)
+            return chunks;
+        size_t first = 0, used = 0;
+        while (first < N && used < chunks.size()) {
+            const auto current = address + sizeof(Vector) * first;
+            const auto pageCount = (4096u - (current & 4095u)) / sizeof(Vector);
+            const auto count = (std::min)(N - first, (std::max)(size_t{1}, pageCount));
+            chunks[used++] = {first, count};
+            first += count;
+        }
+        return chunks;
+    }
+
+    template<class Vector, size_t N, class ValidPosition>
+    bool ResolveInfernoSampledOrigin(const Vector (&points)[N], uint64_t validSamples,
+        int fireCount, bool countComplete, Vector& output, ValidPosition validPosition)
+    {
+        static_assert(N <= 64);
+        if (!countComplete || fireCount <= 0 || fireCount > static_cast<int>(N))
+            return false;
+        for (int i = 0; i < fireCount; ++i) {
+            if ((validSamples & (uint64_t{1} << i)) != 0 && validPosition(points[i])) {
+                output = points[i];
+                return true;
+            }
+        }
+        return false;
+    }
+
+    template<class Vector, size_t N, class ValidPosition>
+    bool ResolveInfernoOrigin(const Vector (&points)[N], size_t bytes,
+        int fireCount, bool countComplete, Vector& output, ValidPosition validPosition)
+    {
+        const auto available = (std::min)(N, bytes / sizeof(Vector));
+        const auto mask = available == 64 ? UINT64_MAX : (uint64_t{1} << available) - 1;
+        return ResolveInfernoSampledOrigin(points, mask, fireCount, countComplete, output, validPosition);
+    }
 
     inline bool ShouldCountWorldPositionReadMiss(bool readAttempted,
         bool readComplete, bool positionValid) noexcept
@@ -132,6 +197,13 @@ namespace esp::data
     inline constexpr uint8_t kUtilityStationaryMinSamples = 2u;
     inline constexpr uint64_t kUtilityFieldHoldUs = 350000u;
 
+    inline bool IsUtilityTickSample(int value) noexcept { return value >= 0 && value < 20000000; }
+    inline bool IsUtilityFlagSample(uint8_t value) noexcept { return value <= 1; }
+    inline bool IsInfernoCountSample(int value) noexcept { return value >= 0 && value <= 64; }
+    inline bool IsInfernoLifetimeSample(float value) noexcept {
+        return std::isfinite(value) && value >= 0 && value <= 30;
+    }
+
     enum class UtilityField : size_t {
         SmokeTick, SmokeActive, SmokeVolume, SmokeSpawned,
         InfernoTick, InfernoLife, InfernoFireCount, InfernoPostEffect,
@@ -191,6 +263,8 @@ namespace esp::data
         float currentGameTime)
     {
         if (intervalPerTick <= 0.0f ||
+            !std::isfinite(intervalPerTick) || !std::isfinite(durationSec) ||
+            !std::isfinite(currentGameTime) ||
             tickStart <= 0 ||
             durationSec <= 0.0f ||
             currentGameTime <= 0.0f) {
@@ -228,21 +302,19 @@ namespace esp::data
     inline uint64_t UpdateUtilityMarkerDeadline(
         bool signal, bool terminal, float remainingSec, uint64_t nowUs,
         uint64_t fallbackDurationUs, uint64_t& deadlineUs,
-        UtilityTimerSource source = UtilityTimerSource::None) noexcept
+        UtilityTimerSource = UtilityTimerSource::None) noexcept
     {
         if (terminal) {
             deadlineUs = nowUs; // Keep an expired tombstone: no fallback re-arming.
             return 0;
         }
         if (signal && !IsUtilityRemainingUnknown(remainingSec)) {
-            const uint64_t candidate = nowUs + static_cast<uint64_t>(
-                (std::max)(0.0f, remainingSec) * 1000000.0f);
-            // A late stationary observation must not extend an already known
-            // game-tick deadline or re-arm an expired effect.
-            if (deadlineUs == 0 || source == UtilityTimerSource::GameTick || candidate < deadlineUs)
+            const auto duration = static_cast<uint64_t>((std::max)(0.0f, remainingSec) * 1000000.0f);
+            const auto candidate = nowUs > UINT64_MAX - duration ? UINT64_MAX : nowUs + duration;
+            if (deadlineUs == 0 || candidate < deadlineUs)
                 deadlineUs = candidate;
         } else if (signal && deadlineUs == 0) {
-            deadlineUs = nowUs + fallbackDurationUs;
+            deadlineUs = nowUs > UINT64_MAX - fallbackDurationUs ? UINT64_MAX : nowUs + fallbackDurationUs;
         }
         // A read miss keeps the last deadline, never a newly invented full duration.
         return deadlineUs > nowUs ? deadlineUs : 0;

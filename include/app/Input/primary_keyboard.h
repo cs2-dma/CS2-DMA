@@ -14,6 +14,8 @@ namespace app::input
         bool resolving = false;
         uint64_t resolveAttempts = 0;
         uint64_t unreadablePages = 0;
+        bool sampleFresh = false;
+        int64_t sampleAgeMs = -1;
     };
 
     bool InitializePrimaryKeyboard();

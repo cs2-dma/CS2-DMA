@@ -12,6 +12,8 @@ namespace overlay {
         uint64_t drawUs = 0;
         uint64_t presentUs = 0;
         uint64_t pacingWaitUs = 0;
+        uint64_t graphicsRecoveries = 0;
+        int32_t graphicsLastError = 0;
     };
 
     bool Create(int width, int height, std::string* outErrorMessage = nullptr);

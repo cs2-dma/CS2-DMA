@@ -25,6 +25,7 @@ void ui::tabs::RadarTab::Render(MenuState& state, IStatusSink& statusSink)
 
     if (g::radarEnabled) {
         radar_sections::RenderDisplaySection();
+        radar_sections::RenderHudSection();
         ImGui::Dummy(ImVec2(0.0f, 4.0f));
         radar_sections::RenderColorsSection();
         ImGui::Dummy(ImVec2(0.0f, 4.0f));

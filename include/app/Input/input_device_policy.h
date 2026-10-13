@@ -20,6 +20,36 @@ namespace app::input
         bool down = false;
     };
 
+    using ControlKeySnapshot = std::array<std::array<KeyState, 256>, 3>;
+
+    class KeyCaptureState
+    {
+    public:
+        void Begin(const ControlKeySnapshot& snapshot)
+        {
+            for (size_t source = 0; source < previous_.size(); ++source)
+                for (size_t key = 0; key < previous_[source].size(); ++key)
+                    previous_[source][key] = snapshot[source][key].available && snapshot[source][key].down;
+        }
+
+        int Observe(const ControlKeySnapshot& snapshot)
+        {
+            int pressed = 0;
+            for (int key = 1; key <= 0xFE; ++key) {
+                for (size_t source = 0; source < previous_.size(); ++source) {
+                    if (!snapshot[source][key].available) continue;
+                    if (snapshot[source][key].down && !previous_[source][key] && pressed == 0)
+                        pressed = key;
+                    previous_[source][key] = snapshot[source][key].down;
+                }
+            }
+            return pressed;
+        }
+
+    private:
+        std::array<std::array<bool, 256>, 3> previous_ = {};
+    };
+
     struct PhysicalKeyboardState
     {
         bool available = false;
@@ -33,6 +63,14 @@ namespace app::input
     {
         return sampledAtMs != 0 && nowMs >= sampledAtMs &&
             nowMs - sampledAtMs <= kNetworkInputMaxAgeMs;
+    }
+
+    inline constexpr bool IsNetworkEventInputAvailable(uint64_t sampledAtMs,
+        uint64_t confirmedAtMs, uint64_t receiverAtMs, uint64_t nowMs)
+    {
+        return sampledAtMs != 0 && sampledAtMs <= nowMs &&
+            confirmedAtMs != 0 && confirmedAtMs <= nowMs && nowMs - confirmedAtMs <= 4000 &&
+            receiverAtMs != 0 && receiverAtMs <= nowMs && nowMs - receiverAtMs <= 500;
     }
 
     inline bool ParseNetworkInputReport(std::span<const uint8_t> bytes,
@@ -124,6 +162,12 @@ namespace app::input
             }
             if (hardwareGesture_) {
                 if (!hardware.available) {
+                    if (nowMs >= primaryResumeAtMs_ && primary.available) {
+                        hardwareGesture_ = false;
+                        primaryBlocked_ = false;
+                        primaryGesture_ = primary.down;
+                        return primary;
+                    }
                     if (primary.available && !primary.down) {
                         hardwareGesture_ = false;
                         primaryBlocked_ = true;
@@ -205,6 +249,8 @@ namespace app::input
         }
 
         bool HasPending() const { return pending_.has_value(); }
+        uint64_t Revision() const { return revision_; }
+        uint64_t PendingRevision() const { return pending_ ? pending_->revision : 0; }
 
         std::optional<QueuedMouseMove> Take()
         {

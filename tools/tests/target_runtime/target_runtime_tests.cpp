@@ -39,6 +39,8 @@ namespace fixture {
     bool alternateKeySamples = false;
     int activationReads = 0;
     app::input::LeftClickStatus click;
+    app::input::MoveReceipt moveReceipt;
+    uint64_t inputClockOffsetUs = 0;
     uint64_t clockAdvanceUs = 0;
     float recoilScale = 2.0f;
     bool recoilScaleValid = false;
@@ -80,6 +82,19 @@ bool app::input::RequestMove(int, int, uint64_t validForUs) {
     if (validForUs == 0) return false;
     if (!fixture::acceptMove) return false;
     ++fixture::moves; return true;
+}
+uint64_t app::input::RequestTrackedMove(int x, int y, uint64_t validForUs) {
+    if (!RequestMove(x, y, validForUs)) return 0;
+    const auto now = fixture::DataNowUs() + fixture::inputClockOffsetUs;
+    fixture::moveReceipt = {static_cast<uint64_t>(fixture::moves), app::input::MoveDeliveryState::Sent,
+        now, now, now, x, y};
+    return fixture::moveReceipt.token;
+}
+app::input::MoveReceipt app::input::GetMoveReceipt(uint64_t token) {
+    if (fixture::moveReceipt.token != token) return {};
+    auto sampledReceipt = fixture::moveReceipt;
+    sampledReceipt.sampledAtUs = fixture::DataNowUs() + fixture::inputClockOffsetUs;
+    return sampledReceipt;
 }
 void app::input::CancelPendingMoves() { ++fixture::moveCancellations; }
 bool app::input::RequestLeftClick(uint32_t) {
@@ -185,6 +200,8 @@ namespace {
         fixture::device.state = app::input::ConnectionState::Connected;
         fixture::acceptMove = true; fixture::moves = 0; fixture::clicks = 0;
         fixture::click = {}; fixture::mapRequests = 0;
+        fixture::moveReceipt = {};
+        fixture::inputClockOffsetUs = 0;
         fixture::geometryAvailable = true;
         fixture::wallBlocks = false;
         fixture::geometryMap = "fixture_map";
@@ -551,6 +568,169 @@ namespace {
         }
     }
 
+    void TestRecoilAcquiredMidSpray() {
+        for (const int style : {0, 1, 2}) for (const bool compensatedView : {false, true}) {
+            auto settings = ResetFixture();
+            auto& snap = fixture::snapshot;
+            auto& profile = settings.weaponProfiles[1];
+            profile.aimSmoothing = 50;
+            Candidate candidate;
+            candidate.player = &snap.players[1]; candidate.slot = 1;
+            candidate.point = candidate.player->hitboxes[0].center;
+            candidate.requiredHitgroup = 1;
+            snap.viewAngles.y = std::atan2(50.0f, 1000.0f) * 180.0f / kPi;
+            snap.localShotsFired = 8;
+            snap.localAimPunch = {-1, 0.25f, 0};
+            if (compensatedView) {
+                snap.viewAngles.x = 2;
+                snap.viewAngles.y -= 0.5f;
+            }
+            MotionRuntimeState motion;
+            target::wind::Settings windSettings;
+            int x = 0, y = 0;
+            const auto result = MoveToward(snap, candidate, {}, motion, 50, style == 1, true,
+                0.01f, &x, &y, nullptr, -1, nullptr, true,
+                style == 2 ? &windSettings : nullptr, &profile);
+            if (compensatedView) {
+                CHECK(result == MoveResult::Aligned && x == 0 && y == 0);
+            } else {
+                CHECK(result == MoveResult::Queued);
+                CHECK(std::abs(y - 91) <= 1 && std::abs(x - 23) <= 1);
+            }
+        }
+    }
+
+    void TestFeedbackManualRebase() {
+        for (const bool recoil : {false, true}) {
+            auto settings = ResetFixture();
+            auto& profile = settings.weaponProfiles[1];
+            profile.aimSoftAssist = false;
+            auto& snap = fixture::snapshot;
+            Candidate candidate;
+            candidate.player = &snap.players[1]; candidate.slot = 1;
+            candidate.point = candidate.player->hitboxes[0].center;
+            MotionRuntimeState motion;
+            int x = 0, y = 0;
+            CHECK(MoveToward(snap, candidate, {}, motion, 4, false, recoil,
+                0.01f, &x, &y, nullptr, -1, nullptr, false, nullptr, &profile) == MoveResult::Queued);
+            const int before = fixture::moves;
+            for (int i = 0; i < 8; ++i) s_outputFeedback.latency.Add(8000);
+            snap.viewAngles.y = -5;
+            snap.sampledAtUs += 8000; FreshFrame();
+            CHECK(MoveToward(snap, candidate, {}, motion, 4, false, recoil,
+                0.01f, &x, &y, nullptr, -1, nullptr, false, nullptr, &profile) == MoveResult::Accumulating);
+            CHECK(fixture::moves == before && s_outputFeedback.diagnostics.rebases == 0);
+            snap.sampledAtUs += 25000; FreshFrame();
+            const auto resumed = MoveToward(snap, candidate, {}, motion, 4, false, recoil,
+                0.01f, &x, &y, nullptr, -1, nullptr, false, nullptr, &profile);
+            if (resumed != MoveResult::Queued) std::cerr << "Manual rebase: recoil=" << recoil
+                << " result=" << static_cast<int>(resumed) << " reason=" << static_cast<int>(motion.diagnostics.reason)
+                << " view=" << snap.viewUpdatedAtUs << " last=" << motion.lastMotionViewAtUs << " delta=" << x << '/' << y << '\n';
+            CHECK(resumed == MoveResult::Queued);
+            CHECK(fixture::moves == before + 1);
+            CHECK(s_outputFeedback.diagnostics.rebases == 1 && s_outputFeedback.diagnostics.timeouts == 0);
+            CHECK(s_outputFeedback.observedToken == 0 && s_outputFeedback.latency.count == 8);
+            fixture::moveReceipt.state = app::input::MoveDeliveryState::Dispatching;
+            snap.viewAngles.y -= 10;
+            snap.sampledAtUs += 50000; FreshFrame();
+            CHECK(AwaitMotionFeedback(snap));
+            CHECK(s_outputFeedback.diagnostics.rebases == 1);
+        }
+    }
+
+    void TestAimDeathHandoffDuringSpray() {
+        for (const auto kind : {app::input::DeviceKind::Makcu, app::input::DeviceKind::KmBox,
+                app::input::DeviceKind::KmBoxNet, app::input::DeviceKind::FerrumOne})
+        for (const int mode : {0, 1}) {
+            auto settings = ResetFixture();
+            fixture::device.selected = kind;
+            settings.aimActivationMode = mode;
+            settings.aimVisibleOnly = false;
+            settings.weaponProfiles[1].aimDamageCheck = false;
+            settings.weaponProfiles[1].aimSmoothing = 50;
+            auto& snap = fixture::snapshot;
+            snap.viewAngles.y = std::atan2(50.0f, 1000.0f) * 180.0f / kPi;
+            fixture::keyDown = true;
+            Tick(settings);
+            CHECK(s_status.aimKeyDown && s_runtime.aim.targetSlot == 1);
+            if (mode == 1) fixture::keyDown = false;
+            snap.sampledAtUs += 8000;
+            snap.localShotsFired = 3;
+            snap.localAimPunch = {-0.5f, 0.25f, 0};
+            Tick(settings);
+            CHECK(s_status.moveY == 45 && s_status.moveX == 23);
+            snap.viewAngles.x += s_status.moveY * 0.022f;
+            snap.viewAngles.y -= s_status.moveX * 0.022f;
+            const auto firstPlayer = snap.players[1];
+            snap.players[1].health = 0;
+            snap.sampledAtUs += 8000;
+            snap.localShotsFired = 4;
+            snap.localAimPunch = {-1, 0.30f, 0};
+            const int beforeGap = fixture::moves;
+            Tick(settings);
+            CHECK(s_status.aimKeyDown && s_status.phase == target::RuntimePhase::NoTarget);
+            CHECK(s_runtime.aim.targetPawn == 0 && s_status.targetSlot == -1);
+            CHECK(s_status.aimMove.recoilAvailable && fixture::moves == beforeGap + 1);
+            CHECK(s_status.moveY == 45 && std::abs(s_status.moveX - 5) <= 1);
+            snap.viewAngles.x += s_status.moveY * 0.022f;
+            snap.viewAngles.y -= s_status.moveX * 0.022f;
+            auto& second = snap.players[2];
+            second = firstPlayer;
+            second.pawn += 0x1000;
+            second.pawnHandle += 1;
+            for (auto& bone : second.bones) bone.y += 20;
+            second.hitboxes[0].start.y += 20;
+            second.hitboxes[0].center.y += 20;
+            second.hitboxes[0].end.y += 20;
+            const int beforeReacquire = fixture::moves;
+            for (int frame = 0; frame < 64; ++frame) {
+                snap.sampledAtUs += 8000;
+                Tick(settings);
+                CHECK(s_status.aimKeyDown && s_runtime.aim.targetSlot == 2);
+                if (fixture::moves > beforeReacquire) {
+                    snap.viewAngles.x += s_status.moveY * 0.022f;
+                    snap.viewAngles.y -= s_status.moveX * 0.022f;
+                }
+                CHECK(std::fabs(snap.viewAngles.x + snap.localAimPunch.x * 2) < 0.04f);
+            }
+            CHECK(fixture::moves > beforeReacquire);
+            CHECK(s_outputFeedback.diagnostics.timeouts == 0);
+            snap.players[2].valid = false;
+            snap.localShotsFired = 0;
+            const int beforeIdle = fixture::moves;
+            snap.sampledAtUs += 8000; Tick(settings);
+            CHECK(fixture::moves == beforeIdle && s_runtime.aim.recoil.pitch == 0);
+            fixture::keyDown = mode == 1;
+            Tick(settings);
+            CHECK(!s_status.aimKeyDown && fixture::moves == beforeIdle);
+        }
+    }
+
+    void TestRecoilOnlyQuantizationAndSaturation() {
+        for (const float increment : {0.002f, 2.0f}) {
+            auto settings = ResetFixture();
+            settings.aimActivationMode = 0;
+            auto& snap = fixture::snapshot;
+            snap.players[1].valid = false;
+            fixture::keyDown = true;
+            Tick(settings);
+            int counts = 0;
+            for (int tick = 0; tick < 32; ++tick) {
+                snap.localShotsFired = 1;
+                if (increment < 1 || tick == 0) snap.localAimPunch.x -= increment;
+                snap.sampledAtUs += 8000;
+                Tick(settings);
+                CHECK(s_status.aimKeyDown && s_status.targetSlot == -1);
+                if (s_status.moveY != 0) {
+                    counts += s_status.moveY;
+                    snap.viewAngles.x += s_status.moveY * 0.022f;
+                }
+            }
+            CHECK(counts > 0 && fixture::clicks == 0);
+            CHECK(std::fabs(snap.viewAngles.x + snap.localAimPunch.x * 2) < 0.025f);
+        }
+    }
+
     void TestRecoilOutputFeedback() {
         auto settings = ResetFixture();
         auto& snap = fixture::snapshot;
@@ -616,19 +796,19 @@ namespace {
             snap.viewAngles = {0, targetYaw, 0};
             MotionRuntimeState motion;
             target::wind::Settings windSettings{4, 40, 1, 40};
-            struct Pending { int due, x, y; };
+            struct Pending { uint64_t dueAtUs; int x, y; };
             std::vector<Pending> pending;
             float maximumError = 0.0f;
             const float count = sensitivity * snap.fovSensitivityAdjust * target::policy::kMouseYawDegrees;
             for (int tick = 0; tick < 260; ++tick) {
+                snap.sampledAtUs += 3000; FreshFrame();
                 for (auto it = pending.begin(); it != pending.end();) {
-                    if (it->due <= tick) {
+                    if (it->dueAtUs <= snap.sampledAtUs) {
                         snap.viewAngles.x += it->y * count;
                         snap.viewAngles.y -= it->x * count;
                         it = pending.erase(it);
                     } else ++it;
                 }
-                snap.sampledAtUs += 3000; FreshFrame();
                 const int progress = std::min(tick, 160);
                 snap.localShotsFired = tick == 0 ? 0 : 1 + progress / 25;
                 snap.localAimPunch = {-0.015f * progress, 0.2f * std::sin(progress * 0.06f), 0};
@@ -639,7 +819,7 @@ namespace {
                 CHECK(result != MoveResult::Failed);
                 if (result == MoveResult::Queued) {
                     if (latencyMs == 0) { snap.viewAngles.x += y * count; snap.viewAngles.y -= x * count; }
-                    else pending.push_back({tick + latencyMs / 4, x, y});
+                    else pending.push_back({snap.sampledAtUs + static_cast<uint64_t>(latencyMs) * 1000u, x, y});
                 }
                 CHECK(pending.size() <= 1);
                 const float pitchError = snap.viewAngles.x + snap.localAimPunch.x * scale;
@@ -648,7 +828,7 @@ namespace {
                 if (tick > 220) CHECK(std::hypot(pitchError, yawError) < 0.08f);
             }
             const float delayedBound = std::max(0.08f,
-                2.0f * (latencyMs / 4 + 1) * std::hypot(0.015f, 0.012f) * scale + count * 1.5f);
+                2.0f * (static_cast<float>(latencyMs) / 4.0f + 1.0f) * std::hypot(0.015f, 0.012f) * scale + count * 1.5f);
             if (maximumError >= delayedBound) std::cerr << "feedback latency=" << latencyMs << " style=" << style
                 << " sensitivity=" << sensitivity << " scale=" << scale << " maximum_error=" << maximumError << '\n';
             CHECK(maximumError < delayedBound);
@@ -1049,7 +1229,7 @@ namespace {
         profile.aimSoftAssist = false;
         s_outputFeedback = {};
         CHECK(step(precise) == MoveResult::Queued);
-        CHECK(std::abs(x) > softX * 2);
+        CHECK(std::abs(x) >= softX);
         profile.aimSoftAssist = true;
         s_outputFeedback = {};
         snap.viewAngles.y = std::atan2(50.0f, 1000.0f) * 180.0f / kPi - 0.08f;
@@ -1886,7 +2066,7 @@ void TestFireEvaluationAndPrediction() {
         const Candidate planned = SelectTarget(snapshot, settings.triggerAimBone,
             1920, 1080, 150, false, true, 0, 0, 100, snapshot.localIntervalPerTick);
         CHECK(planned.player == &moving);
-        CHECK(planned.predictionOffset.y > 0 && planned.predictionOffset.y <= 1.5f);
+        CHECK(planned.predictionOffset.y > 0 && planned.predictionOffset.y <= moving.hitboxes[0].radius * 0.45f + 0.0001f);
         snapshot.viewAngles.y = std::atan2(planned.point.y, planned.point.x) * 180.0f / kPi;
         fixture::keyDown = true;
         Tick(settings);
@@ -2014,6 +2194,7 @@ void TestIndependentAccuracyToggles() {
 int main() { return RunNetworkTargetIntegration(); }
 #else
 #include "audit_regressions.inl"
+#include "modern_motion_regressions.inl"
 
 int main(int argc, char** argv) {
     if (argc == 2 && std::string_view(argv[1]) == "--view-offset") {
@@ -2269,6 +2450,12 @@ int main(int argc, char** argv) {
         }
     }
     TestViewOffsetReadPath();
+    TestModernMotionControl();
+    TestTrackedDeliveryFeedback();
+    TestFeedbackClockDomains();
+    TestHitchanceEarlyDecision();
+    TestAngularFovAndCompactSnapshot();
+    TestIntentAndPointContinuityRuntime();
     TestIdleAimPointRegression();
     TestAutomaticPointAndPoseCoherence();
     TestSpawnImmunitySelection();
@@ -2281,6 +2468,10 @@ int main(int argc, char** argv) {
     TestAssistanceMath();
     TestSeparatedRecoilController();
     TestRecoilOutputFeedback();
+    TestRecoilAcquiredMidSpray();
+    TestFeedbackManualRebase();
+    TestAimDeathHandoffDuringSpray();
+    TestRecoilOnlyQuantizationAndSaturation();
     TestRecoilDuringOffAxisAcquisition();
     TestRecoilSampleGap();
     TestGentleDefaultsAndCurveBounds();

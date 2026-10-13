@@ -1,6 +1,7 @@
 #include "pch.h"
 #include "Memory.h"
 #include "ScatterReadTracker.h"
+#include "ProcessProbePolicy.h"
 
 Memory::LibModules Memory::modules{};
 Memory::CurrentProcessInformation Memory::current_process{};
@@ -677,6 +678,8 @@ DWORD Memory::GetPidFromName(const std::string& process_name)
 		target_a == "cs2.exe" ||
 		target_a == "cs2" ||
 		target_b == "cs2";
+	if (isCs2Target && directPid == 0)
+		return 0;
 	if (directPid != 0 && !isCs2Target)
 		return directPid;
 	if (directPid != 0 && this->vHandle)
@@ -707,6 +710,8 @@ DWORD Memory::GetPidFromName(const std::string& process_name)
 	{
 		for (DWORD i = 0; i < total_processes; i++)
 		{
+			if (!dma::IsActiveProcessCandidate(process_info[i].dwPID, process_info[i].dwState))
+				continue;
 			std::string short_name = process_info[i].szName ? process_info[i].szName : "";
 			std::string long_name = process_info[i].szNameLong ? process_info[i].szNameLong : "";
 			short_name = to_lower(short_name);
@@ -845,16 +850,12 @@ bool Memory::FixCr3()
 		return s;
 	};
 	auto canAccessProbeModules = [&](DWORD pid) -> bool {
-		auto hasModule = [&](const std::string& moduleName) -> bool {
-			if (moduleName.empty()) return false;
-			uint64_t base = VMMDLL_ProcessGetModuleBaseU(this->vHandle, pid, moduleName.c_str());
-			if (base == 0) return false;
-			
+		auto readHeader = [&](uint64_t base) -> bool {
 			IMAGE_DOS_HEADER dos = { 0 };
 			DWORD read_size = 0;
 			if (!VMMDLL_MemReadEx(this->vHandle, pid, base, (PBYTE)&dos, sizeof(IMAGE_DOS_HEADER), &read_size, VMMDLL_FLAG_NOCACHE))
 				return false;
-			return dos.e_magic == 0x5A4D;
+			return read_size == sizeof(dos) && dos.e_magic == 0x5A4D;
 		};
 
 		const std::string targetLower = to_lower(current_process.process_name);
@@ -865,11 +866,10 @@ bool Memory::FixCr3()
 			targetLower == "cs2" ||
 			targetBaseLower == "cs2";
 
-		if (isCs2Target)
-			return hasModule("client.dll") || hasModule("engine2.dll");
-
-		return hasModule(current_process.process_name) ||
-			(targetBase != current_process.process_name && hasModule(targetBase));
+		return dma::HasReadableProcessAddressSpace(isCs2Target, current_process.process_name,
+			targetBase, [&](std::string_view moduleName) {
+				return VMMDLL_ProcessGetModuleBaseU(this->vHandle, pid, std::string(moduleName).c_str());
+			}, readHeader);
 	};
 
 	if (canAccessProbeModules(current_process.PID))
@@ -892,12 +892,12 @@ bool Memory::FixCr3()
 	}
 
 	
-	std::this_thread::sleep_for(std::chrono::milliseconds(500));
-
 	const auto progressDeadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
 	bool progressReady = false;
 	while (std::chrono::steady_clock::now() < progressDeadline)
 	{
+		if (canAccessProbeModules(current_process.PID))
+			return true;
 		BYTE bytes[4] = {0};
 		DWORD i = 0;
 		auto nt = VMMDLL_VfsReadW(this->vHandle, const_cast<LPWSTR>(L"\\misc\\procinfo\\progress_percent.txt"), bytes, 3, &i, 0);

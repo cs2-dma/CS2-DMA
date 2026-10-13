@@ -2,6 +2,7 @@
 #include "Game/Schema/structs.h"
 #include "Features/ESP/Worker/worker_policy.h"
 #include <array>
+#include <algorithm>
 #include <cstdint>
 
 namespace esp {
@@ -256,6 +257,8 @@ namespace esp {
         uint64_t drawUs = 0;
         uint64_t presentUs = 0;
         uint64_t pacingWaitUs = 0;
+        uint64_t graphicsRecoveries = 0;
+        int32_t graphicsLastError = 0;
     };
 
     struct DmaTiming {
@@ -381,6 +384,8 @@ namespace esp {
         int32_t  worldUtilityCandidateCount = 0;
         int32_t  worldClassifiedCandidateCount = 0;
         int32_t  worldIdentityPendingCount = 0;
+        uint64_t worldReadCounts = 0;
+        uint32_t worldReadDemand = 0;
         uint64_t worldMarkerCapacityDrops = 0;
         uint64_t worldMarkerReadGapHolds = 0;
         uint64_t worldPositionReadMisses = 0;
@@ -600,8 +605,46 @@ namespace esp {
         int worldMarkerCount = 0;
     };
 
+    struct TargetPlayerData {
+        bool valid = false;
+        uintptr_t pawn = 0;
+        uint32_t pawnHandle = 0;
+        int health = 0, armor = 0, team = 0, ping = 0;
+        bool hasHelmet = false, hasHelmetValid = false;
+        Vector3 position = {}, velocity = {};
+        bool velocityValid = false;
+        char name[128] = {};
+        Vector3 bones[kPlayerStoredBoneCount] = {};
+        bool hasBones = false;
+        HitboxCapsule hitboxes[kMaximumPlayerHitboxes] = {};
+        uint8_t hitboxCount = 0;
+        bool hasHitboxes = false, visible = false;
+        bool gunGameImmunity = false, gunGameImmunityValid = false;
+        uint64_t coreUpdatedAtUs = 0, bonesUpdatedAtUs = 0, hitboxesUpdatedAtUs = 0;
+        uint64_t helmetUpdatedAtUs = 0, gunGameImmunityUpdatedAtUs = 0, visibilityUpdatedAtUs = 0;
+        float predictionConfidence = 1.0f;
+
+        TargetPlayerData() = default;
+        TargetPlayerData(const PlayerData& source) noexcept
+            : valid(source.valid), pawn(source.pawn), pawnHandle(source.pawnHandle),
+            health(source.health), armor(source.armor), team(source.team), ping(source.ping),
+            hasHelmet(source.hasHelmet), hasHelmetValid(source.hasHelmetValid),
+            position(source.position), velocity(source.velocity), velocityValid(source.velocityValid),
+            hasBones(source.hasBones), hitboxCount(source.hitboxCount), hasHitboxes(source.hasHitboxes),
+            visible(source.visible), gunGameImmunity(source.gunGameImmunity), gunGameImmunityValid(source.gunGameImmunityValid),
+            coreUpdatedAtUs(source.coreUpdatedAtUs), bonesUpdatedAtUs(source.bonesUpdatedAtUs),
+            hitboxesUpdatedAtUs(source.hitboxesUpdatedAtUs), helmetUpdatedAtUs(source.helmetUpdatedAtUs),
+            gunGameImmunityUpdatedAtUs(source.gunGameImmunityUpdatedAtUs), visibilityUpdatedAtUs(source.visibilityUpdatedAtUs)
+        {
+            std::copy_n(source.name, std::size(name), name);
+            std::copy_n(source.bones, kPlayerStoredBoneCount, bones);
+            std::copy_n(source.hitboxes, kMaximumPlayerHitboxes, hitboxes);
+        }
+    };
+    static_assert(sizeof(TargetPlayerData) < sizeof(PlayerData));
+
     struct TargetSnapshot {
-        std::array<PlayerData, 64> players = {};
+        std::array<TargetPlayerData, 64> players = {};
         char mapKey[64] = {};
         Vector3 localPos = {};
         Vector3 localEyePos = {};
@@ -687,6 +730,7 @@ namespace esp {
 
     void PublishDataSettingsSnapshot();
     void Draw();
+    float GetCameraAspect();
 
     uint64_t    GetPublishCount();
     bool        GetWebRadarSnapshot(WebRadarSnapshot* outSnapshot);

@@ -1,5 +1,7 @@
 *.pdb
 *.obj
 *.tlog
+__pycache__/
+*.pyc
 x64/obj/
 x64/Release/data/config/WebRadarConfig.json

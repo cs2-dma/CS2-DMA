@@ -1,9 +1,13 @@
+#include <source_location>
+
 struct NetworkTargetFixture
 {
     SOCKET socket = INVALID_SOCKET;
     uint16_t port = 0;
     std::atomic<bool> running{true};
     std::atomic<bool> monitorEnabled{true};
+    std::atomic<bool> eventOnly{true};
+    std::atomic<bool> replyEnabled{true};
     std::atomic<uint8_t> buttons{0};
     std::atomic<uint8_t> key{0};
     std::atomic<uint8_t> modifiers{0};
@@ -34,6 +38,8 @@ struct NetworkTargetFixture
         CHECK(ioctlsocket(socket, FIONBIO, &nonblocking) == 0);
         worker = std::thread([this] {
             uint16_t monitorPort = 0;
+            bool reportSent = false;
+            std::array<uint8_t, 20> lastReport = {};
             int32_t outputButtons = 0;
             std::array<uint8_t, 16> delayedAck = {};
             sockaddr_in delayedSender = {};
@@ -50,7 +56,9 @@ struct NetworkTargetFixture
                     if (command == 0x27388020u) {
                         uint32_t random = 0;
                         std::memcpy(&random, bytes.data() + 4, 4);
-                        monitorPort = (random >> 16) == 0xAA55 ? static_cast<uint16_t>(random) : 0;
+                        const auto nextPort = (random >> 16) == 0xAA55 ? static_cast<uint16_t>(random) : 0;
+                        if (monitorPort != nextPort) reportSent = false;
+                        monitorPort = nextPort;
                     } else if (received >= 28) {
                         int32_t fields[3] = {};
                         std::memcpy(fields, bytes.data() + 16, sizeof(fields));
@@ -70,12 +78,12 @@ struct NetworkTargetFixture
                         std::copy_n(bytes.begin(), delayedAck.size(), delayedAck.begin());
                         delayedSender = sender;
                         moveAckBlocked = true;
-                    } else {
+                    } else if (replyEnabled.load()) {
                         sendto(socket, reinterpret_cast<const char*>(bytes.data()), 16, 0,
                             reinterpret_cast<const sockaddr*>(&sender), senderSize);
                     }
                 }
-                if (moveAckBlocked.load() && releaseMoveAck.load()) {
+                if (moveAckBlocked.load() && releaseMoveAck.load() && replyEnabled.load()) {
                     sendto(socket, reinterpret_cast<const char*>(delayedAck.data()), 16, 0,
                         reinterpret_cast<const sockaddr*>(&delayedSender), sizeof(delayedSender));
                     moveAckBlocked = false;
@@ -88,9 +96,13 @@ struct NetworkTargetFixture
                     destination.sin_family = AF_INET;
                     destination.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
                     destination.sin_port = htons(monitorPort);
-                    sendto(socket, reinterpret_cast<const char*>(report.data()),
-                        static_cast<int>(report.size()), 0,
-                        reinterpret_cast<const sockaddr*>(&destination), sizeof(destination));
+                    if (!eventOnly.load() || !reportSent || report != lastReport) {
+                        sendto(socket, reinterpret_cast<const char*>(report.data()),
+                            static_cast<int>(report.size()), 0,
+                            reinterpret_cast<const sockaddr*>(&destination), sizeof(destination));
+                        reportSent = true;
+                        lastReport = report;
+                    }
                 }
                 std::this_thread::sleep_for(std::chrono::milliseconds(1));
             }
@@ -110,11 +122,18 @@ int RunNetworkTargetIntegration()
     using namespace app::input;
     WSADATA data = {};
     CHECK(WSAStartup(MAKEWORD(2, 2), &data) == 0);
-    const auto wait = [](auto condition) {
-        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(3);
+    const auto wait = [](auto condition, int timeoutSeconds = 3,
+        std::source_location location = std::source_location::current()) {
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(timeoutSeconds);
         while (!condition() && std::chrono::steady_clock::now() < deadline)
             std::this_thread::sleep_for(std::chrono::milliseconds(2));
-        CHECK(condition());
+        const bool ready = condition();
+        if (!ready) std::cerr << "Network wait timed out at " << location.line() << '\n';
+        CHECK(ready);
+    };
+    const auto tick = [](const g::TargetSettings& settings, bool uiBlocked = false) {
+        FreshFrame();
+        Tick(settings, uiBlocked);
     };
     {
         NetworkTargetFixture server;
@@ -128,6 +147,76 @@ int RunNetworkTargetIntegration()
             CHECK(GetDeviceStatus().inputMonitorLastPacketBytes == 20);
             CHECK(GetDeviceStatus().inputMonitorPort < 32768);
             CHECK(GetDeviceStatus().moveRequests == 0);
+            CHECK(RequestDisconnect());
+            server.monitorEnabled = false;
+            wait([] { return GetDeviceStatus().state == ConnectionState::Disconnected; });
+            CHECK(RequestConnectAndTest());
+            wait([] { return GetDeviceStatus().state == ConnectionState::Connected; });
+            const auto firstMonitorPort = GetDeviceStatus().inputMonitorPort;
+            CHECK(!GetDeviceStatus().physicalButtonsAvailable);
+            wait([&] {
+                const auto status = GetDeviceStatus();
+                return status.inputMonitorPort != 0 && status.inputMonitorPort != firstMonitorPort;
+            }, 8);
+            CHECK(GetDeviceStatus().state == ConnectionState::Connected);
+            server.monitorEnabled = true;
+            wait([] { return GetDeviceStatus().physicalButtonsAvailable; });
+            {
+                auto held = ResetFixture();
+                held.aimKey = 0x06;
+                held.aimActivationMode = 0;
+                fixture::geometryAvailable = false;
+                fixture::keyboardAvailable = false;
+                server.buttons = 0x10;
+                wait([] { return ReadActivationKeyState(0x06).down; });
+                const auto pressed = GetDeviceStatus();
+                const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(6);
+                while (std::chrono::steady_clock::now() < deadline) {
+                    tick(held);
+                    CHECK(s_status.aimKeyDown);
+                    CHECK(GetDeviceStatus().physicalButtonsAvailable);
+                    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+                }
+                const auto quiet = GetDeviceStatus();
+                CHECK(quiet.inputMonitorPort == pressed.inputMonitorPort);
+                CHECK(quiet.inputMonitorPackets == pressed.inputMonitorPackets);
+                CHECK(quiet.physicalInputUpdatedAtMs == pressed.physicalInputUpdatedAtMs);
+                CHECK(quiet.physicalInputValidatedAtMs > pressed.physicalInputValidatedAtMs);
+                CHECK(quiet.moveRequests > pressed.moveRequests);
+                server.buttons = 0;
+                wait([] { const auto key = ReadActivationKeyState(0x06); return key.available && !key.down; });
+                tick(held);
+                CHECK(!s_status.aimKeyDown);
+            }
+            {
+                auto toggled = ResetFixture();
+                toggled.aimKey = 0x06;
+                toggled.aimActivationMode = 1;
+                fixture::keyboardAvailable = false;
+                tick(toggled);
+                server.buttons = 0x10;
+                wait([] { return ReadActivationKeyState(0x06).down; });
+                tick(toggled);
+                CHECK(s_status.aimKeyDown);
+                server.buttons = 0;
+                wait([] { const auto key = ReadActivationKeyState(0x06); return key.available && !key.down; });
+                tick(toggled);
+                std::this_thread::sleep_for(std::chrono::milliseconds(1500));
+                tick(toggled);
+                CHECK(s_status.aimKeyDown);
+                KeyCaptureState capture;
+                capture.Begin(ReadControlKeySnapshot());
+                CHECK(capture.Observe(ReadControlKeySnapshot()) == 0);
+                server.buttons = 0x10;
+                wait([] { return ReadActivationKeyState(0x06).down; });
+                CHECK(capture.Observe(ReadControlKeySnapshot()) == 0x06);
+                CHECK(capture.Observe(ReadControlKeySnapshot()) == 0);
+                tick(toggled);
+                CHECK(!s_status.aimKeyDown);
+                server.buttons = 0;
+                wait([] { const auto key = ReadActivationKeyState(0x06); return key.available && !key.down; });
+                tick(toggled);
+            }
             for (int source = 0; source < 4; ++source) for (int mode = 0; mode < 2; ++mode) {
                 auto settings = ResetFixture();
                 g::menuOpen = true;
@@ -147,7 +236,7 @@ int RunNetworkTargetIntegration()
                         return value.available && value.down == down;
                     });
                 };
-                const auto frame = [&] { fixture::snapshot.sampledAtUs = fixture::DataNowUs(); Tick(settings); };
+                const auto frame = [&] { tick(settings); };
                 press(false);
                 if (source == 3) std::this_thread::sleep_for(std::chrono::milliseconds(270));
                 frame();
@@ -155,7 +244,7 @@ int RunNetworkTargetIntegration()
                 press(true); frame();
                 CHECK(s_status.aimKeyDown);
                 CHECK(s_status.phase == target::RuntimePhase::Tracking);
-                wait([&] { return server.moves.load() > movesBefore; });
+                wait([&] { frame(); return server.moves.load() > movesBefore; });
                 press(false); frame();
                 if (mode == 1) {
                     CHECK(s_status.aimKeyDown);
@@ -166,6 +255,147 @@ int RunNetworkTargetIntegration()
                 const auto queued = GetDeviceStatus().moveRequests;
                 for (int i = 0; i < 5; ++i) frame();
                 CHECK(GetDeviceStatus().moveRequests == queued);
+            }
+
+            {
+                wait([] {
+                    const auto status = GetDeviceStatus();
+                    return !status.moveInFlight && !status.movePending;
+                });
+                auto continuous = ResetFixture();
+                continuous.aimKey = 0x06;
+                continuous.aimActivationMode = 0;
+                fixture::geometryAvailable = false;
+                fixture::keyboardAvailable = false;
+                server.buttons = 0x10;
+                wait([] { return ReadActivationKeyState(0x06).down; });
+                const auto beforeContinuous = GetDeviceStatus().moveCompletions;
+                uint64_t appliedToken = 0;
+                bool targetMoved = false;
+                for (int frame = 0; frame < 128 && GetDeviceStatus().moveCompletions < beforeContinuous + 12; ++frame) {
+                    tick(continuous);
+                    wait([] {
+                        const auto status = GetDeviceStatus();
+                        return !status.moveInFlight && !status.movePending;
+                    });
+                    const auto receipt = GetMoveReceipt(s_outputFeedback.token);
+                    if (receipt.state == MoveDeliveryState::Sent && receipt.token != appliedToken) {
+                        CHECK(receipt.sampledAtUs >= receipt.sentAtUs);
+                        CHECK(receipt.sentAtUs > fixture::snapshot.sampledAtUs + 1000000);
+                        const float scale = fixture::snapshot.sensitivity *
+                            fixture::snapshot.fovSensitivityAdjust * target::policy::kMouseYawDegrees;
+                        fixture::snapshot.viewAngles.x += receipt.y * scale;
+                        fixture::snapshot.viewAngles.y -= receipt.x * scale;
+                        appliedToken = receipt.token;
+                    }
+                    if (!targetMoved && frame > 0 && !s_outputFeedback.diagnostics.pending &&
+                        s_status.aimMove.angularErrorDegrees < 0.01f) {
+                        auto& movingPlayer = fixture::snapshot.players[1];
+                        auto& movingHead = movingPlayer.hitboxes[0];
+                        movingHead.start.y += 40;
+                        movingHead.center.y += 40;
+                        movingHead.end.y += 40;
+                        for (auto& bone : movingPlayer.bones) bone.y += 40;
+                        targetMoved = true;
+                    }
+                    std::this_thread::sleep_for(std::chrono::milliseconds(4));
+                }
+                CHECK(targetMoved);
+                if (GetDeviceStatus().moveCompletions <= beforeContinuous + 8) {
+                    std::cerr << "Continuous feedback: moves=" << GetDeviceStatus().moveCompletions - beforeContinuous
+                        << " samples=" << s_outputFeedback.diagnostics.latencySamples
+                        << " pending=" << s_outputFeedback.diagnostics.pending
+                        << " age=" << s_outputFeedback.diagnostics.ageUs
+                        << " phase=" << static_cast<int>(s_status.phase)
+                        << " reason=" << static_cast<int>(s_status.aimMove.reason)
+                        << " expected=" << s_outputFeedback.diagnostics.expectedYaw
+                        << " observed=" << s_outputFeedback.diagnostics.observedYaw
+                        << " view=" << fixture::snapshot.viewAngles.y
+                        << " angular_error=" << s_status.aimMove.angularErrorDegrees
+                        << " gain=" << s_status.aimMove.assistanceGain << '\n';
+                }
+                CHECK(GetDeviceStatus().moveCompletions > beforeContinuous + 8);
+                CHECK(s_outputFeedback.diagnostics.latencySamples > 8);
+                CHECK(s_outputFeedback.diagnostics.timeouts == 0);
+                server.buttons = 0;
+                wait([] { return !ReadActivationKeyState(0x06).down; });
+                tick(continuous);
+            }
+
+            for (const int mode : {0, 1}) {
+                wait([] { const auto value = GetDeviceStatus(); return !value.movePending && !value.moveInFlight; });
+                server.buttons = 0;
+                wait([] { const auto value = ReadActivationKeyState(0x06); return value.available && !value.down; });
+                auto handoff = ResetFixture();
+                handoff.aimKey = 0x06;
+                handoff.aimActivationMode = mode;
+                handoff.aimVisibleOnly = false;
+                handoff.weaponProfiles[1].aimDamageCheck = false;
+                handoff.weaponProfiles[1].aimSmoothing = 50;
+                fixture::geometryAvailable = false;
+                fixture::keyboardAvailable = false;
+                auto& snap = fixture::snapshot;
+                snap.viewAngles.y = std::atan2(50.0f, 1000.0f) * 180.0f / kPi;
+                tick(handoff);
+                server.buttons = 0x11;
+                wait([] { return ReadActivationKeyState(0x06).down; });
+                tick(handoff);
+                CHECK(s_status.aimKeyDown);
+                const auto heldPacketCount = GetDeviceStatus().inputMonitorPackets;
+                if (mode == 1) {
+                    server.buttons = 1;
+                    wait([] { return !ReadActivationKeyState(0x06).down; });
+                    tick(handoff);
+                    CHECK(s_status.aimKeyDown);
+                }
+                uint64_t applied = 0;
+                const auto apply = [&] {
+                    wait([] { const auto value = GetDeviceStatus(); return !value.movePending && !value.moveInFlight; });
+                    const auto receipt = GetMoveReceipt(s_outputFeedback.token);
+                    if (receipt.state == MoveDeliveryState::Sent && receipt.token != applied) {
+                        snap.viewAngles.x += receipt.y * 0.022f;
+                        snap.viewAngles.y -= receipt.x * 0.022f;
+                        applied = receipt.token;
+                    }
+                    std::this_thread::sleep_for(std::chrono::milliseconds(4));
+                };
+                snap.localShotsFired = 3;
+                snap.localAimPunch = {-0.5f, 0.25f, 0};
+                tick(handoff); apply();
+                const auto original = snap.players[1];
+                snap.players[1].health = 0;
+                snap.localShotsFired = 4;
+                snap.localAimPunch = {-1, 0.3f, 0};
+                const auto beforeGap = GetDeviceStatus().moveRequests;
+                for (int frame = 0; frame < 4; ++frame) {
+                    tick(handoff); apply();
+                    CHECK(s_status.aimKeyDown && s_status.targetSlot == -1);
+                }
+                CHECK(GetDeviceStatus().moveRequests > beforeGap);
+                auto& second = snap.players[2];
+                second = original;
+                second.pawn += 0x1000;
+                second.pawnHandle += 1;
+                for (auto& bone : second.bones) bone.y += 20;
+                second.hitboxes[0].start.y += 20;
+                second.hitboxes[0].center.y += 20;
+                second.hitboxes[0].end.y += 20;
+                const auto beforeSecond = GetDeviceStatus().moveRequests;
+                for (int frame = 0; frame < 64; ++frame) {
+                    tick(handoff); apply();
+                    CHECK(s_status.aimKeyDown && s_runtime.aim.targetSlot == 2);
+                    CHECK(std::fabs(snap.viewAngles.x + snap.localAimPunch.x * 2) < 0.04f);
+                }
+                CHECK(GetDeviceStatus().moveRequests > beforeSecond);
+                CHECK(s_outputFeedback.diagnostics.timeouts == 0);
+                if (mode == 0) CHECK(GetDeviceStatus().inputMonitorPackets == heldPacketCount);
+                server.buttons = mode == 1 ? 0x11 : 0;
+                wait([&] { return ReadActivationKeyState(0x06).down == (mode == 1); });
+                tick(handoff);
+                CHECK(!s_status.aimKeyDown);
+                server.buttons = 0;
+                wait([] { return !ReadActivationKeyState(0x06).down; });
+                tick(handoff);
             }
 
             auto settings = ResetFixture();
@@ -181,7 +411,7 @@ int RunNetworkTargetIntegration()
             server.buttons = 0x10;
             wait([] { return ReadActivationKeyState(0x06).down; });
             for (int i = 0; i < 50 && server.downs.load() == downsBefore; ++i) {
-                fixture::snapshot.sampledAtUs = fixture::DataNowUs(); Tick(settings);
+                tick(settings);
                 s_runtime.trigger.stableSince = std::chrono::steady_clock::now() - std::chrono::seconds(1);
                 std::this_thread::sleep_for(std::chrono::milliseconds(2));
             }
@@ -189,35 +419,86 @@ int RunNetworkTargetIntegration()
             CHECK(s_runtime.trigger.assist.windUpdatedAtUs == 0);
             wait([&] { return server.ups.load() > upsBefore; });
             for (int i = 0; i < 30; ++i) {
-                fixture::snapshot.sampledAtUs = fixture::DataNowUs(); Tick(settings);
+                tick(settings);
             }
             CHECK(server.downs.load() == downsBefore + 1);
             server.buttons = 0;
             wait([] { return !ReadActivationKeyState(0x06).down; });
 
+            wait([] {
+                const auto output = GetDeviceStatus();
+                const auto click = GetLeftClickStatus();
+                return !output.movePending && !output.moveInFlight && !output.probeInFlight &&
+                    !click.outputDown && !click.active;
+            });
             CHECK(RequestLeftButton(true));
             wait([] { return GetLeftClickStatus().outputDown; });
             const auto batches = GetDeviceStatus().moveCompletions;
-            CHECK(RequestMove(3, -2));
+            const auto heldMove = RequestTrackedMove(3, -2);
+            CHECK(heldMove != 0);
             std::this_thread::sleep_for(std::chrono::milliseconds(5));
             CHECK(GetDeviceStatus().moveCompletions == batches);
             CHECK(RequestLeftButton(false));
             wait([] { return !GetLeftClickStatus().outputDown; });
-            wait([&] { return GetDeviceStatus().moveCompletions > batches; });
+            wait([&] {
+                const auto state = GetMoveReceipt(heldMove).state;
+                return state != MoveDeliveryState::Queued && state != MoveDeliveryState::Dispatching;
+            });
+            CHECK(GetMoveReceipt(heldMove).state == MoveDeliveryState::Sent);
+            CHECK(GetDeviceStatus().moveCompletions > batches);
             CHECK(server.inconsistentButtons.load() == 0);
 
+            settings = ResetFixture();
+            settings.aimKey = 0x06;
+            settings.aimActivationMode = 1;
+            fixture::primaryKey = 0x06;
+            fixture::keyboardAvailable = true;
+            fixture::keyDown = false;
+            server.buttons = 0;
+            wait([] { const auto key = ReadActivationKeyState(0x06); return key.available && !key.down; });
+            tick(settings);
+            fixture::keyDown = true;
+            server.buttons = 0x10;
+            wait([] { return GetDeviceStatus().physicalButtonMask == 0x10; });
+            tick(settings);
+            CHECK(s_status.aimKeyDown);
+            server.buttons = 0;
+            wait([] { return GetDeviceStatus().physicalButtonMask == 0; });
+            tick(settings);
+            CHECK(s_status.aimKeyDown);
+            wait([] { const auto status = GetDeviceStatus(); return !status.movePending && !status.moveInFlight; });
+            CHECK(RequestDisconnect());
+            wait([] { return GetDeviceStatus().state == ConnectionState::Disconnected; });
             server.monitorEnabled = false;
+            CHECK(RequestConnectAndTest());
+            wait([] { return GetDeviceStatus().state == ConnectionState::Connected; });
             wait([] { return !GetDeviceStatus().physicalButtonsAvailable; });
+            settings = ResetFixture();
+            settings.aimKey = 0x06;
+            settings.aimActivationMode = 1;
+            fixture::keyboardAvailable = true;
+            fixture::keyDown = false;
+            tick(settings);
+            CHECK(!s_status.aimKeyDown);
+            fixture::keyDown = true;
+            tick(settings);
+            CHECK(s_status.aimKeyDown);
+            fixture::keyDown = false;
+            tick(settings);
+            CHECK(s_status.aimKeyDown);
+            fixture::keyDown = true;
+            tick(settings);
+            CHECK(!s_status.aimKeyDown);
             settings = ResetFixture();
             settings.aimKey = 0x06; settings.aimActivationMode = 0;
             fixture::keyDown = false;
             std::this_thread::sleep_for(std::chrono::milliseconds(270));
-            Tick(settings);
+            tick(settings);
             const auto beforeFallback = GetDeviceStatus().moveRequests;
-            fixture::keyDown = true; Tick(settings);
+            fixture::keyDown = true; tick(settings);
             CHECK(s_status.aimKeyDown);
             CHECK(GetDeviceStatus().moveRequests > beforeFallback);
-            fixture::keyboardAvailable = false; Tick(settings);
+            fixture::keyboardAvailable = false; tick(settings);
             CHECK(!s_status.aimKeyDown);
             CHECK(GetDeviceStatus().state == ConnectionState::Connected);
 
@@ -234,12 +515,39 @@ int RunNetworkTargetIntegration()
                 CHECK(RequestMove(11, -12));
                 wait([&] { return server.moveAckBlocked.load(); });
             };
+            server.monitorEnabled = true;
+            server.buttons = 0x10;
+            fixture::keyboardAvailable = false;
+            wait([] { return GetDeviceStatus().physicalButtonsAvailable && ReadActivationKeyState(0x06).down; });
+            blockMove();
+            const auto releaseAt = std::chrono::steady_clock::now();
+            server.buttons = 0;
+            wait([] { const auto key = ReadActivationKeyState(0x06); return key.available && !key.down; });
+            CHECK(std::chrono::steady_clock::now() - releaseAt < std::chrono::milliseconds(100));
+            CHECK(GetDeviceStatus().moveInFlight);
+            server.buttons = 1;
+            wait([] { return GetDeviceStatus().physicalButtonMask == 1; });
+            CHECK(TryRequestLeftClick(18) == ClickRequestResult::ManualInput);
+            CHECK(GetDeviceStatus().moveInFlight);
+            server.buttons = 0;
+            wait([] { return GetDeviceStatus().physicalButtonMask == 0; });
+            server.releaseMoveAck = true;
+            drain();
             blockMove();
             const int beforeLatest = server.moves.load();
             const auto replacedBefore = GetDeviceStatus().moveReplacements;
-            for (int i = 1; i <= 100; ++i) CHECK(RequestMove(i, -i));
+            uint64_t previous = 0, last = 0;
+            for (int i = 1; i <= 100; ++i) {
+                last = RequestTrackedMove(i, -i);
+                CHECK(last != 0 && GetMoveReceipt(last).state == MoveDeliveryState::Queued);
+                if (previous) CHECK(GetMoveReceipt(previous).state == MoveDeliveryState::Replaced);
+                previous = last;
+            }
             server.releaseMoveAck = true;
             drain();
+            const auto delivered = GetMoveReceipt(last);
+            CHECK(delivered.state == MoveDeliveryState::Sent && delivered.sentAtUs >= delivered.dispatchAtUs);
+            CHECK(delivered.dispatchAtUs >= delivered.queuedAtUs && delivered.x == 100 && delivered.y == -100);
             CHECK(server.moves.load() == beforeLatest + 1);
             CHECK(server.lastMoveX.load() == 100 && server.lastMoveY.load() == -100);
             CHECK(GetDeviceStatus().moveReplacements == replacedBefore + 99);
@@ -247,12 +555,20 @@ int RunNetworkTargetIntegration()
             blockMove();
             const int beforeExpiry = server.moves.load();
             const auto expiredBefore = GetDeviceStatus().moveExpirations;
-            CHECK(RequestMove(79, -80, 1000));
+            const auto expiredToken = RequestTrackedMove(79, -80, 1000);
+            CHECK(expiredToken != 0);
             std::this_thread::sleep_for(std::chrono::milliseconds(5));
             server.releaseMoveAck = true;
             drain();
             CHECK(server.moves.load() == beforeExpiry);
             CHECK(GetDeviceStatus().moveExpirations == expiredBefore + 1);
+            CHECK(GetMoveReceipt(expiredToken).state == MoveDeliveryState::Expired);
+            blockMove();
+            const auto cancelledToken = RequestTrackedMove(10, -10);
+            CancelPendingMoves();
+            CHECK(GetMoveReceipt(cancelledToken).state == MoveDeliveryState::Cancelled);
+            server.releaseMoveAck = true;
+            drain();
 
             blockMove();
             const int beforeBusyDowns = server.downs.load();
@@ -276,16 +592,15 @@ int RunNetworkTargetIntegration()
                 settings.weaponProfiles[1].aimWindMouse = true;
                 settings.aimKey = 0x06;
                 fixture::keyDown = false;
-                Tick(settings);
+                tick(settings);
                 fixture::keyDown = true;
-                Tick(settings);
+                tick(settings);
                 drain();
                 fixture::keyDown = false;
-                Tick(settings);
+                tick(settings);
                 blockMove();
-                fixture::snapshot.sampledAtUs = fixture::DataNowUs();
                 const auto beforeBlocked = GetDeviceStatus().moveRequests;
-                Tick(settings);
+                tick(settings);
                 CHECK(!GetDeviceStatus().movePending);
                 CHECK(GetDeviceStatus().moveRequests == beforeBlocked);
                 CHECK(s_status.aimMove.reason == target::MoveBlockReason::OutputBusy);
@@ -302,22 +617,30 @@ int RunNetworkTargetIntegration()
                     fixture::geometryAvailable = true;
                     fixture::wallBlocks = true;
                 }
-                Tick(settings, cancellation == 1);
+                tick(settings, cancellation == 1);
                 CHECK(!GetDeviceStatus().movePending);
                 CHECK(GetDeviceStatus().moveCancellations > cancelledBefore);
                 server.releaseMoveAck = true;
                 drain();
                 CHECK(server.moves.load() == beforeCancel);
             }
+            server.monitorEnabled = false;
+            server.replyEnabled = false;
+            fixture::keyboardAvailable = false;
+            CHECK(RequestMove(3, 1));
+            wait([] { return GetDeviceStatus().state == ConnectionState::Error; }, 4);
+            CHECK(!ReadActivationKeyState(0x06).available);
+            CHECK(!GetDeviceStatus().physicalButtonsAvailable);
             CHECK(RequestDisconnect());
             CHECK(TryRequestLeftClick(18) == ClickRequestResult::Unavailable);
             fixture::keyDown = false;
             server.monitorEnabled = true;
+            server.replyEnabled = true;
         }
         Shutdown();
     }
     WSACleanup();
     if (failures) { std::cerr << failures << " Target/input integration failures\n"; return 1; }
-    std::cout << "Target/input integration passed: KMBox/Ferrum UDP, Hold/Toggle, aim/trigger, 100-to-1 coalescing, expiry, 7 cancellation paths including geometry readiness, busy movement/probe, release priority, missing monitor.\n";
+    std::cout << "Target/input integration passed: KMBox/Ferrum event-only UDP, 6s quiet Hold, release during blocked ACK, connection-loss reset, continuous feedback across independent clocks, Hold/Toggle, aim/trigger, 100-to-1 coalescing, expiry, 7 cancellation paths including geometry readiness, busy movement/probe, release priority, missing monitor.\n";
     return 0;
 }

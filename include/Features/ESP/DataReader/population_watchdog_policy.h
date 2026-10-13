@@ -28,10 +28,10 @@ namespace esp::data
     inline constexpr uint64_t kPopulationWatchdogHardAgeUs = 5500000u;
     inline constexpr uint64_t kPopulationWatchdogStaleCommittedResetAgeUs = 1500000u;
     inline constexpr uint64_t kPopulationWatchdogHardCooldownUs = 8000000u;
-    inline constexpr uint64_t kLaunchUnderresolvedMinResetAgeUs = 800000u;
+    inline constexpr uint64_t kLaunchUnderresolvedMinResetAgeUs = 250000u;
     inline constexpr uint64_t kLaunchUnderresolvedMaxResetAgeUs = 12000000u;
-    inline constexpr uint64_t kLaunchUnderresolvedProbeAgeUs = 600000u;
-    inline constexpr uint64_t kLaunchUnderresolvedRepairAgeUs = 2200000u;
+    inline constexpr uint64_t kLaunchUnderresolvedProbeAgeUs = 150000u;
+    inline constexpr uint64_t kLaunchUnderresolvedRepairAgeUs = 1100000u;
     inline constexpr uint64_t kLaunchUnderresolvedFullAgeUs = 4000000u;
     inline constexpr uint64_t kLaunchUnderresolvedRefreshCooldownUs = 900000u;
     inline constexpr uint64_t kStableLowControllerGuardUs = 5000000u;

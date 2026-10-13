@@ -551,7 +551,7 @@ app::input::KeyState app::input::ReadPrimaryKeyState(int virtualKey)
             const uint64_t nowMs = GetTickCount64();
             if (!s_ready.load(std::memory_order_acquire) ||
                 s_readFailures.load(std::memory_order_relaxed) != 0 ||
-                publishedAtMs == 0 || nowMs < publishedAtMs || nowMs - publishedAtMs > 250u)
+                !keyboard_policy::IsSampleFresh(publishedAtMs, nowMs))
                 return {};
             return {true, ((word >> (byteOffset * 8u)) & mask) != 0u};
         }
@@ -568,14 +568,21 @@ bool app::input::IsPrimaryKeyDown(int virtualKey)
 
 app::input::PrimaryKeyboardStatus app::input::GetPrimaryKeyboardStatus()
 {
+    const auto sampledAtMs = s_publishedAtMs.load(std::memory_order_acquire);
+    const auto nowMs = GetTickCount64();
+    const bool ready = s_ready.load(std::memory_order_acquire);
+    const auto failures = s_readFailures.load(std::memory_order_relaxed);
     return {
-        s_ready.load(std::memory_order_acquire),
+        ready,
         s_sourcePid.load(std::memory_order_relaxed),
-        s_readFailures.load(std::memory_order_relaxed),
+        failures,
         s_sequence.load(std::memory_order_relaxed) / 2u,
         s_resolving.load(std::memory_order_acquire),
         s_resolveAttempts.load(std::memory_order_relaxed),
         s_unreadablePages.load(std::memory_order_relaxed),
+        ready && failures == 0 && keyboard_policy::IsSampleFresh(sampledAtMs, nowMs),
+        ready && sampledAtMs != 0 && nowMs >= sampledAtMs
+            ? static_cast<int64_t>(nowMs - sampledAtMs) : -1,
     };
 }
 
@@ -596,6 +603,12 @@ void app::input::StartPrimaryKeyboardRecovery()
             if (!needsResolution) {
                 failedAttempts = 0;
                 nextAttemptMs = 0;
+                if (keyboard_policy::NeedsPoll(s_ready.load(std::memory_order_acquire),
+                        s_readFailures.load(std::memory_order_relaxed),
+                        s_publishedAtMs.load(std::memory_order_acquire), now)) {
+                    esp::recovery::DmaReadSession session;
+                    if (session.Valid()) (void)PollPrimaryKeyboard();
+                }
             } else if (now >= nextAttemptMs) {
                 esp::recovery::DmaReadSession session;
                 if (session.Valid()) {
@@ -616,7 +629,7 @@ void app::input::StartPrimaryKeyboardRecovery()
                 }
             }
             std::unique_lock waitLock(s_recoveryWaitMutex);
-            s_recoveryWake.wait_for(waitLock, stop, std::chrono::milliseconds(250), [] { return false; });
+            s_recoveryWake.wait_for(waitLock, stop, std::chrono::milliseconds(50), [] { return false; });
         }
     });
 }

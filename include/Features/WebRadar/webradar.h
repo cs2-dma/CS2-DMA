@@ -101,6 +101,7 @@ private:
     std::string BuildFallbackLiveJsonV2(const std::string& mapName, uint64_t nowMs) const;
 
     static uint64_t UnixNowMs();
+    static uint64_t MonotonicNowMs();
     static std::string BuildPlayerSteamId(int slot);
     static std::string ResolveMapName(const esp::WebRadarSnapshot& snapshot, const std::string& previousMap);
     static std::string NormalizeMapName(const std::string& rawName);
@@ -135,12 +136,13 @@ private:
     uint64_t settingsVersion_ = 1;
     esp::WebRadarSnapshot latestSnapshot_ = {};
     bool hasSnapshot_ = false;
+    uint64_t snapshotReceivedMs_ = 0;
     uint64_t snapshotVersion_ = 0;
     std::string latestPayloadJson_;
     std::string latestPayloadJsonV2_;
     uint64_t latestPayloadVersion_ = 0;
     uint64_t legacyPayloadDemandUntilMs_ = 0;
-    uint64_t bytesOutWindowUnixMs_ = 0;
+    uint64_t bytesOutWindowMs_ = 0;
     uint64_t bytesOutWindowBytes_ = 0;
 
     RuntimeStats stats_;

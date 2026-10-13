@@ -201,6 +201,10 @@ uint16_t esp::weapons::WeaponItemIdFromDesignerName(
         return 0;
 
     const std::string_view visualKey = designerName.substr(prefixOffset);
+    if (AsciiEqualsIgnoreCase(visualKey, "hkp2000"))
+        return 32;
+    if (AsciiEqualsIgnoreCase(visualKey, "healthshot"))
+        return 57;
     for (const WeaponLookupEntry& entry : kWeaponLookup) {
         if (entry.visualKey && AsciiEqualsIgnoreCase(visualKey, entry.visualKey))
             return entry.id;
@@ -225,7 +229,7 @@ esp::weapons::DroppedWeaponCategoryFromItemId(uint16_t id) noexcept
         return DroppedWeaponCategory::Shotguns;
     case 14: case 28:
         return DroppedWeaponCategory::MachineGuns;
-    case 31: case 57:
+    case 31: case 43: case 44: case 45: case 46: case 47: case 48: case 57:
         return DroppedWeaponCategory::Equipment;
     default:
         return DroppedWeaponCategory::Unknown;

@@ -349,7 +349,13 @@ void ui::tabs::WorldTab::Render(MenuState& state, IStatusSink& statusSink)
             ImGui::BeginDisabled(!g::espWorld);
             ui::widgets::ToggleRow("projectiles", "Projectiles", &g::espWorldProjectiles);
             ui::widgets::ToggleRow("smoke_timer", "Smoke Timer", &g::espWorldSmokeTimer);
+            ImGui::BeginDisabled(!g::espWorldSmokeTimer);
+            ui::widgets::ColorRow("smoke_timer_color", "Smoke Timer Color", g::espWorldSmokeTimerColor, ImGuiColorEditFlags_AlphaBar | ImGuiColorEditFlags_NoInputs);
+            ImGui::EndDisabled();
             ui::widgets::ToggleRow("molotov_timer", "Molotov Timer", &g::espWorldInfernoTimer);
+            ImGui::BeginDisabled(!g::espWorldInfernoTimer);
+            ui::widgets::ColorRow("molotov_timer_color", "Molotov Timer Color", g::espWorldInfernoTimerColor, ImGuiColorEditFlags_AlphaBar | ImGuiColorEditFlags_NoInputs);
+            ImGui::EndDisabled();
             ui::widgets::ToggleRow("decoy_timer", "Decoy Timer", &g::espWorldDecoyTimer);
             ui::widgets::ColorRow("world_color", "World Color", g::espWorldColor, ImGuiColorEditFlags_AlphaBar | ImGuiColorEditFlags_NoInputs);
             ImGui::EndDisabled();

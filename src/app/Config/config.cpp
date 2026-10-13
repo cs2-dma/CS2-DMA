@@ -35,6 +35,53 @@ namespace {
     using json = nlohmann::json;
     using IniSection = std::unordered_map<std::string, std::string>;
     using IniDocument = std::unordered_map<std::string, IniSection>;
+    constexpr int kConfigVersion = 1;
+    constexpr uintmax_t kMaxConfigBytes = 1024 * 1024;
+
+    bool IsSupportedConfig(const json& root)
+    {
+        if (!root.is_object())
+            return false;
+        const auto version = root.find("configVersion");
+        if (version != root.end() &&
+            (!version->is_number_integer() || *version < 0 || *version > kConfigVersion))
+            return false;
+        for (const char* section : {"ESP", "Target", "Radar", "WebRadar", "UI", "Screen", "Settings"}) {
+            const auto entry = root.find(section);
+            if (entry != root.end() && !entry->is_object())
+                return false;
+        }
+        return true;
+    }
+
+    bool ReadConfigDocument(const std::filesystem::path& path, json& root)
+    {
+        std::error_code ec;
+        const auto size = std::filesystem::file_size(path, ec);
+        if (ec || size == 0 || size > kMaxConfigBytes)
+            return false;
+        try {
+            std::ifstream file(path, std::ios::binary);
+            if (!file.is_open())
+                return false;
+            root = json::parse(file, nullptr, false);
+            return IsSupportedConfig(root);
+        } catch (...) {
+            return false;
+        }
+    }
+
+    bool PreserveConfigBackup(const std::filesystem::path& path)
+    {
+        std::error_code ec;
+        if (!std::filesystem::exists(path, ec))
+            return !ec;
+        auto backup = path;
+        backup += ".bak";
+        if (std::filesystem::exists(backup, ec))
+            return !ec;
+        return std::filesystem::copy_file(path, backup, std::filesystem::copy_options::none, ec);
+    }
 
     std::string s_activeProfile = "KevqDefault";
     std::mutex s_profileStateMutex;
@@ -99,6 +146,7 @@ namespace {
     struct ScreenConfigSnapshot {
         bool vsyncEnabled = true;
         int fpsLimit = 0;
+        app::display::MappingSettings mapping;
     };
 
     struct ConfigSnapshot {
@@ -119,7 +167,7 @@ namespace {
             g::radarSettings,
             g::webRadarSettings,
             g::uiSettings,
-            { g::vsyncEnabled, g::fpsLimit }
+            { g::vsyncEnabled, g::fpsLimit, g::displaySettings.mapping }
         };
     }
 
@@ -137,6 +185,7 @@ namespace {
             webradar::cfg::kMaxRealtimeIntervalMs);
         g::vsyncEnabled = snapshot.screen.vsyncEnabled;
         g::fpsLimit = snapshot.screen.fpsLimit;
+        g::displaySettings.mapping = snapshot.screen.mapping;
     }
 
     const ConfigSnapshot& GetDefaultConfig()
@@ -156,7 +205,8 @@ namespace {
             const std::string key = path.lexically_normal().generic_string();
             if (!seen.insert(key).second)
                 continue;
-            app::platform::RemoveFileIfExists(path);
+            if (PreserveConfigBackup(path))
+                app::platform::RemoveFileIfExists(path);
         }
     }
 
@@ -481,6 +531,8 @@ namespace {
             0.5f,
             4.0f,
             defaults.esp.skeletonThickness);
+        if (g::targetSettings.fovUnit < 0 || g::targetSettings.fovUnit > 1) g::targetSettings.fovUnit = 0;
+        restoreOutsideRange(g::targetSettings.fovDegrees, 0.25f, 30.0f, defaults.target.fovDegrees);
         g::targetFovRadius = target::policy::SanitizeFovRadius(
             g::targetFovRadius,
             defaults.target.fovRadius);
@@ -502,6 +554,9 @@ namespace {
             restoreOutsideRange(profile.aimAssistMaxSpeed, 1.0f, 180.0f, fallback.aimAssistMaxSpeed);
             restoreOutsideRange(profile.aimAssistDeadzone, 0.0f, 1.0f, fallback.aimAssistDeadzone);
             restoreOutsideRange(profile.aimRecoilStrength, 0.0f, 100.0f, fallback.aimRecoilStrength);
+            restoreOutsideRange(profile.aimMaxAcceleration, 50.0f, 5000.0f, fallback.aimMaxAcceleration);
+            restoreOutsideRange(profile.aimMaxJerk, 1000.0f, 200000.0f, fallback.aimMaxJerk);
+            restoreOutsideRange(profile.fovDegrees, 0.25f, 30.0f, fallback.fovDegrees);
             restoreOutsideRange(profile.aimWindGravity, 4.0f, 40.0f, fallback.aimWindGravity);
             restoreOutsideRange(profile.aimWindFluctuation, 0.0f, 40.0f, fallback.aimWindFluctuation);
             restoreOutsideRange(profile.aimWindMaxStep, 1.0f, 40.0f, fallback.aimWindMaxStep);
@@ -558,6 +613,8 @@ namespace {
         if (g::radarMode < 0 || g::radarMode > 1)
             g::radarMode = defaults.radar.mode;
         restoreOutsideRange(g::radarSize, 100.0f, 400.0f, defaults.radar.size);
+        g::displaySettings.mapping = app::display::Sanitize(g::displaySettings.mapping);
+        g::radarSettings.hud = app::display::Sanitize(g::radarSettings.hud);
         restoreOutsideRange(g::radarDotSize, 2.0f, 8.0f, defaults.radar.dotSize);
         restoreOutsideRange(g::espOffscreenSize, 6.0f, 36.0f, defaults.esp.offscreenSize);
         restoreOutsideRange(
@@ -717,12 +774,16 @@ namespace {
         LoadColor(ini, "ESP", "OffscreenColor", g::espOffscreenColor);
         LoadColor(ini, "ESP", "FlagColor", g::espFlagColor);
         LoadColor(ini, "ESP", "WorldColor", g::espWorldColor);
+        LoadColor(ini, "ESP", "WorldSmokeTimerColor", g::espWorldSmokeTimerColor);
+        LoadColor(ini, "ESP", "WorldInfernoTimerColor", g::espWorldInfernoTimerColor);
         LoadColor(ini, "ESP", "ItemColor", g::espItemColor);
         LoadColor(ini, "ESP", "BombColor", g::espBombColor);
 
         LoadBool(ini, "Target", "Enabled", g::targetEnabled);
         LoadBool(ini, "Target", "FovEnabled", g::targetFovEnabled);
         LoadBool(ini, "Target", "FovPerWeapon", g::targetFovPerWeapon);
+        LoadInt(ini, "Target", "FovUnit", g::targetSettings.fovUnit);
+        LoadFloat(ini, "Target", "FovDegrees", g::targetSettings.fovDegrees);
         LoadFloat(ini, "Target", "FovRadius", g::targetFovRadius);
         LoadColor(ini, "Target", "FovColor", g::targetFovColor);
         LoadBool(ini, "Target", "AimbotEnabled", g::targetAimbotEnabled);
@@ -868,9 +929,23 @@ namespace {
 
     bool WriteJsonConfig(const std::string& jsonPath, const json& finalRoot)
     {
+        if (!IsSupportedConfig(finalRoot))
+            return false;
         std::filesystem::path path(jsonPath);
         std::error_code ec;
+        json merged = finalRoot;
+        if (std::filesystem::exists(path, ec)) {
+            json previous;
+            if (!ReadConfigDocument(path, previous) || !PreserveConfigBackup(path))
+                return false;
+            previous.merge_patch(finalRoot);
+            merged = std::move(previous);
+        } else if (ec) {
+            return false;
+        }
         std::filesystem::create_directories(path.parent_path(), ec);
+        if (ec)
+            return false;
 
         std::filesystem::path tmpPath = path;
         tmpPath += ".tmp";
@@ -878,7 +953,7 @@ namespace {
             std::ofstream file(tmpPath, std::ios::binary | std::ios::trunc);
             if (!file.is_open())
                 return false;
-            file << finalRoot.dump(4);
+            file << merged.dump(4);
             file.flush();
             if (!file.good())
                 return false;
@@ -899,19 +974,21 @@ namespace {
 
     bool LoadJsonConfig(const std::string& jsonPath)
     {
-        std::ifstream file(jsonPath, std::ios::binary);
-        if (!file.is_open())
-            return false;
-
-        json loadedRoot = json::parse(file, nullptr, false);
-        if (loadedRoot.is_discarded() || !loadedRoot.is_object())
+        json loadedRoot;
+        if (!ReadConfigDocument(jsonPath, loadedRoot))
             return false;
 
         {
             std::lock_guard<std::recursive_mutex> lock(g::settingsMutex);
-            ApplyConfig(GetDefaultConfig());
-            ApplyLoadedConfig(loadedRoot);
-            ValidateLoadedValues();
+            const ConfigSnapshot previous = CaptureCurrentConfig();
+            try {
+                ApplyConfig(GetDefaultConfig());
+                ApplyLoadedConfig(loadedRoot);
+                ValidateLoadedValues();
+            } catch (...) {
+                ApplyConfig(previous);
+                return false;
+            }
             g::configJustLoaded = true;
 
         }
@@ -942,7 +1019,9 @@ namespace {
 
         std::error_code ec;
         if (std::filesystem::exists(jsonPath, ec)) {
-            DeleteLegacyProfileFiles(cleanName);
+            json existing;
+            if (!ReadConfigDocument(jsonPath, existing))
+                return false;
             return true;
         }
 
@@ -965,11 +1044,13 @@ namespace {
 
         const ConfigSnapshot savedSnapshot = CaptureCurrentConfig();
         const std::string savedActiveProfile = CopyActiveProfile();
+        const bool savedJustLoaded = g::configJustLoaded;
 
         const bool migrated = LoadFromLegacyPath(legacySource) && SaveToPath(jsonPath.string());
 
         ApplyConfig(savedSnapshot);
         SetActiveProfile(savedActiveProfile);
+        g::configJustLoaded = savedJustLoaded;
 
         if (migrated)
             DeleteLegacyProfileFiles(cleanName);

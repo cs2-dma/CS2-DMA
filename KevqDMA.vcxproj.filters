@@ -555,6 +555,9 @@
     <ClInclude Include="include\app\Bootstrap\startup_offsets.h">
       <Filter>Header Files\app\Bootstrap</Filter>
     </ClInclude>
+    <ClInclude Include="include\app\Bootstrap\startup_process.h">
+      <Filter>Header Files\app\Bootstrap</Filter>
+    </ClInclude>
     <ClInclude Include="include\app\Bootstrap\release_policy.h">
       <Filter>Header Files\app\Bootstrap</Filter>
     </ClInclude>
@@ -591,6 +594,15 @@
     <ClInclude Include="include\app\Core\app_state.h">
       <Filter>Header Files\app\Core</Filter>
     </ClInclude>
+    <ClInclude Include="include\app\Platform\display_mapping.h">
+      <Filter>Header Files\app\Platform</Filter>
+    </ClInclude>
+    <ClInclude Include="include\app\UI\viewport_draw_scope.h">
+      <Filter>Header Files\app\UI</Filter>
+    </ClInclude>
+    <ClInclude Include="include\app\UI\screen_mapping_controls.h">
+      <Filter>Header Files\app\UI</Filter>
+    </ClInclude>
     <ClInclude Include="include\app\Core\build_info.h">
       <Filter>Header Files\app\Core</Filter>
     </ClInclude>
@@ -616,6 +628,9 @@
       <Filter>Header Files\app\Platform</Filter>
     </ClInclude>
     <ClInclude Include="include\app\Platform\overlay.h">
+      <Filter>Header Files\app\Platform</Filter>
+    </ClInclude>
+    <ClInclude Include="include\app\Platform\graphics_recovery.h">
       <Filter>Header Files\app\Platform</Filter>
     </ClInclude>
     <ClInclude Include="include\app\Platform\win_handle.h">
@@ -701,6 +716,9 @@
       <Filter>Header Files\Features\ESP\DataReader</Filter>
     </ClInclude>
     <ClInclude Include="include\Features\ESP\DataReader\player_repair_policy.h">
+      <Filter>Header Files\Features\ESP\DataReader</Filter>
+    </ClInclude>
+    <ClInclude Include="include\Features\ESP\DataReader\observer_policy.h">
       <Filter>Header Files\Features\ESP\DataReader</Filter>
     </ClInclude>
     <ClInclude Include="include\Features\ESP\DataReader\player_slot_policy.h">
@@ -809,6 +827,9 @@
       <Filter>Header Files\Features\Target</Filter>
     </ClInclude>
     <ClInclude Include="include\Features\Target\target_policy.h">
+      <Filter>Header Files\Features\Target</Filter>
+    </ClInclude>
+    <ClInclude Include="include\Features\Target\motion_control.h">
       <Filter>Header Files\Features\Target</Filter>
     </ClInclude>
     <ClInclude Include="include\Features\Target\target_settings_policy.h">
@@ -1000,6 +1021,9 @@
     <ClInclude Include="src\Features\ESP\DataReader\world_parts\world_read_context.inl">
       <Filter>Inline Files\Features\ESP\DataReader\World</Filter>
     </ClInclude>
+    <ClInclude Include="src\Features\ESP\DataReader\world_parts\world_read_identity.inl">
+      <Filter>Inline Files\Features\ESP\DataReader\World</Filter>
+    </ClInclude>
     <ClInclude Include="src\Features\ESP\DataReader\world_parts\world_utility_probe.inl">
       <Filter>Inline Files\Features\ESP\DataReader\World</Filter>
     </ClInclude>
@@ -1156,10 +1180,11 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="src\vendor\DMALibrary\Memory\ScatterReadTracker.h" />
+    <ClInclude Include="src\vendor\DMALibrary\Memory\ProcessProbePolicy.h" />
     <None Include="src\vendor\DMALibrary\vendor-lock.json" />
     <None Include="src\Features\WebRadar\Assets\remote\server.js"><Filter>Resource Files\Features\WebRadar\Assets</Filter></None>
     <None Include="src\Features\WebRadar\Assets\maps.json"><Filter>Resource Files\Features\WebRadar\Assets</Filter></None>
     <None Include="src\Features\WebRadar\Assets\map-sources.json"><Filter>Resource Files\Features\WebRadar\Assets</Filter></None>
-    <None Include="tools\vendor\check_dma_vendor.ps1" />
+    <None Include="tools\dependencies\verify_dma.ps1" />
   </ItemGroup>
 </Project>

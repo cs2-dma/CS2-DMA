@@ -8,6 +8,7 @@
                 ++unknownUtilityProbeCount;
             const bool relevantUtilityEntity =
                 wantsWorldUtilityData &&
+                exactClass != esp::data::WorldEntityClass::DroppedWeapon &&
                 (isUtilityGrenade ||
                  knownSmokeSubclass ||
                  knownDecoySubclass ||
@@ -50,29 +51,29 @@
                        esp::data::IsWorldFieldReadComplete(bytesRead, expectedBytes);
             };
             const bool smokeTickFresh =
-                utilityFieldFresh(worldSmokeTickReadBytes[idx], sizeof(int));
+                utilityFieldFresh(worldSmokeTickReadBytes[idx], sizeof(int)) && esp::data::IsUtilityTickSample(worldSmokeTick[idx]);
             const bool smokeActiveFresh =
-                utilityFieldFresh(worldSmokeActiveReadBytes[idx], sizeof(uint8_t));
+                utilityFieldFresh(worldSmokeActiveReadBytes[idx], sizeof(uint8_t)) && esp::data::IsUtilityFlagSample(worldSmokeActive[idx]);
             const bool smokeVolumeFresh =
-                utilityFieldFresh(worldSmokeVolumeReadBytes[idx], sizeof(uint8_t));
+                utilityFieldFresh(worldSmokeVolumeReadBytes[idx], sizeof(uint8_t)) && esp::data::IsUtilityFlagSample(worldSmokeVolumeDataReceived[idx]);
             const bool smokeSpawnedFresh =
-                utilityFieldFresh(worldSmokeSpawnedReadBytes[idx], sizeof(uint8_t));
+                utilityFieldFresh(worldSmokeSpawnedReadBytes[idx], sizeof(uint8_t)) && esp::data::IsUtilityFlagSample(worldSmokeEffectSpawned[idx]);
             const bool infernoTickFresh =
-                utilityFieldFresh(worldInfernoTickReadBytes[idx], sizeof(int));
+                utilityFieldFresh(worldInfernoTickReadBytes[idx], sizeof(int)) && esp::data::IsUtilityTickSample(worldInfernoTick[idx]);
             const bool infernoLifeFresh =
-                utilityFieldFresh(worldInfernoLifeReadBytes[idx], sizeof(float));
+                utilityFieldFresh(worldInfernoLifeReadBytes[idx], sizeof(float)) && esp::data::IsInfernoLifetimeSample(worldInfernoLife[idx]);
             const bool infernoFireCountFresh =
-                utilityFieldFresh(worldInfernoFireCountReadBytes[idx], sizeof(int));
+                utilityFieldFresh(worldInfernoFireCountReadBytes[idx], sizeof(int)) && esp::data::IsInfernoCountSample(worldInfernoFireCount[idx]);
             const bool infernoPostEffectFresh =
-                utilityFieldFresh(worldInfernoPostEffectReadBytes[idx], sizeof(uint8_t));
+                utilityFieldFresh(worldInfernoPostEffectReadBytes[idx], sizeof(uint8_t)) && esp::data::IsUtilityFlagSample(worldInfernoInPostEffect[idx]);
             const bool decoyTickFresh =
-                utilityFieldFresh(worldDecoyTickReadBytes[idx], sizeof(int));
+                utilityFieldFresh(worldDecoyTickReadBytes[idx], sizeof(int)) && esp::data::IsUtilityTickSample(worldDecoyTick[idx]);
             const bool decoyClientTickFresh =
-                utilityFieldFresh(worldDecoyClientTickReadBytes[idx], sizeof(int));
+                utilityFieldFresh(worldDecoyClientTickReadBytes[idx], sizeof(int)) && esp::data::IsUtilityTickSample(worldDecoyClientTick[idx]);
             const bool explodeTickFresh =
-                utilityFieldFresh(worldExplodeTickReadBytes[idx], sizeof(int));
+                utilityFieldFresh(worldExplodeTickReadBytes[idx], sizeof(int)) && esp::data::IsUtilityTickSample(worldExplodeTick[idx]);
             const bool velocityFresh =
-                utilityFieldFresh(worldVelocityReadBytes[idx], sizeof(Vector3));
+                utilityFieldFresh(worldVelocityReadBytes[idx], sizeof(Vector3)) && IsFiniteVec(worldVelocities[idx]);
 
             using Field = esp::data::UtilityField;
             auto fieldAvailable = [&](Field field, bool fresh) {
@@ -281,8 +282,7 @@
                 smokeTickKnown &&
                 smokeRemaining <= 0.0f;
             const bool infernoExplicitTerminal =
-                s_worldInfernoLatched[idx] &&
-                infernoPostEffectFresh &&
+                infernoPostEffectAvailable &&
                 infernoPostEffectSane &&
                 infernoInPostEffect != 0u;
             const bool smokeStationaryFallbackAllowed = false;
@@ -309,7 +309,7 @@
                     infernoTickKnown,
                     infernoTickExpired ? 0.0f : infernoRemaining,
                     infernoStrongState,
-                    infernoEffectIdentity,
+                    false,
                     stationaryConfirmed,
                     s_worldUtilityStationarySinceUs[idx],
                     nowUs,

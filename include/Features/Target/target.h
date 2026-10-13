@@ -144,6 +144,8 @@ namespace target
         int shotsFired = 0;
         int pointHitbox = -1;
         float recoilScale = 2.0f;
+        float assistanceGain = 1.0f;
+        bool inputIntentEstimated = false;
     };
 
     struct GeometryCapabilities
@@ -166,6 +168,14 @@ namespace target
         float observedPitch = 0.0f;
         float observedYaw = 0.0f;
         uint64_t timeouts = 0;
+        uint64_t rebases = 0;
+        uint64_t token = 0;
+        uint64_t queueAgeUs = 0;
+        uint64_t sentAtUs = 0;
+        uint64_t latencySamples = 0;
+        uint64_t latencyP50Us = 0;
+        uint64_t latencyP95Us = 0;
+        uint64_t latencyP99Us = 0;
     };
 
     struct RuntimeStatus
@@ -198,6 +208,8 @@ namespace target
         uint64_t updatedAtUs = 0;
         uint16_t weaponId = 0;
         int weaponProfile = -1;
+        float fovRadiusX = 0.0f;
+        float fovRadiusY = 0.0f;
     };
 
     void Start();

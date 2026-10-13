@@ -127,6 +127,7 @@
         RemoteField{"cs2_dumper::schemas::client_dll::C_Inferno::m_firePositions", "client_dll.hpp", &runtime_offsets::Values::C_Inferno_m_firePositions},
         RemoteField{"cs2_dumper::schemas::client_dll::C_Inferno::m_bInPostEffectTime", "client_dll.hpp", &runtime_offsets::Values::C_Inferno_m_bInPostEffectTime},
         RemoteField{"cs2_dumper::schemas::client_dll::C_SmokeGrenadeProjectile::m_nSmokeEffectTickBegin", "client_dll.hpp", &runtime_offsets::Values::C_SmokeGrenadeProjectile_m_nSmokeEffectTickBegin},
+        RemoteField{"cs2_dumper::schemas::client_dll::C_SmokeGrenadeProjectile::m_vSmokeDetonationPos", "client_dll.hpp", &runtime_offsets::Values::C_SmokeGrenadeProjectile_m_vSmokeDetonationPos},
         RemoteField{"cs2_dumper::schemas::client_dll::C_SmokeGrenadeProjectile::m_bDidSmokeEffect", "client_dll.hpp", &runtime_offsets::Values::C_SmokeGrenadeProjectile_m_bDidSmokeEffect},
         RemoteField{"cs2_dumper::schemas::client_dll::C_SmokeGrenadeProjectile::m_bSmokeVolumeDataReceived", "client_dll.hpp", &runtime_offsets::Values::C_SmokeGrenadeProjectile_m_bSmokeVolumeDataReceived},
         RemoteField{"cs2_dumper::schemas::client_dll::C_SmokeGrenadeProjectile::m_bSmokeEffectSpawned", "client_dll.hpp", &runtime_offsets::Values::C_SmokeGrenadeProjectile_m_bSmokeEffectSpawned},

@@ -673,6 +673,8 @@ namespace esp {
     extern std::atomic<int32_t>  s_worldUtilityCandidateCountStat;
     extern std::atomic<int32_t>  s_worldClassifiedCandidateCountStat;
     extern std::atomic<int32_t>  s_worldIdentityPendingCountStat;
+    extern std::atomic<uint64_t> s_worldReadCountsStat;
+    extern std::atomic<uint32_t> s_worldReadDemandStat;
     extern std::atomic<uint64_t> s_worldMarkerCapacityDropsStat;
     extern std::atomic<uint64_t> s_worldMarkerReadGapHoldsStat;
     extern std::atomic<uint64_t> s_worldPositionReadMissesStat;

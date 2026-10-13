@@ -8,6 +8,12 @@
 
 namespace esp::render
 {
+    inline bool HasOverlayDrawDemand(bool players, bool world, bool items,
+        bool radar, bool spectators, bool bombTimer, bool grenadeHelper) noexcept
+    {
+        return players || world || items || radar || spectators || bombTimer || grenadeHelper;
+    }
+
     struct OffscreenDirection
     {
         float x = 0.0f;

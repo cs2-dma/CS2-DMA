@@ -8,7 +8,7 @@ import urllib.request
 from pathlib import Path
 from PIL import Image, ImageChops
 
-ROOT = Path(__file__).resolve().parents[2]
+ROOT = Path(__file__).resolve().parents[3]
 ASSETS = ROOT / 'src/Features/WebRadar/Assets'
 POOL_REVISION = '3fc98e763328f7d1627405b389d1b6b69c5b0e38'
 

@@ -191,12 +191,21 @@ foreach ($callout in $translatedCallouts) {
 
 $buildInfoText = Get-Content -LiteralPath $buildInfoPath -Raw
 foreach ($versionDeclaration in @(
-        '#define KEVQDMA_VERSION_NUMERIC 1,0,7,0'
-        '#define KEVQDMA_VERSION_STRING "1.0.7"'
         '#define KEVQDMA_VERSION_TAG "v" KEVQDMA_VERSION_STRING'
         'inline constexpr std::string_view kVersionTag = KEVQDMA_VERSION_TAG;')) {
     if (-not $buildInfoText.Contains($versionDeclaration)) {
         $errors.Add("Application version declaration is missing: $versionDeclaration")
+    }
+}
+$numericVersion = [regex]::Match($buildInfoText, '(?m)^#define KEVQDMA_VERSION_NUMERIC (\d+),(\d+),(\d+),(\d+)\s*$')
+$stringVersion = [regex]::Match($buildInfoText, '(?m)^#define KEVQDMA_VERSION_STRING "(\d+)\.(\d+)\.(\d+)"\s*$')
+if (-not $numericVersion.Success -or -not $stringVersion.Success) {
+    $errors.Add('Application version declarations are missing or malformed.')
+} else {
+    for ($part = 1; $part -le 3; ++$part) {
+        if ($numericVersion.Groups[$part].Value -ne $stringVersion.Groups[$part].Value) {
+            $errors.Add('Numeric and displayed application versions disagree.')
+        }
     }
 }
 foreach ($resourceVersionUse in @(
@@ -256,8 +265,8 @@ foreach ($difference in Compare-Object $savedConfigGlobals $loadedConfigGlobals)
 $vendorVersionChecks = @(
     @{
         Path = 'src\vendor\imgui\imgui.h'
-        Pattern = '#define IMGUI_VERSION       "1.92.9"'
-        Name = 'Dear ImGui 1.92.9'
+        Pattern = '#define IMGUI_VERSION       "1.92.9b"'
+        Name = 'Dear ImGui 1.92.9b'
     },
     @{
         Path = 'src\vendor\json\json.hpp'

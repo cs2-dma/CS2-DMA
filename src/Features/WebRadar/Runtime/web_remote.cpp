@@ -6,6 +6,7 @@
 #include "app/Config/project_paths.h"
 #include "app/Core/fallback_log.h"
 #include "app/Core/globals.h"
+#include "app/Core/build_info.h"
 #include "app/Core/text_utils.h"
 #include "app/Platform/file_replace.h"
 #include <Windows.h>
@@ -782,7 +783,7 @@ namespace
         request += std::to_string(settings.webPort);
         request += "\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Version: 13\r\nSec-WebSocket-Key: ";
         request += key;
-        request += "\r\nUser-Agent: KevqDMA-WebRadar/1.0\r\n\r\n";
+        request += "\r\nUser-Agent: " + app::build_info::HttpUserAgent() + "\r\n\r\n";
 
         if (!SendAll(socketHandle, request.data(), request.size())) {
             if (outError)
@@ -1205,6 +1206,7 @@ namespace
             const HRSRC resource = FindResourceA(module, "REMOTE_SERVER_JS", MAKEINTRESOURCEA(10));
             if (!resource) return std::string{};
             const HGLOBAL loaded = LoadResource(module, resource);
+            if (!loaded) return std::string{};
             const char* data = static_cast<const char*>(LockResource(loaded));
             return data ? std::string(data, SizeofResource(module, resource)) : std::string{};
         }();
@@ -1213,7 +1215,9 @@ namespace
 
     const char* PackageJson()
     {
-        return R"JSON({"name":"kevqdma-webradar-server","version":"1.0.0","private":true,"main":"server.js","scripts":{"start":"node server.js"},"dependencies":{"express":"^4.19.2","ws":"^8.20.0"},"engines":{"node":">=18"}})JSON";
+        return R"JSON({"name":"kevqdma-webradar-server","version":")JSON"
+            KEVQDMA_VERSION_STRING
+            R"JSON(","private":true,"main":"server.js","scripts":{"start":"node server.js"},"dependencies":{"express":"5.3.0","ws":"8.22.0"},"engines":{"node":">=18"}})JSON";
     }
 
     struct ResourceExportContext {
@@ -1472,6 +1476,7 @@ namespace webradar::remote
             << "test -f \"$ROOT/public/index.html\" || { echo 'missing public/index.html'; exit 13; }; "
             << "command -v node >/dev/null 2>&1 || { echo 'node is not installed'; exit 14; }; "
             << "command -v npm >/dev/null 2>&1 || { echo 'npm is not installed'; exit 15; }; "
+            << "node -e \"if (Number(process.versions.node.split('.')[0]) < 18) process.exit(1)\" || { echo 'Node.js 18 or newer is required'; exit 19; }; "
             << "test -d \"$ROOT/node_modules/express\" || { echo 'missing express dependency'; exit 16; }; "
             << "test -d \"$ROOT/node_modules/ws\" || { echo 'missing ws dependency'; exit 17; }; "
             << "systemctl is-active --quiet kevqdma-webradar || { systemctl --no-pager --lines=20 status kevqdma-webradar 2>&1; exit 18; }; "
@@ -1699,6 +1704,7 @@ namespace webradar::remote
             << "apt-get update -y; "
             << "apt-get install -y nodejs npm; "
             << "fi; "
+            << "node -e \"if (Number(process.versions.node.split('.')[0]) < 18) process.exit(1)\" || { echo 'Node.js 18 or newer is required'; exit 19; }; "
             << "node --version; npm --version";
 
         ReportDeployProgress(progress, "Deploy: installing Node.js/npm if missing...");

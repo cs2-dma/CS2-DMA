@@ -1,6 +1,8 @@
 #include "Features/Settings/UI/settings_sections.h"
 
 #include "app/Core/globals.h"
+#include "app/Core/build_info.h"
+#include "app/UI/screen_mapping_controls.h"
 #include "app/UI/MenuShell/menu_utils.h"
 #include "app/UI/MenuShell/ui_widgets.h"
 #include "app/Config/config.h"
@@ -455,7 +457,7 @@ void ui::tabs::settings_sections::RenderScreenSection()
     ImGui::Dummy(ImVec2(0.0f, 6.0f));
     ImGui::TextDisabled(
         "%s",
-        KEVQ_TR("Overlay size is detected automatically from the game window."));
+        KEVQ_TR("Output size follows the selected overlay monitor/window."));
 
     ImGui::Dummy(ImVec2(0.0f, 8.0f));
 
@@ -481,6 +483,8 @@ void ui::tabs::settings_sections::RenderScreenSection()
         ImGui::EndCombo();
     }
 
+    ImGui::Dummy(ImVec2(0.0f, 8.0f));
+    ui::RenderScreenMappingControls();
     ImGui::Dummy(ImVec2(0.0f, 8.0f));
     ui::widgets::ToggleRow("vsync", "VSync", &g::vsyncEnabled);
     if (!g::vsyncEnabled) {
@@ -987,7 +991,12 @@ void ui::tabs::settings_sections::RenderDebugWindow(bool* open)
     if (ImGui::Button(KEVQ_TR("Copy Diagnostics"), ImVec2(ImGui::GetContentRegionAvail().x, 30.0f))) {
         char line[1024] = {};
         std::string diagnostics;
-        diagnostics.reserve(2048);
+        diagnostics.reserve(8192);
+        std::snprintf(line, sizeof(line), "build version=%s stamp=%s overlay_px=%.0f/%.0f game_px=%d/%d\n",
+            app::build_info::VersionTag().c_str(), app::build_info::DisplayStamp().c_str(),
+            ImGui::GetIO().DisplaySize.x, ImGui::GetIO().DisplaySize.y,
+            g::displaySettings.mapping.gameWidth, g::displaySettings.mapping.gameHeight);
+        diagnostics += line;
 
         const char* dataQuality = "healthy";
         for (const auto* subsystem : { &debug.playersCore, &debug.cameraView,
@@ -1249,6 +1258,18 @@ void ui::tabs::settings_sections::RenderDebugWindow(bool* open)
         diagnostics += line;
 
         std::snprintf(line, sizeof(line),
+            "world_reads last_scan entities=%u details=%u identities=%u names=%u esp=%d webradar=%d utility=%d due=%d offsets_identity/smoke/inferno=%d/%d/%d\n",
+            static_cast<unsigned>(debug.worldReadCounts & 0xFFFFu),
+            static_cast<unsigned>((debug.worldReadCounts >> 16) & 0xFFFFu),
+            static_cast<unsigned>((debug.worldReadCounts >> 32) & 0xFFFFu),
+            static_cast<unsigned>((debug.worldReadCounts >> 48) & 0xFFFFu),
+            (debug.worldReadDemand & 1u) != 0u, (debug.worldReadDemand & 2u) != 0u,
+            (debug.worldReadDemand & 4u) != 0u, (debug.worldReadDemand & 8u) != 0u,
+            (debug.worldReadDemand & 16u) != 0u, (debug.worldReadDemand & 32u) != 0u,
+            (debug.worldReadDemand & 64u) != 0u);
+        diagnostics += line;
+
+        std::snprintf(line, sizeof(line),
             "player_core_rejections incomplete_mask=0x%llX invalid_values_mask=0x%llX\n",
             static_cast<unsigned long long>(debug.playerCoreIncompleteMask),
             static_cast<unsigned long long>(debug.playerCoreInvalidMask));
@@ -1313,6 +1334,11 @@ void ui::tabs::settings_sections::RenderDebugWindow(bool* open)
             msFromUs(debug.overlay.drawUs),
             msFromUs(debug.overlay.presentUs),
             msFromUs(debug.overlay.pacingWaitUs));
+        diagnostics += line;
+        std::snprintf(line, sizeof(line),
+            "graphics recoveries=%llu last_error=0x%08X\n",
+            static_cast<unsigned long long>(debug.overlay.graphicsRecoveries),
+            static_cast<unsigned>(debug.overlay.graphicsLastError));
         diagnostics += line;
 
         std::snprintf(line, sizeof(line),

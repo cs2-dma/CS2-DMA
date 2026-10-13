@@ -10,6 +10,20 @@
 
 namespace app::input::keyboard_policy
 {
+    inline constexpr uint64_t kMaximumSampleAgeMs = 250;
+
+    inline bool IsSampleFresh(uint64_t sampledAtMs, uint64_t nowMs)
+    {
+        return sampledAtMs != 0 && nowMs >= sampledAtMs &&
+            nowMs - sampledAtMs <= kMaximumSampleAgeMs;
+    }
+
+    inline bool NeedsPoll(bool ready, uint32_t failures, uint64_t sampledAtMs, uint64_t nowMs)
+    {
+        return ready && (failures != 0 || sampledAtMs == 0 || nowMs < sampledAtMs ||
+            nowMs - sampledAtMs >= 100);
+    }
+
     inline bool NeedsResolution(bool ready, uint32_t failures, uint64_t failedSinceMs, uint64_t nowMs)
     {
         return !ready || (failures >= 8 && failedSinceMs != 0 && nowMs >= failedSinceMs &&

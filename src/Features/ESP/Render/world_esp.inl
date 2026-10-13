@@ -1,4 +1,4 @@
-if (g::espWorld || (g::espEnabled && g::espItem)) {
+if (g::espWorld || g::espItem) {
     for (int i = 0; i < worldMarkerCount; ++i) {
         const WorldMarker& marker = worldMarkers[i];
         if (!marker.valid)
@@ -102,11 +102,9 @@ if (g::espWorld || (g::espEnabled && g::espItem)) {
             (marker.type == WorldMarkerType::Smoke && g::espWorldSmokeTimer) ||
             (marker.type == WorldMarkerType::Inferno && g::espWorldInfernoTimer) ||
             (marker.type == WorldMarkerType::Decoy && g::espWorldDecoyTimer);
-        char markerText[96] = {};
+        char timerText[24] = {};
         if (showTimer && lifeLeft > 0.0f)
-            std::snprintf(markerText, sizeof(markerText), "%s %.1fs", markerName, static_cast<double>(lifeLeft));
-        else
-            std::snprintf(markerText, sizeof(markerText), "%s", markerName);
+            std::snprintf(timerText, sizeof(timerText), " %.1fs", static_cast<double>(lifeLeft));
 
         ImVec2 itemBoxMin = {};
         ImVec2 itemBoxMax = {};
@@ -171,7 +169,9 @@ if (g::espWorld || (g::espEnabled && g::espItem)) {
         }
 
         if (!isDroppedWeapon || g::espItemText) {
-            const ImVec2 textSize = ImGui::CalcTextSize(markerText);
+            const ImVec2 nameSize = ImGui::CalcTextSize(markerName);
+            const ImVec2 timerSize = ImGui::CalcTextSize(timerText);
+            const ImVec2 textSize(nameSize.x + timerSize.x, nameSize.y);
             const float textY = isDroppedWeapon && g::espItemHighlight
                 ? itemBoxMax.y + 3.0f
                 : markerScreen.y - textSize.y * 0.5f;
@@ -181,7 +181,15 @@ if (g::espWorld || (g::espEnabled && g::espItem)) {
                 0.0f,
                 ImVec2(markerScreen.x - textSize.x * 0.5f, textY),
                 markerColor,
-                markerText);
+                markerName);
+            if (timerText[0]) {
+                const ImU32 timerColor = marker.type == WorldMarkerType::Smoke
+                    ? ColorToImU32(g::espWorldSmokeTimerColor)
+                    : marker.type == WorldMarkerType::Inferno
+                        ? ColorToImU32(g::espWorldInfernoTimerColor) : markerColor;
+                DrawTextShadow(drawList, nullptr, 0.0f,
+                    ImVec2(markerScreen.x - textSize.x * 0.5f + nameSize.x, textY), timerColor, timerText);
+            }
         }
     }
 }

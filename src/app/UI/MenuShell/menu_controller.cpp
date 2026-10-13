@@ -18,6 +18,7 @@
 #include <Windows.h>
 
 #include <algorithm>
+#include <cstring>
 #include <string>
 
 #include <imgui.h>
@@ -132,8 +133,10 @@ void ui::MenuController::Render()
 {
     HandleOverlayKeyCapture();
 
-    if (!g::menuOpen)
+    if (!g::menuOpen) {
+        tabs::TargetTab::CancelKeyCapture();
         return;
+    }
 
     EnsureInitialized();
     HandleMenuKeyCapture();
@@ -153,6 +156,7 @@ void ui::MenuController::Render()
     }
     bool menuOpenLocal = g::menuOpen.load(std::memory_order_relaxed);
     if (!ImGui::Begin(menuTitle.c_str(), &menuOpenLocal, ImGuiWindowFlags_NoCollapse)) {
+        tabs::TargetTab::CancelKeyCapture();
         g::menuOpen.store(menuOpenLocal, std::memory_order_relaxed);
         s_forceStartupCenter = false;
         ImGui::End();
@@ -193,15 +197,18 @@ void ui::MenuController::Render()
         static_cast<unsigned>(dmaStats.consecutiveDegraded));
 
     ui::RenderVersionNotice(app::updates::GetStatus(), false);
+    bool targetRendered = false;
     if (ImGui::BeginTabBar("##tabs", ImGuiTabBarFlags_FittingPolicyResizeDown)) {
         for (const auto& tab : tabs_) {
             if (ImGui::BeginTabItem(app::localization::Get(tab->Label()))) {
+                targetRendered = std::strcmp(tab->Label(), "Target") == 0;
                 tab->Render(state_, *this);
                 ImGui::EndTabItem();
             }
         }
         ImGui::EndTabBar();
     }
+    if (!targetRendered) tabs::TargetTab::CancelKeyCapture();
 
     world::grenade_helper::RenderPopups(*this);
 

@@ -2,16 +2,22 @@
 #include "Features/ESP/Render/skeleton_projection.h"
 #include <imgui.h>
 #include <imgui_internal.h>
+#include "app/UI/viewport_draw_scope.h"
+#include "app/UI/screen_mapping_controls.h"
 
 #include "app/Localization/localization.h"
 #include "app/UI/MenuShell/ui_icons.h"
 #include "Features/ESP/UI/esp_sections.h"
 #include "Features/ESP/UI/esp_tab.h"
 #include "Features/ESP/esp.h"
+#include "Features/ESP/weapon_catalog.h"
+#include "../../../src/Features/ESP/esp_local_state.h"
 #include "Features/ESP/Render/weapon_icon_atlas.h"
 #include "Features/ESP/Render/bar_labels.h"
 #include "Features/ESP/Render/draw_policy.h"
+#include "Features/ESP/DataReader/player_commit_policy.h"
 #include "Features/ESP/Render/visual_style_policy.h"
+#include "Features/Radar/map_registry.h"
 #include "Features/Radar/UI/radar_sections.h"
 #include "Features/Target/UI/target_tab.h"
 #include "Features/Target/physics_bvh.h"
@@ -39,6 +45,7 @@
 #include <functional>
 #include <iostream>
 #include <limits>
+#include <numbers>
 #include <string>
 
 #include "../../../src/Features/ESP/Helpers/draw_corner_box.inl"
@@ -56,6 +63,8 @@ namespace ui::tabs::testing { void FollowTargetWeapon(bool follow); }
 namespace ui::tabs::testing { bool TargetTooltipRow(const char* id, ImVec4& rectangle, bool& disabled); }
 namespace ui::tabs::esp_sections::testing { void OpenSettings(const char* id); }
 namespace ui { void RenderEspPreview(); }
+const radar::MapDefinition* radar::FindMapForPosition(std::string_view, double, double, double, std::string_view) { return nullptr; }
+const radar::MapDefinition* radar::ResolveMapByBounds(double, double, double, double, bool) { return nullptr; }
 // No GPU resources in this headless suite: exercise the missing-atlas fallback.
 bool esp::render::weapon_icons::CalculateDrawSize(uint16_t, float, ImVec2*) noexcept { return false; }
 bool esp::render::weapon_icons::Draw(ImDrawList*, uint16_t, const ImVec2&, float, ImU32, bool) noexcept { return false; }
@@ -82,6 +91,8 @@ bool app::input::IsActivationKeyDown(int)
 
 app::input::KeyState app::input::ReadActivationKeyState(int) { return {}; }
 app::input::KeyState app::input::ReadPrimaryKeyState(int) { return {}; }
+app::input::ControlKeySnapshot targetControlKeysFixture = {};
+app::input::ControlKeySnapshot app::input::ReadControlKeySnapshot() { return targetControlKeysFixture; }
 
 bool app::input::IsControlKeyDown(int)
 {
@@ -140,6 +151,8 @@ namespace
     }
 
 #define CHECK(expression) Check((expression), #expression, __LINE__)
+
+    #include "world_timer_render.inl"
 
     void TestHeldGrenadeFilter()
     {
@@ -689,6 +702,55 @@ void TestHeadContour()
         click(row("trigger_auto_shot", false));
         CHECK(g::targetTriggerAutoShot != previousRepeat);
         row("trigger_force_center", true);
+        ui::tabs::testing::OpenTargetSettings("target_aimbot");
+        ui::tabs::testing::OpenTargetPage(0);
+        g::targetAimKey = 6;
+        targetControlKeysFixture = {};
+        targetControlKeysFixture[1][2] = {true, true};
+        targetControlKeysFixture[0][2] = {true, false};
+        frame();
+        frame();
+        click(row("aim_key", false));
+        CHECK(g::targetKeyCaptureUntilMs.load() > GetTickCount64() + 1000);
+        const auto* captureWindow = ImGui::FindWindowByName("target_aimbot_settings_win");
+        CHECK(captureWindow != nullptr);
+        ImGuiID captureButtonId = 0;
+        if (captureWindow) captureButtonId = captureWindow->NavLastIds[0];
+        frame();
+        if (captureWindow) CHECK(captureWindow->NavLastIds[0] == captureButtonId);
+        targetControlKeysFixture[0][2].down = true;
+        frame();
+        CHECK(g::targetAimKey == 2 && g::targetKeyCaptureUntilMs.load() == 0);
+        targetControlKeysFixture = {};
+        click(row("aim_key", false));
+        targetControlKeysFixture[2][VK_ESCAPE] = {true, true};
+        frame();
+        CHECK(g::targetAimKey == 2 && g::targetKeyCaptureUntilMs.load() == 0);
+        for (int source = 0; source < 3; ++source) {
+            targetControlKeysFixture = {};
+            click(row("aim_key", false));
+            targetControlKeysFixture[source][0x75] = {true, true};
+            frame();
+            CHECK(g::targetAimKey == 0x75 && g::targetKeyCaptureUntilMs.load() == 0);
+        }
+        targetControlKeysFixture = {};
+        click(row("aim_key", false));
+        ui::tabs::testing::OpenTargetSettings("target_triggerbot");
+        CHECK(g::targetKeyCaptureUntilMs.load() == 0);
+        frame();
+        frame();
+        click(row("trigger_key", false));
+        targetControlKeysFixture[0][4] = {true, true};
+        frame();
+        CHECK(g::targetTriggerKey == 4 && g::targetKeyCaptureUntilMs.load() == 0);
+        targetControlKeysFixture = {};
+        click(row("trigger_key", false));
+        ui::tabs::TargetTab::CancelKeyCapture();
+        frame();
+        CHECK(g::targetKeyCaptureUntilMs.load() == 0);
+        ui::tabs::testing::OpenTargetSettings("");
+        frame();
+        CHECK(g::targetAimKey == 0x75);
         ui::tabs::testing::OpenTargetSettings("");
         ui::tabs::testing::FollowTargetWeapon(false);
         targetWeaponAvailableFixture = true;
@@ -723,7 +785,7 @@ void TestHeadContour()
             ImGui::GetStyle().WindowMinSize = ImVec2(1, 1);
             for (const ImVec2 size : {ImVec2(900, 700), ImVec2(320, 120), ImVec2(140, 70),
                     ImVec2(40, 25), ImVec2(8, 8), ImVec2(560, 620), ImVec2(1040, 760)}) {
-                for (int page = 0; page < 2; ++page) {
+                for (int page = 0; page < 4; ++page) {
                     for (int frame = 0; frame < 3; ++frame) {
                         ImGui::NewFrame();
                         ImGui::SetNextWindowSize(size, ImGuiCond_Always);
@@ -733,6 +795,12 @@ void TestHeadContour()
                         if (page == 0) {
                             ui::tabs::EspTab tab;
                             tab.Render(state, sink);
+                        } else if (page == 2) {
+                            g::displaySettings.mapping.scaling = frame;
+                            ui::RenderScreenMappingControls();
+                        } else if (page == 3) {
+                            g::radarSettings.hud.manual = frame != 0;
+                            ui::tabs::radar_sections::RenderHudSection();
                         } else {
                             ui::tabs::testing::OpenTargetDiagnostics(frame != 0);
                             ui::tabs::TargetTab tab;
@@ -750,6 +818,141 @@ void TestHeadContour()
         }
         g::espSettings = savedEsp;
         g::targetEnabled = savedTarget;
+        g::displaySettings.mapping = {};
+        g::radarSettings.hud = {};
+    }
+
+    void RunViewportRegression()
+    {
+        ImGui::CreateContext();
+        auto& io = ImGui::GetIO();
+        io.IniFilename = nullptr;
+        io.DisplaySize = ImVec2(1920, 1080);
+        io.Fonts->AddFontDefault();
+        io.Fonts->Build();
+        io.Fonts->SetTexID(static_cast<ImTextureID>(1));
+        for (const app::display::Rect viewport : {
+            app::display::Rect{0, 0, 1920, 1080}, {240, 0, 1440, 1080}, {192, 216, 1536, 756}}) {
+            ImGui::NewFrame();
+            auto& list = *ImGui::GetBackgroundDrawList();
+            list.AddRectFilled(ImVec2(1, 2), ImVec2(3, 4), IM_COL32_WHITE);
+            const int first = list.VtxBuffer.Size;
+            const ImVec2 unchanged = list.VtxBuffer[0].pos;
+            {
+                app::display::ViewportDrawScope scope(list, viewport);
+                list.AddRectFilled(ImVec2(10, 20), ImVec2(30, 40), IM_COL32_WHITE);
+                list.AddText(ImVec2(10, 45), IM_COL32_WHITE, "74");
+                list.PushClipRect(ImVec2(5, 7), ImVec2(295, 297), true);
+                list.AddRectFilled(ImVec2(15, 25), ImVec2(35, 45), IM_COL32_WHITE);
+                list.PopClipRect();
+            }
+            CHECK(list.VtxBuffer[0].pos.x == unchanged.x && list.VtxBuffer[0].pos.y == unchanged.y);
+            CHECK(list.VtxBuffer[first].pos.x == 10 + viewport.x);
+            CHECK(list.VtxBuffer[first].pos.y == 20 + viewport.y);
+            int transformedCommands = 0;
+            for (const auto& cmd : list.CmdBuffer) {
+                if (!cmd.ElemCount || cmd.IdxOffset == 0) continue;
+                CHECK(cmd.ClipRect.x >= viewport.x && cmd.ClipRect.y >= viewport.y);
+                CHECK(cmd.ClipRect.z <= viewport.x + viewport.width);
+                CHECK(cmd.ClipRect.w <= viewport.y + viewport.height);
+                ++transformedCommands;
+            }
+            CHECK(transformedCommands >= 1);
+            const int after = list.VtxBuffer.Size;
+            list.AddRectFilled(ImVec2(51, 52), ImVec2(53, 54), IM_COL32_WHITE);
+            CHECK(list.VtxBuffer[after].pos.x == 51 && list.VtxBuffer[after].pos.y == 52);
+            CHECK(list.CmdBuffer.back().ClipRect.x == 0 && list.CmdBuffer.back().ClipRect.z == 1920);
+            ImGui::Render();
+        }
+        ImGui::DestroyContext();
+    }
+
+    int RenderRadarFixture(const esp::EntitySnapshot& snap, uint64_t nowUs)
+    {
+        using namespace esp;
+        ImGui::NewFrame();
+        auto* drawList = ImGui::GetBackgroundDrawList();
+        const auto* players = snap.players;
+        const auto* prevPlayers = snap.prevPlayers;
+        const Vector3 localPos = snap.localPos;
+        const int localTeam = snap.localTeam;
+        const bool localHasBomb = false;
+        const bool hasMinimapBounds = false;
+        const Vector3 minimapMins{}, minimapMaxs{};
+        const float yawRad = 0, yawSin = 0, yawCos = 1;
+        const BombState bombState{};
+        const WorldMarker worldMarkers[1]{};
+        const int worldMarkerCount = 0;
+        const auto CopyActiveMapState = [] { return ActiveMapStateSnapshot{}; };
+        const auto TickNowUs = [nowUs] { return nowUs; };
+        const auto NormalizeYawDeltaRad = [](float yaw) { return std::remainder(yaw, 2 * std::numbers::pi_v<float>); };
+        const auto ColorToImU32 = [](const float* color) {
+            return ImGui::ColorConvertFloat4ToU32(ImVec4(color[0], color[1], color[2], color[3]));
+        };
+        const auto isValidWorldPos = [](const Vector3& position) {
+            return std::isfinite(position.x) && std::isfinite(position.y) && std::isfinite(position.z) &&
+                std::fabs(position.x) + std::fabs(position.y) + std::fabs(position.z) > 1;
+        };
+        const auto IsLocalSnapshotSlot = [](const EntitySnapshot& frame, SnapshotPlayerIdentity player) {
+            return player.slotIndex == frame.localPlayerIndex || (frame.localPawn != 0 && player.pawn == frame.localPawn);
+        };
+#include "../../../src/Features/Radar/Render/radar_overlay.inl"
+        int vertices = 0;
+        const auto color = ColorToImU32(g::radarDotColor);
+        for (const auto& vertex : drawList->VtxBuffer) if (vertex.col == color) ++vertices;
+        ImGui::Render();
+        return vertices;
+    }
+
+    void RunRadarRosterRegression()
+    {
+        const auto savedRadar = g::radarSettings;
+        const auto savedEsp = g::espSettings;
+        const auto savedViewport = g::gameViewport;
+        g::radarSettings = {};
+        g::radarEnabled = true;
+        g::radarShowLocalDot = g::radarShowAngles = g::radarShowBomb = g::radarShowCrosshair = false;
+        g::radarDotColor[0] = g::radarDotColor[2] = g::radarDotColor[3] = 1;
+        g::radarDotColor[1] = 0;
+        g::espEnabled = false;
+        g::espShowTeammates = true;
+        g::gameViewport = app::display::Resolve({}, 1920, 1080);
+        ImGui::CreateContext();
+        auto& io = ImGui::GetIO();
+        io.IniFilename = nullptr;
+        io.DisplaySize = ImVec2(1920, 1080);
+        io.Fonts->AddFontDefault(); io.Fonts->Build(); io.Fonts->SetTexID(static_cast<ImTextureID>(1));
+        static esp::EntitySnapshot frame;
+        frame = {};
+        frame.sceneSerial = 501;
+        frame.localPlayerIndex = 0; frame.localPawn = 0x1000; frame.localTeam = 3; frame.localPos = {100, 100, 100};
+        auto& player = frame.players[1];
+        player.valid = true; player.pawn = 0x2000; player.health = 100; player.team = 2; player.position = {200, 200, 100};
+        const int dotVertices = RenderRadarFixture(frame, 1000000);
+        CHECK(dotVertices > 0);
+        for (bool warming : {false, true}) {
+            CHECK(esp::data::ShouldExposePlayerRoster(!warming, false, warming));
+            CHECK(RenderRadarFixture(frame, 1004000) == dotVertices);
+        }
+        frame.prevPlayers[1] = player;
+        player.valid = false;
+        CHECK(RenderRadarFixture(frame, 1008000) == dotVertices);
+        ++frame.sceneSerial;
+        CHECK(RenderRadarFixture(frame, 1012000) == 0);
+        player = frame.prevPlayers[1];
+        CHECK(RenderRadarFixture(frame, 1016000) == dotVertices);
+        player.health = 0;
+        CHECK(RenderRadarFixture(frame, 1020000) == 0);
+        player = {};
+        CHECK(RenderRadarFixture(frame, 1024000) == 0);
+        for (int slot = 0; slot < 64; ++slot) {
+            auto& entry = frame.players[slot];
+            entry.valid = true; entry.pawn = 0x1000 + slot * 0x1000;
+            entry.health = 100; entry.team = 2; entry.position = {200.0f + slot, 200, 100};
+        }
+        CHECK(RenderRadarFixture(frame, 1028000) == dotVertices * 63);
+        ImGui::DestroyContext();
+        g::radarSettings = savedRadar; g::espSettings = savedEsp; g::gameViewport = savedViewport;
     }
 
     void RunLayout(float dpiScale, float width, float height)
@@ -853,7 +1056,9 @@ void TestHeadContour()
                     ImGuiWindowFlags_NoCollapse);
 
             StatusSink status;
-            if (page == 5) {
+            if (page == 6) {
+                ui::RenderScreenMappingControls();
+            } else if (page == 5) {
                 ui::RenderVersionNotice(releaseStatus, false);
                 ui::RenderVersionNotice(releaseStatus, true);
             } else if (page == 3) {
@@ -866,6 +1071,7 @@ void TestHeadContour()
                 else CHECK(drawList->VtxBuffer.Size == before);
                 TestFlagExpiryRendering();
                 TestPlayerFlagReadCommitRender();
+                TestWorldTimerRendering();
             } else if (page == 1) {
                 ui::MenuState menuState;
                 ui::tabs::WorldTab worldTab;
@@ -881,6 +1087,7 @@ void TestHeadContour()
                 ui::tabs::esp_sections::RenderOptionsGrid();
                 ImGui::Separator();
                 ui::tabs::radar_sections::RenderDisplaySection();
+                ui::tabs::radar_sections::RenderHudSection();
                 ui::tabs::radar_sections::RenderColorsSection();
                 ui::tabs::radar_sections::RenderCalibrationSection(status);
             }
@@ -945,6 +1152,7 @@ void TestHeadContour()
         }
 
         const bool savedFovPerWeapon = g::targetFovPerWeapon;
+        const int savedFovUnit = g::targetSettings.fovUnit;
         const bool savedAimAssist = g::targetTriggerAimAssist;
         const auto savedWeaponProfiles = g::targetWeaponProfiles;
         for (const char* settingsId : {"target_fov", "target_aimbot", "target_triggerbot"}) {
@@ -959,6 +1167,7 @@ void TestHeadContour()
                 targetWeaponAvailableFixture = mode != 0;
                 ui::tabs::testing::FollowTargetWeapon((mode & 1) == 0);
                 g::targetFovPerWeapon = (mode & 1) != 0;
+                g::targetSettings.fovUnit = mode % 2;
                 g::targetTriggerAimAssist = (mode & 1) != 0;
                 for (auto& profile : g::targetWeaponProfiles) {
                     profile.hitchanceEnabled = (mode & 1) != 0;
@@ -966,6 +1175,8 @@ void TestHeadContour()
                     profile.aimAdaptiveSmoothing = (mode & 1) != 0;
                     profile.aimWindMouse = (mode & 1) != 0;
                     profile.aimMotionStyle = mode % 3;
+                    profile.aimTrajectoryControl = (mode & 1) != 0;
+                    profile.aimRespectInput = (mode & 1) != 0;
                     profile.triggerForceCenter = (mode & 1) != 0;
                     profile.aimSoftAssist = (mode & 1) != 0;
                     profile.aimDamageCheck = (mode & 1) != 0;
@@ -1049,11 +1260,26 @@ void TestHeadContour()
             renderAndValidateFrame(3);
             renderAndValidateFrame(4);
         }
+        for (int mode : {0, 1, 2}) {
+            g::displaySettings.mapping.scaling = mode;
+            g::displaySettings.mapping.autoAspect = mode != 0;
+            renderAndValidateFrame(6);
+        }
+        g::displaySettings.mapping = {};
+        for (bool manualHud : {false, true}) {
+            g::radarSettings.hud.manual = manualHud;
+            for (int shape : {0, 1}) {
+                g::radarSettings.hud.shape = shape;
+                renderAndValidateFrame(0);
+            }
+        }
+        g::radarSettings.hud = {};
         g::espPreviewOpen = false;
         g::espEnabled = false;
         renderAndValidateFrame(0);
         g::espSettings = savedEspSettings;
         g::targetFovPerWeapon = savedFovPerWeapon;
+        g::targetSettings.fovUnit = savedFovUnit;
         g::targetTriggerAimAssist = savedAimAssist;
         g::targetWeaponProfiles = savedWeaponProfiles;
         g::espBox = savedEspBox;
@@ -1081,6 +1307,8 @@ int main(int argc, char** argv)
     }
     using app::localization::Language;
     RunTargetControlRegression();
+    RunViewportRegression();
+    RunRadarRosterRegression();
     RunSmallMenuRegression();
     TestHeldGrenadeFilter();
     const Language originalLanguage = app::localization::GetLanguage();

@@ -7,5 +7,6 @@ namespace ui::tabs::radar_sections {
 void RenderCalibrationSection(IStatusSink& statusSink);
 void RenderDisplaySection();
 void RenderColorsSection();
+void RenderHudSection();
 
 } 

@@ -103,14 +103,10 @@
                 exactClass == esp::data::WorldEntityClass::MolotovProjectile ||
                 hasTrackedSubclass(s_worldMolotovSubclassIds, subclassId);
             const bool isUtilityGrenade = isFlashGrenade || isHeGrenade || isSmokeGrenade || isMolotovGrenade || isDecoyGrenade || isIncendiaryGrenade;
-            const char* knownItemName = WeaponNameFromItemId(itemId);
-            const bool knownDroppedItem =
-                exactClass == esp::data::WorldEntityClass::DroppedWeapon &&
-                knownItemName != nullptr &&
-                !isUtilityGrenade &&
-                itemId != 49 &&
-                !IsKnifeItemId(itemId);
-            const bool posNonOrigin = (std::fabs(pos.x) > 1.0f || std::fabs(pos.y) > 1.0f);
+            const bool knownDroppedItem = esp::data::IsDroppedWorldItem(itemId, exactClass);
+            if (knownDroppedItem || itemId == kWeaponC4Id)
+                emittingWorldSampleUs = (std::min)(emittingWorldSampleUs, s_cachedWorldOwnerSampleUs[idx]);
+            const bool posNonOrigin = isValidWorldPos(pos);
             const bool discoveryShardActive =
                 (worldDiscoveryShardCount <= 1u) ||
                 (static_cast<uint32_t>(idx - esp::data::kFirstWorldEntitySlot) % worldDiscoveryShardCount) == activeWorldDiscoveryShard;

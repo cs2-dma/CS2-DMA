@@ -8,6 +8,7 @@
 #include "app/Core/app_state.h"
 
 namespace g {
+    inline app::display::Viewport gameViewport;
     inline std::recursive_mutex settingsMutex;
     using DisplaySettings = app::state::DisplaySettings;
     using RuntimeState = app::state::RuntimeState;
@@ -131,6 +132,8 @@ namespace g {
     inline auto& espOffscreenColor = espSettings.offscreenColor;
     inline auto& espFlagColor = espSettings.flagColor;
     inline auto& espWorldColor = espSettings.worldColor;
+    inline auto& espWorldSmokeTimerColor = espSettings.worldSmokeTimerColor;
+    inline auto& espWorldInfernoTimerColor = espSettings.worldInfernoTimerColor;
     inline auto& espBombColor = espSettings.bombColor;
     inline float& espBombTextSize = espSettings.bombTextSize;
     inline bool& espBombText = espSettings.bombText;

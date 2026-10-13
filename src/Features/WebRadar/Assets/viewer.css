@@ -455,7 +455,7 @@ input {
 .player-card {
   position: relative;
   min-height: 122px;
-  padding: 14px 14px 14px 118px;
+  padding: 14px 18px 14px 126px;
   border-radius: 14px;
   border: 1px solid rgba(100, 146, 180, 0.13);
   background: linear-gradient(180deg, rgba(9, 23, 35, 0.94), rgba(7, 19, 29, 0.92));
@@ -476,7 +476,7 @@ input {
 }
 
 .player-card.is-right {
-  padding: 14px 118px 14px 14px;
+  padding: 14px 126px 14px 18px;
 }
 
 .player-card.is-right::before {
@@ -529,13 +529,11 @@ input {
   flex-direction: column;
   justify-content: center;
   gap: 9px;
-  transform: translateX(8px);
 }
 
 .player-card.is-right .player-card__content {
   align-items: flex-end;
   text-align: right;
-  transform: translateX(-8px);
 }
 
 .player-card__top,
@@ -548,6 +546,7 @@ input {
 }
 
 .player-card__top {
+  width: 100%;
   min-width: 0;
   justify-content: space-between;
 }
@@ -569,6 +568,7 @@ input {
 
 .player-card__name {
   display: block;
+  flex: 1 1 auto;
   color: #d9eaf6;
   font-size: 0.9rem;
   font-weight: 600;
@@ -585,6 +585,7 @@ input {
   font-weight: 600;
   flex: 0 0 auto;
   white-space: nowrap;
+  font-variant-numeric: tabular-nums;
 }
 
 .player-card.is-right .player-card__identity {
@@ -606,38 +607,44 @@ input {
 .player-card__stat-icon,
 .player-card__weapon-icon,
 .player-card__util-icon {
+  flex-shrink: 0;
   background-color: var(--radar-secondary);
   -webkit-mask: no-repeat center / contain;
   mask: no-repeat center / contain;
 }
 
-.player-card__stat-icon,
-.player-card__util-icon {
+.player-card__stat-icon {
   width: 14px;
   height: 14px;
 }
 
-.player-card__util-icon--compact {
-  width: 12px;
-  height: 12px;
+.player-card__util-icon {
+  width: 16px;
+  height: 16px;
 }
 
 .player-card__weapon-icon {
-  width: 28px;
-  height: 18px;
+  width: 34px;
+  height: 16px;
   background-color: var(--radar-primary);
 }
 
-/* Grenade SVGs are square (1:1); rendering them in the 28x18 weapon slot
-   stretches them. Force a square 18x18 box so smoke/molotov/he/decoy/flash/c4
-   icons keep their aspect ratio. */
 .player-card__weapon-icon--square {
-  width: 18px;
+  width: 16px;
 }
 
 .player-card__weapon-name {
+  min-width: 0;
   color: var(--radar-secondary);
   font-size: 0.76rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.player-card__weapon {
+  width: 100%;
+  min-width: 0;
 }
 
 .player-card__util {
@@ -1170,13 +1177,13 @@ body.only-radar .map-shell {
   .player-card,
   .player-card.is-right {
     min-height: 108px;
-    padding-left: 92px;
-    padding-right: 12px;
+    padding-left: 100px;
+    padding-right: 18px;
   }
 
   .player-card.is-right {
-    padding-left: 12px;
-    padding-right: 92px;
+    padding-left: 18px;
+    padding-right: 100px;
   }
 
   .player-card__model {

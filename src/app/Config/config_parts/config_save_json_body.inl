@@ -1,5 +1,5 @@
         json root = json::object();
-        root["configVersion"] = 1;
+        root["configVersion"] = kConfigVersion;
 
         json& esp = EnsureSection(root, "ESP");
         esp["Enabled"] = g::espEnabled;
@@ -134,6 +134,8 @@
         SaveColor(esp, "OffscreenColor", g::espOffscreenColor);
         SaveColor(esp, "FlagColor", g::espFlagColor);
         SaveColor(esp, "WorldColor", g::espWorldColor);
+        SaveColor(esp, "WorldSmokeTimerColor", g::espWorldSmokeTimerColor);
+        SaveColor(esp, "WorldInfernoTimerColor", g::espWorldInfernoTimerColor);
         SaveColor(esp, "ItemColor", g::espItemColor);
         SaveColor(esp, "BombColor", g::espBombColor);
 
@@ -150,6 +152,8 @@
         target["Enabled"] = g::targetEnabled;
         target["FovEnabled"] = g::targetFovEnabled;
         target["FovPerWeapon"] = g::targetFovPerWeapon;
+        target["FovUnit"] = g::targetSettings.fovUnit;
+        target["FovDegrees"] = g::targetSettings.fovDegrees;
         target["FovRadius"] = g::targetFovRadius;
         SaveColor(target, "FovColor", g::targetFovColor);
         target["AimbotEnabled"] = g::targetAimbotEnabled;
@@ -185,6 +189,11 @@
                 {"AimMotionStyle", profile.aimMotionStyle},
                 {"AimReactionMs", profile.aimReactionMs},
                 {"TriggerForceCenter", profile.triggerForceCenter},
+                {"AimTrajectoryControl", profile.aimTrajectoryControl},
+                {"AimMaxAcceleration", profile.aimMaxAcceleration},
+                {"AimMaxJerk", profile.aimMaxJerk},
+                {"AimRespectInput", profile.aimRespectInput},
+                {"FovDegrees", profile.fovDegrees},
                 {"AimAssistStrength", profile.aimAssistStrength},
                 {"AimAssistMaxSpeed", profile.aimAssistMaxSpeed},
                 {"AimAssistDeadzone", profile.aimAssistDeadzone},
@@ -213,6 +222,15 @@
         radar["ShowCrosshair"] = g::radarShowCrosshair;
         radar["ShowBomb"] = g::radarShowBomb;
         radar["Size"] = g::radarSize;
+        radar["HudManual"] = g::radarSettings.hud.manual;
+        radar["HudShape"] = g::radarSettings.hud.shape;
+        radar["HudX"] = g::radarSettings.hud.x;
+        radar["HudY"] = g::radarSettings.hud.y;
+        radar["HudWidth"] = g::radarSettings.hud.width;
+        radar["HudHeight"] = g::radarSettings.hud.height;
+        radar["HudScale"] = g::radarSettings.hud.scale;
+        radar["HudSafeX"] = g::radarSettings.hud.safeX;
+        radar["HudSafeY"] = g::radarSettings.hud.safeY;
         radar["DotSize"] = g::radarDotSize;
         radar["WorldRotationDeg"] = g::radarWorldRotationDeg;
         radar["WorldScale"] = g::radarWorldScale;
@@ -245,6 +263,14 @@
         json& screen = EnsureSection(root, "Screen");
         screen["VSync"] = g::vsyncEnabled;
         screen["FPSLimit"] = g::fpsLimit;
+        screen["MappingGameWidth"] = g::displaySettings.mapping.gameWidth;
+        screen["MappingGameHeight"] = g::displaySettings.mapping.gameHeight;
+        screen["MappingAutoAspect"] = g::displaySettings.mapping.autoAspect;
+        screen["MappingScaling"] = g::displaySettings.mapping.scaling;
+        screen["MappingX"] = g::displaySettings.mapping.x;
+        screen["MappingY"] = g::displaySettings.mapping.y;
+        screen["MappingWidth"] = g::displaySettings.mapping.width;
+        screen["MappingHeight"] = g::displaySettings.mapping.height;
 
         json& ui = EnsureSection(root, "UI");
         ui["EspPreviewOpen"] = g::espPreviewOpen;

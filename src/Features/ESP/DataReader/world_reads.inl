@@ -92,14 +92,11 @@
         static uint64_t s_cachedWorldOwnerSampleUs[kMaxTrackedWorldEntities + 1] = {};
         static Vector3 s_cachedWorldPositions[kMaxTrackedWorldEntities + 1] = {};
         static uint64_t s_cachedWorldPositionSampleUs[kMaxTrackedWorldEntities + 1] = {};
-        constexpr size_t kWorldSubclassClassCacheSlots = 512u;
-        static uint32_t s_cachedClassSubclassIds[kWorldSubclassClassCacheSlots] = {};
-        static uint8_t s_cachedClassKinds[kWorldSubclassClassCacheSlots] = {};
-        static size_t s_cachedClassCount = 0;
         static uint64_t s_worldIdentityRetryUs[kMaxTrackedWorldEntities + 1] = {};
+        static uint32_t s_worldIdentityValidationCursor = 0;
         static uint64_t s_worldDetailCacheResetSerial = 0;
         {
-            const uint64_t detailResetSerial = s_sceneResetSerial.load(std::memory_order_relaxed);
+            const uint64_t detailResetSerial = s_worldDataCacheEpoch;
             if (s_worldDetailCacheResetSerial != detailResetSerial) {
                 s_worldDetailCacheResetSerial = detailResetSerial;
                 memset(s_cachedWorldSceneNodes, 0, sizeof(s_cachedWorldSceneNodes));
@@ -108,34 +105,14 @@
                 memset(s_cachedWorldOwnerSampleUs, 0, sizeof(s_cachedWorldOwnerSampleUs));
                 memset(s_cachedWorldPositions, 0, sizeof(s_cachedWorldPositions));
                 memset(s_cachedWorldPositionSampleUs, 0, sizeof(s_cachedWorldPositionSampleUs));
-                memset(s_cachedClassSubclassIds, 0, sizeof(s_cachedClassSubclassIds));
-                memset(s_cachedClassKinds, 0, sizeof(s_cachedClassKinds));
                 memset(s_worldIdentityRetryUs, 0, sizeof(s_worldIdentityRetryUs));
-                s_cachedClassCount = 0;
+                s_worldIdentityValidationCursor = 0;
             }
         }
 
-        auto findCachedEntityClass = [&](uint32_t subclassId, uint8_t* classKind) {
-            if (subclassId == 0u || !classKind)
-                return false;
-            for (size_t i = 0; i < s_cachedClassCount; ++i) {
-                if (s_cachedClassSubclassIds[i] == subclassId) {
-                    *classKind = s_cachedClassKinds[i];
-                    return true;
-                }
-            }
-            return false;
-        };
         auto rememberEntityClass = [&](uint32_t subclassId, esp::data::WorldEntityClass entityClass) {
             if (subclassId == 0u || entityClass == esp::data::WorldEntityClass::Unknown)
                 return;
-            uint8_t ignored = 0;
-            if (!findCachedEntityClass(subclassId, &ignored) &&
-                s_cachedClassCount < kWorldSubclassClassCacheSlots) {
-                s_cachedClassSubclassIds[s_cachedClassCount] = subclassId;
-                s_cachedClassKinds[s_cachedClassCount] = static_cast<uint8_t>(entityClass);
-                ++s_cachedClassCount;
-            }
             switch (entityClass) {
             case esp::data::WorldEntityClass::SmokeProjectile:
                 rememberTrackedSubclass(s_worldSmokeSubclassIds, subclassId);
@@ -168,11 +145,6 @@
                 mem.AddScatterReadRequest(handle, ent + ofs.C_SmokeGrenadeProjectile_m_bSmokeEffectSpawned, &worldSmokeEffectSpawned[idx], sizeof(uint8_t), &worldSmokeSpawnedReadBytes[idx]);
         };
         auto queueInfernoStateReads = [&](int idx, uintptr_t ent) {
-            // firePositions are world-space. Inferno scene-node origin may be
-            // zero even while its fire points are valid.
-            if (ofs.C_Inferno_m_firePositions > 0)
-                mem.AddScatterReadRequest(handle, ent + ofs.C_Inferno_m_firePositions,
-                    &worldInfernoOrigin[idx], sizeof(Vector3), &worldInfernoOriginReadBytes[idx]);
             if (ofs.C_Inferno_m_nFireEffectTickBegin > 0)
                 mem.AddScatterReadRequest(handle, ent + ofs.C_Inferno_m_nFireEffectTickBegin, &worldInfernoTick[idx], sizeof(int), &worldInfernoTickReadBytes[idx]);
             if (ofs.C_Inferno_m_nFireLifetime > 0)
@@ -195,6 +167,8 @@
 
         auto queueUtilityReads = [&](int idx, uintptr_t ent, uint16_t itemId, uint32_t subclassId, uint8_t classKind) {
             const auto exactClass = static_cast<esp::data::WorldEntityClass>(classKind);
+            if (exactClass == esp::data::WorldEntityClass::DroppedWeapon)
+                return;
             const bool isSmokeGrenade = (itemId == 45);
             const bool isMolotovGrenade = (itemId == 46);
             const bool isIncendiaryGrenade = (itemId == 48);
@@ -210,9 +184,6 @@
             const bool knownHeSubclass =
                 exactClass == esp::data::WorldEntityClass::HeProjectile ||
                 hasTrackedSubclass(s_worldHeSubclassIds, subclassId);
-            const bool knownInfernoSubclass =
-                exactClass == esp::data::WorldEntityClass::Inferno ||
-                hasTrackedSubclass(s_worldInfernoSubclassIds, subclassId);
             const bool knownMolotovProjectileSubclass =
                 exactClass == esp::data::WorldEntityClass::MolotovProjectile ||
                 hasTrackedSubclass(s_worldMolotovSubclassIds, subclassId);
@@ -222,8 +193,6 @@
                 if (ofs.C_BaseEntity_m_vecVelocity > 0 && wantsWorldProjectiles)
                     mem.AddScatterReadRequest(handle, ent + ofs.C_BaseEntity_m_vecVelocity, &worldVelocities[idx], sizeof(Vector3), &worldVelocityReadBytes[idx]);
             }
-            if (knownInfernoSubclass)
-                queueInfernoStateReads(idx, ent);
             if (ofs.C_BaseEntity_m_vecVelocity > 0 &&
                 wantsWorldProjectiles &&
                 (isInfernoGrenade || knownMolotovProjectileSubclass))
@@ -239,9 +208,11 @@
 
         
         int cachedIdentityRefreshCount = 0;
-        int cachedUnknownIdentityRetryCount = 0;
-        constexpr int kMaxUnknownIdentityRetriesPerScan = 12;
+        int cachedIdentityRetryCount = 0;
+        int cachedUnknownIdentityRefreshCount = 0;
+        constexpr int kMaxWorldIdentityRefreshesPerScan = 12;
         constexpr uint64_t kUnknownIdentityRetryIntervalUs = 1000000u;
+        constexpr uint64_t kKnownIdentityValidationIntervalUs = 250000u;
 
         
         
@@ -286,13 +257,21 @@
             
             
             
-            for (int candidateIdx = 0; candidateIdx < worldCandidateCount; ++candidateIdx) {
-                const int idx = s_worldCandidateIndices[candidateIdx];
+            const int cachedSlotCount = worldLimit - esp::data::kFirstWorldEntitySlot + 1;
+            const int cachedReadStart = static_cast<int>(
+                s_worldIdentityValidationCursor % static_cast<uint32_t>(cachedSlotCount));
+            for (int candidateOrdinal = 0; candidateOrdinal < cachedSlotCount; ++candidateOrdinal) {
+                const int idx = esp::data::kFirstWorldEntitySlot +
+                    (cachedReadStart + candidateOrdinal) % cachedSlotCount;
+                if (s_worldCandidateMask[idx] == 0u)
+                    continue;
                 const uintptr_t cachedEnt = s_worldEntityRefs[idx];
                 if (!cachedEnt)
                     continue;
                 const uintptr_t cachedSceneNode = s_cachedWorldSceneNodes[idx];
-                if (!cachedSceneNode)
+                const auto cachedNodeClass = static_cast<esp::data::WorldEntityClass>(s_worldEntityClassKinds[idx]);
+                if (!cachedSceneNode && cachedNodeClass != esp::data::WorldEntityClass::Inferno &&
+                    cachedNodeClass != esp::data::WorldEntityClass::SmokeProjectile)
                     continue;
                 const uint16_t cachedItemId = s_worldEntityItemIds[idx];
                 const uint32_t cachedSubclassId = s_worldEntitySubclassIds[idx];
@@ -319,13 +298,7 @@
                     worldDomainBombRescueDue;
                 const bool cachedDroppedItemCandidate =
                     worldDomainDroppedItemsDue &&
-                    cachedExactClass ==
-                        esp::data::WorldEntityClass::DroppedWeapon &&
-                    cachedItemId != 0 &&
-                    cachedItemId != kWeaponC4Id &&
-                    WeaponNameFromItemId(cachedItemId) != nullptr &&
-                    !isUtilityWorldItemId(cachedItemId) &&
-                    !IsKnifeItemId(cachedItemId);
+                    esp::data::IsDroppedWorldItem(cachedItemId, cachedExactClass);
                 const bool cachedUtilityCandidate =
                     worldDomainActiveUtilityDue &&
                     (isUtilityWorldItemId(cachedItemId) ||
@@ -340,14 +313,18 @@
                         shouldReadWorldIdentityProbeDetails,
                         cachedItemId,
                         static_cast<esp::data::WorldEntityClass>(cachedClassKind),
-                        wantsWorldUtilityData,
+                        wantsWorldIdentityData,
                         s_worldIdentityRetryUs[idx],
                         nowUs,
-                        kUnknownIdentityRetryIntervalUs);
+                        kUnknownIdentityRetryIntervalUs) ||
+                    ((worldDomainDroppedItemsDue || worldDomainActiveUtilityDue || worldDomainSlowDiscoveryDue) &&
+                     cachedExactClass != esp::data::WorldEntityClass::Unknown &&
+                     (s_worldIdentityRetryUs[idx] == 0u || nowUs < s_worldIdentityRetryUs[idx] ||
+                      nowUs - s_worldIdentityRetryUs[idx] >= kKnownIdentityValidationIntervalUs));
                 const bool cachedIdentityRefreshCandidate =
                     cachedIdentityRetryDue &&
-                    cachedUnknownIdentityRetryCount <
-                        kMaxUnknownIdentityRetriesPerScan;
+                    cachedIdentityRetryCount <
+                        kMaxWorldIdentityRefreshesPerScan;
                 if (!(cachedBombCandidate ||
                       cachedDroppedItemCandidate ||
                       cachedUtilityCandidate ||
@@ -355,7 +332,7 @@
                     continue;
 
                 
-                if (ofs.CGameSceneNode_m_vecAbsOrigin > 0) {
+                if (ofs.CGameSceneNode_m_vecAbsOrigin > 0 && isLikelyGamePointer(cachedSceneNode)) {
                     mem.AddScatterReadRequest(
                         handle,
                         cachedSceneNode + ofs.CGameSceneNode_m_vecAbsOrigin,
@@ -385,7 +362,7 @@
                         sizeof(uint8_t),
                         &worldDormantReadBytes[idx]);
                 }
-                if ((needsWorldOwnerRefreshForItemId(cachedItemId) ||
+                if ((cachedDroppedItemCandidate || needsWorldOwnerRefreshForItemId(cachedItemId) ||
                      (wantsWorldProjectiles && cachedUtilityCandidate)) &&
                     ofs.C_BaseEntity_m_hOwnerEntity > 0) {
                     mem.AddScatterReadRequest(
@@ -403,7 +380,7 @@
                         sizeof(uint32_t),
                         &worldDropTickReadBytes[idx]);
                 }
-                if (cachedBombCandidate) {
+                if (cachedBombCandidate || cachedDroppedItemCandidate) {
                     mem.AddScatterReadRequest(
                         handle,
                         cachedSceneNode + 0x10u,
@@ -429,7 +406,12 @@
                 if (cachedIdentityRefreshCandidate) {
                     s_identityRefreshMask[idx] = 1u;
                     s_worldIdentityRetryUs[idx] = nowUs;
-                    ++cachedUnknownIdentityRetryCount;
+                    ++cachedIdentityRetryCount;
+                    if (cachedExactClass == esp::data::WorldEntityClass::Unknown)
+                        ++cachedUnknownIdentityRefreshCount;
+                    if (worldDomainDroppedItemsDue || worldDomainSlowDiscoveryDue)
+                        s_worldIdentityValidationCursor = static_cast<uint32_t>(
+                            (idx + 1 - esp::data::kFirstWorldEntitySlot) % cachedSlotCount);
                     if (ofs.C_BaseEntity_m_nSubclassID > 0) {
                         mem.AddScatterReadRequest(
                             handle,
@@ -438,7 +420,9 @@
                             sizeof(uint32_t),
                             &worldSubclassReadBytes[idx]);
                     }
-                    if (ofs.C_EconEntity_m_AttributeManager > 0 &&
+                    if ((cachedExactClass == esp::data::WorldEntityClass::Unknown ||
+                         cachedExactClass == esp::data::WorldEntityClass::DroppedWeapon) &&
+                        ofs.C_EconEntity_m_AttributeManager > 0 &&
                         ofs.C_AttributeContainer_m_Item > 0 &&
                         ofs.C_EconItemView_m_iItemDefinitionIndex > 0) {
                         const uintptr_t itemDefAddress =
@@ -484,10 +468,10 @@
                 bool blocksChanged = false;
                 for (int b = 0; b < blockCount; ++b) {
                     const bool blockReadComplete =
-                        esp::data::IsWorldFieldReadComplete(
-                            worldBlockReadBytes[b],
-                            sizeof(uintptr_t));
+                        app::memory_address::IsCompleteGamePointerSample(
+                            worldBlocks[b], worldBlockReadBytes[b]);
                     if (!blockReadComplete) {
+                        worldBlockReadBytes[b] = 0;
                         worldBlocks[b] = s_cachedWorldBlocks[b];
                     } else if (!isLikelyGamePointer(worldBlocks[b])) {
                         worldBlocks[b] = 0;
@@ -560,293 +544,7 @@
 
 
 
-        int newEntityCount = 0;
-        int dynamicRefreshCount = 0;
-        if (worldScanOk) {
-            
-            
-            
-            
-            for (int candidateIdx = 0; candidateIdx < worldCandidateCount; ++candidateIdx) {
-                const int idx = s_worldCandidateIndices[candidateIdx];
-                const int blockIdx = idx >> 9;
-                const bool blockReadComplete =
-                    blockIdx >= 0 &&
-                    blockIdx < blockCount &&
-                    esp::data::IsWorldFieldReadComplete(
-                        worldBlockReadBytes[blockIdx],
-                        sizeof(uintptr_t));
-                const bool entityReadComplete =
-                    blockReadComplete &&
-                    esp::data::IsWorldFieldReadComplete(
-                        worldEntityReadBytes[idx],
-                        sizeof(uintptr_t));
-                worldEntityReadComplete[idx] = entityReadComplete ? 1u : 0u;
-                if (!entityReadComplete) {
-                    if (worldDomainBombRescueDue &&
-                        s_worldEntityItemIds[idx] == kWeaponC4Id)
-                        worldScanC4ReadIncomplete = true;
-                    worldEntities[idx] = s_worldEntityRefs[idx];
-                    continue;
-                }
-                uintptr_t ent = worldEntities[idx];
-                if (ent && !isLikelyGamePointer(ent)) {
-                    worldEntities[idx] = 0;
-                    ent = 0;
-                }
-                if (!ent)
-                    continue;
-
-                const bool entityUnchanged = (ent == s_worldEntityRefs[idx]);
-                if (entityUnchanged && s_cachedWorldSceneNodes[idx]) {
-                    const bool cachedC4 =
-                        s_worldEntityItemIds[idx] == kWeaponC4Id &&
-                        worldDomainBombRescueDue;
-                    bool sceneNodeComplete = true;
-                    if (worldSceneNodeRefreshRequested[idx] != 0u) {
-                        sceneNodeComplete =
-                            esp::data::IsWorldFieldReadComplete(
-                                worldSceneNodeReadBytes[idx],
-                                sizeof(uintptr_t)) &&
-                            isLikelyGamePointer(worldSceneNodes[idx]);
-                        if (!sceneNodeComplete) {
-                            if (cachedC4)
-                                worldScanC4ReadIncomplete = true;
-                            worldSceneNodes[idx] = s_cachedWorldSceneNodes[idx];
-                        } else if (worldSceneNodes[idx] != s_cachedWorldSceneNodes[idx]) {
-                            worldSceneNodeChanged[idx] = 1u;
-                            ++dynamicRefreshCount;
-                        }
-                    } else {
-                        worldSceneNodes[idx] = s_cachedWorldSceneNodes[idx];
-                    }
-                    const bool ownerRefreshRequested =
-                        needsWorldOwnerRefreshForItemId(s_worldEntityItemIds[idx]) &&
-                        ofs.C_BaseEntity_m_hOwnerEntity > 0;
-                    const bool ownerComplete =
-                        !ownerRefreshRequested ||
-                        esp::data::IsWorldFieldReadComplete(
-                            worldOwnerReadBytes[idx],
-                            sizeof(uint32_t));
-                    if (!ownerComplete) {
-                        if (cachedC4)
-                            worldScanC4ReadIncomplete = true;
-                        worldOwnerHandles[idx] = s_cachedWorldOwnerHandles[idx];
-                    }
-                    const bool refreshedSubclass =
-                        s_identityRefreshMask[idx] != 0u &&
-                        esp::data::IsWorldFieldReadComplete(
-                            worldSubclassReadBytes[idx],
-                            sizeof(uint32_t));
-                    const bool refreshedItemDefinition =
-                        s_identityRefreshMask[idx] != 0u &&
-                        esp::data::IsWorldFieldReadComplete(
-                            worldItemDefReadBytes[idx],
-                            sizeof(uint16_t));
-                    if (!refreshedSubclass)
-                        worldSubclassIds[idx] = s_worldEntitySubclassIds[idx];
-                    if (!refreshedItemDefinition)
-                        worldItemDefs[idx] = s_worldEntityItemIds[idx];
-                    worldClassKinds[idx] = s_worldEntityClassKinds[idx];
-                    worldBasicDetailsComplete[idx] =
-                        esp::data::AreWorldBasicDetailsComplete(
-                            sceneNodeComplete,
-                            true)
-                            ? 1u
-                            : 0u;
-                } else {
-                    
-                    ++newEntityCount;
-                    // Cached dependent reads were queued for the previous entity.
-                    // Reset values AND completion counts before reading a replacement,
-                    // or an incomplete new read can inherit the old entity's success.
-                    const DWORD entityBytes = worldEntityReadBytes[idx];
-                    resetWorldScratchSlot(idx);
-                    worldEntities[idx] = ent;
-                    worldEntityReadBytes[idx] = entityBytes;
-                    worldEntityReadComplete[idx] = 1u;
-                    s_positionReadAttemptedMask[idx] = 0;
-                    s_identityRefreshMask[idx] = 0;
-
-
-
-                    mem.AddScatterReadRequest(
-                        handle,
-                        ent + ofs.C_BaseEntity_m_pGameSceneNode,
-                        &worldSceneNodes[idx],
-                        sizeof(uintptr_t),
-                        &worldSceneNodeReadBytes[idx]);
-                    if (wantsWorldOwnerHandles && ofs.C_BaseEntity_m_hOwnerEntity > 0) {
-                        mem.AddScatterReadRequest(
-                            handle,
-                            ent + ofs.C_BaseEntity_m_hOwnerEntity,
-                            &worldOwnerHandles[idx],
-                            sizeof(uint32_t),
-                            &worldOwnerReadBytes[idx]);
-                    }
-                    if (!bombOnlyWorldMode && ofs.C_BaseEntity_m_nSubclassID > 0) {
-                        mem.AddScatterReadRequest(
-                            handle,
-                            ent + ofs.C_BaseEntity_m_nSubclassID,
-                            &worldSubclassIds[idx],
-                            sizeof(uint32_t),
-                            &worldSubclassReadBytes[idx]);
-                    }
-                    if (wantsWorldIdentityData && ofs.CEntityInstance_m_pEntity > 0) {
-                        mem.AddScatterReadRequest(
-                            handle,
-                            ent + ofs.CEntityInstance_m_pEntity,
-                            &worldIdentities[idx],
-                            sizeof(uintptr_t),
-                            &worldIdentityReadBytes[idx]);
-                    }
-                    // Item definition is the independent numeric identity path.
-                    // Keep it for utility scans: designerName requires three DMA
-                    // hops and can transiently fail when a new entity is created.
-                    const bool wantsItemDefinition =
-                        esp::data::ShouldReadWorldItemDefinition(
-                            wantsWorldUtilityData,
-                            worldDomainDroppedItemsDue,
-                            worldDomainBombRescueDue);
-                    if (wantsItemDefinition &&
-                        ofs.C_EconEntity_m_AttributeManager > 0 &&
-                        ofs.C_AttributeContainer_m_Item > 0 &&
-                        ofs.C_EconItemView_m_iItemDefinitionIndex > 0) {
-                        const uintptr_t itemDefAddress =
-                            ent + ofs.C_EconEntity_m_AttributeManager + ofs.C_AttributeContainer_m_Item + ofs.C_EconItemView_m_iItemDefinitionIndex;
-                        mem.AddScatterReadRequest(
-                            handle,
-                            itemDefAddress,
-                            &worldItemDefs[idx],
-                            sizeof(uint16_t),
-                            &worldItemDefReadBytes[idx]);
-                    }
-                }
-            }
-            
-            if (newEntityCount > 0 || cachedIdentityRefreshCount > 0) {
-                if (newEntityCount > 0)
-                    executeOptionalScatterRead();
-                for (int candidateIdx = 0; candidateIdx < worldCandidateCount; ++candidateIdx) {
-                    const int idx = s_worldCandidateIndices[candidateIdx];
-                    if (!worldEntityReadComplete[idx] ||
-                        !worldEntities[idx] ||
-                        worldEntities[idx] == s_worldEntityRefs[idx]) {
-                        continue;
-                    }
-                    const bool sceneNodeComplete =
-                        esp::data::IsWorldFieldReadComplete(
-                            worldSceneNodeReadBytes[idx],
-                            sizeof(uintptr_t)) &&
-                        isLikelyGamePointer(worldSceneNodes[idx]);
-                    const bool subclassComplete =
-                        bombOnlyWorldMode ||
-                        ofs.C_BaseEntity_m_nSubclassID <= 0 ||
-                        esp::data::IsWorldFieldReadComplete(
-                            worldSubclassReadBytes[idx],
-                            sizeof(uint32_t));
-                    const bool itemDefComplete =
-                        esp::data::IsWorldFieldReadComplete(
-                            worldItemDefReadBytes[idx],
-                            sizeof(uint16_t));
-                    if (!itemDefComplete)
-                        worldItemDefs[idx] = 0;
-                    if (!esp::data::IsWorldFieldReadComplete(
-                            worldOwnerReadBytes[idx],
-                            sizeof(uint32_t))) {
-                        worldOwnerHandles[idx] = 0;
-                    }
-                    worldBasicDetailsComplete[idx] =
-                        esp::data::AreWorldBasicDetailsComplete(
-                            sceneNodeComplete,
-                            subclassComplete)
-                            ? 1u
-                            : 0u;
-                    if (worldBasicDetailsComplete[idx])
-                        ++dynamicRefreshCount;
-                }
-
-                int identityCount = 0;
-                if (wantsWorldIdentityData && ofs.CEntityIdentity_m_designerName > 0) {
-                    for (int candidateIdx = 0; candidateIdx < worldCandidateCount; ++candidateIdx) {
-                        const int idx = s_worldCandidateIndices[candidateIdx];
-                        if (!worldEntityReadComplete[idx] ||
-                            !worldEntities[idx] ||
-                            !esp::data::IsWorldFieldReadComplete(
-                                worldIdentityReadBytes[idx],
-                                sizeof(uintptr_t)) ||
-                            !isLikelyGamePointer(worldIdentities[idx])) {
-                            continue;
-                        }
-                        const bool entityChanged =
-                            worldEntities[idx] != s_worldEntityRefs[idx];
-                        if (!entityChanged &&
-                            worldClassKinds[idx] !=
-                                static_cast<uint8_t>(esp::data::WorldEntityClass::Unknown)) {
-                            continue;
-                        }
-                        uint8_t cachedClassKind = 0;
-                        if (findCachedEntityClass(worldSubclassIds[idx], &cachedClassKind)) {
-                            worldClassKinds[idx] = cachedClassKind;
-                            rememberEntityClass(
-                                worldSubclassIds[idx],
-                                static_cast<esp::data::WorldEntityClass>(cachedClassKind));
-                            continue;
-                        }
-                        mem.AddScatterReadRequest(
-                            handle,
-                            worldIdentities[idx] + ofs.CEntityIdentity_m_designerName,
-                            &worldDesignerNamePtrs[idx],
-                            sizeof(uintptr_t),
-                            &worldDesignerNamePtrReadBytes[idx]);
-                        ++identityCount;
-                    }
-                }
-                if (identityCount > 0)
-                    executeOptionalScatterRead();
-
-                int designerNameCount = 0;
-                for (int candidateIdx = 0; candidateIdx < worldCandidateCount; ++candidateIdx) {
-                    const int idx = s_worldCandidateIndices[candidateIdx];
-                    if (!esp::data::IsWorldDesignerNamePointerSample(
-                            worldDesignerNamePtrs[idx], worldDesignerNamePtrReadBytes[idx])) {
-                        continue;
-                    }
-                    mem.AddScatterReadRequest(
-                        handle,
-                        worldDesignerNamePtrs[idx],
-                        worldDesignerNames[idx],
-                        sizeof(worldDesignerNames[idx]) - 1u,
-                        &worldDesignerNameReadBytes[idx]);
-                    ++designerNameCount;
-                }
-                if (designerNameCount > 0)
-                    executeOptionalScatterRead();
-
-                for (int candidateIdx = 0; candidateIdx < worldCandidateCount; ++candidateIdx) {
-                    const int idx = s_worldCandidateIndices[candidateIdx];
-                    const auto designerName = esp::data::ReadWorldDesignerName(
-                        worldDesignerNames[idx], sizeof(worldDesignerNames[idx]),
-                        worldDesignerNameReadBytes[idx]);
-                    if (designerName.empty()) {
-                        continue;
-                    }
-                    const auto entityClass = esp::data::ClassifyWorldDesignerName(
-                        designerName);
-                    worldClassKinds[idx] = static_cast<uint8_t>(entityClass);
-                    rememberEntityClass(worldSubclassIds[idx], entityClass);
-                    if (worldItemDefs[idx] == 0u) {
-                        uint16_t inferredItemId =
-                            esp::weapons::WeaponItemIdFromDesignerName(
-                                designerName);
-                        if (inferredItemId == 0u)
-                            inferredItemId =
-                                esp::data::UtilityItemIdFromWorldClass(entityClass);
-                        worldItemDefs[idx] = inferredItemId;
-                    }
-                }
-            }
-        }
+        #include "world_parts/world_read_identity.inl"
 
 
         for (int candidateIdx = 0; candidateIdx < worldCandidateCount; ++candidateIdx) {
@@ -855,13 +553,120 @@
                 static_cast<esp::data::WorldEntityClass>(worldClassKinds[idx]));
         }
 
+        struct InfernoPoseRead {
+            Vector3 points[64] = {};
+            std::array<esp::data::WorldVectorReadChunk, 3> chunks{};
+            DWORD bytes[3]{};
+            int slot = 0;
+        };
+        static thread_local InfernoPoseRead infernoPoses[esp::data::kMaxUtilityEffectMarkers];
+        int infernoPoseCount = 0;
+        if (worldScanOk && shouldReadWorldUtilityDetails) {
+            int smokePoseCount = 0;
+            for (int candidateIdx = 0; candidateIdx < worldCandidateCount; ++candidateIdx) {
+                const int idx = s_worldCandidateIndices[candidateIdx];
+                if (!worldEntityReadComplete[idx] || !worldEntities[idx] ||
+                    worldClassKinds[idx] != static_cast<uint8_t>(esp::data::WorldEntityClass::SmokeProjectile))
+                    continue;
+                if (worldSmokeActiveReadBytes[idx] == 0u || worldSmokeTickReadBytes[idx] == 0u)
+                    queueSmokeStateReads(idx, worldEntities[idx]);
+                if (ofs.C_SmokeGrenadeProjectile_m_vSmokeDetonationPos > 0) {
+                    mem.AddScatterReadRequest(handle, worldEntities[idx] + ofs.C_SmokeGrenadeProjectile_m_vSmokeDetonationPos,
+                        &worldSmokeOrigin[idx], sizeof(Vector3), &worldSmokeOriginReadBytes[idx]);
+                    s_positionReadAttemptedMask[idx] = 1u;
+                }
+                ++smokePoseCount;
+            }
+            for (int candidateIdx = 0; candidateIdx < worldCandidateCount; ++candidateIdx) {
+                const int idx = s_worldCandidateIndices[candidateIdx];
+                if (!worldEntityReadComplete[idx] || !worldEntities[idx] ||
+                    worldClassKinds[idx] != static_cast<uint8_t>(esp::data::WorldEntityClass::Inferno))
+                    continue;
+                if (infernoPoseCount >= static_cast<int>(std::size(infernoPoses)))
+                    break;
+                auto& pose = infernoPoses[infernoPoseCount++];
+                pose = {};
+                pose.slot = idx;
+                queueInfernoStateReads(idx, worldEntities[idx]);
+                if (isLikelyGamePointer(worldSceneNodes[idx]) && ofs.CGameSceneNode_m_vecAbsOrigin > 0) {
+                    mem.AddScatterReadRequest(handle, worldSceneNodes[idx] + ofs.CGameSceneNode_m_vecAbsOrigin,
+                        &worldPositions[idx], sizeof(Vector3), &worldPositionReadBytes[idx]);
+                    mem.AddScatterReadRequest(handle, worldSceneNodes[idx] + 0x10u,
+                        &worldTransformPositions[idx], sizeof(Vector3), &worldTransformPositionReadBytes[idx]);
+                    s_positionReadAttemptedMask[idx] = 1u;
+                }
+                if (ofs.C_Inferno_m_firePositions > 0) {
+                    const auto address = worldEntities[idx] + ofs.C_Inferno_m_firePositions;
+                    pose.chunks = esp::data::PlanWorldVectorReads<Vector3, 64>(address);
+                    if (pose.chunks[0].count != 0) s_positionReadAttemptedMask[idx] = 1u;
+                    for (size_t c = 0; c < pose.chunks.size(); ++c) {
+                        const auto chunk = pose.chunks[c];
+                        if (chunk.count != 0)
+                            mem.AddScatterReadRequest(handle, address + chunk.first * sizeof(Vector3),
+                                pose.points + chunk.first, chunk.count * sizeof(Vector3), &pose.bytes[c]);
+                    }
+                }
+            }
+            if (infernoPoseCount > 0 || smokePoseCount > 0) {
+                executeOptionalScatterRead();
+                for (int candidateIdx = 0; candidateIdx < worldCandidateCount; ++candidateIdx) {
+                    const int idx = s_worldCandidateIndices[candidateIdx];
+                    Vector3 origin = {};
+                    if (worldEntityReadComplete[idx] && worldEntities[idx] &&
+                        worldClassKinds[idx] == static_cast<uint8_t>(esp::data::WorldEntityClass::SmokeProjectile) &&
+                        esp::data::ResolveSmokeOrigin(worldSmokeOrigin[idx], worldSmokeOriginReadBytes[idx],
+                            worldSmokeActive[idx], worldSmokeActiveReadBytes[idx],
+                            worldSmokeEffectSpawned[idx], worldSmokeSpawnedReadBytes[idx], origin, isValidWorldPos))
+                        worldBasicDetailsComplete[idx] = 1u;
+                }
+                for (int p = 0; p < infernoPoseCount; ++p) {
+                    const auto& pose = infernoPoses[p];
+                    const int idx = pose.slot;
+                    const bool countComplete = worldInfernoFireCountReadBytes[idx] == sizeof(int);
+                    if (countComplete && worldInfernoFireCount[idx] >= 0 && worldInfernoFireCount[idx] <= 64)
+                        worldBasicDetailsComplete[idx] = 1u;
+                    uint64_t validSamples = 0;
+                    for (size_t c = 0; c < pose.chunks.size(); ++c) {
+                        const auto chunk = pose.chunks[c];
+                        if (pose.bytes[c] != chunk.count * sizeof(Vector3)) continue;
+                        for (size_t i = 0; i < chunk.count; ++i)
+                            validSamples |= uint64_t{1} << (chunk.first + i);
+                    }
+                    if (esp::data::ResolveInfernoSampledOrigin(pose.points, validSamples, worldInfernoFireCount[idx],
+                            countComplete, worldInfernoOrigin[idx], isValidWorldPos)) {
+                        worldInfernoOriginReadBytes[idx] = sizeof(Vector3);
+                    }
+                }
+                int anchorRetryCount = 0;
+                for (int p = 0; p < infernoPoseCount; ++p) {
+                    const auto& pose = infernoPoses[p];
+                    const int idx = pose.slot;
+                    if (worldInfernoOriginReadBytes[idx] != 0 || ofs.C_Inferno_m_firePositions <= 0 ||
+                        worldInfernoFireCountReadBytes[idx] != sizeof(int) || worldInfernoFireCount[idx] <= 0 ||
+                        worldInfernoFireCount[idx] > 64) continue;
+                    if ((worldPositionReadBytes[idx] == sizeof(Vector3) && isValidWorldPos(worldPositions[idx])) ||
+                        (worldTransformPositionReadBytes[idx] == sizeof(Vector3) && isValidWorldPos(worldTransformPositions[idx]))) continue;
+                    bool incomplete = false;
+                    for (size_t c = 0; c < pose.chunks.size(); ++c)
+                        incomplete = incomplete || pose.bytes[c] != pose.chunks[c].count * sizeof(Vector3);
+                    if (!incomplete) continue;
+                    mem.AddScatterReadRequest(handle, worldEntities[idx] + ofs.C_Inferno_m_firePositions,
+                        &worldInfernoOrigin[idx], sizeof(Vector3), &worldInfernoOriginReadBytes[idx]);
+                    ++anchorRetryCount;
+                }
+                if (anchorRetryCount != 0) executeOptionalScatterRead();
+            }
+        }
+
         if (worldScanOk && dynamicRefreshCount > 0) {
             for (int candidateIdx = 0; candidateIdx < worldCandidateCount; ++candidateIdx) {
                 const int idx = s_worldCandidateIndices[candidateIdx];
                 const uintptr_t ent = worldEntities[idx];
                 if (!ent) continue;
+                if (worldClassKinds[idx] == static_cast<uint8_t>(esp::data::WorldEntityClass::Inferno))
+                    continue;
                 const bool entityUnchanged = (ent == s_worldEntityRefs[idx]) && s_cachedWorldSceneNodes[idx];
-                if (entityUnchanged && worldSceneNodeChanged[idx] == 0u) continue;
+                if (entityUnchanged && worldSceneNodeChanged[idx] == 0u && worldDetailsReadQueued[idx] == 0u) continue;
                 if (!worldBasicDetailsComplete[idx]) continue;
                 if (!worldSceneNodes[idx]) continue;
                 worldPositions[idx] = {};
@@ -888,8 +693,11 @@
                         &worldDormantReadBytes[idx]);
                 }
                 if (worldItemDefs[idx] == kWeaponC4Id ||
-                    s_worldEntityItemIds[idx] == kWeaponC4Id) {
-                    if (ofs.C_CSWeaponBase_m_nDropTick > 0) {
+                    s_worldEntityItemIds[idx] == kWeaponC4Id ||
+                    esp::data::IsDroppedWorldItem(worldItemDefs[idx],
+                        static_cast<esp::data::WorldEntityClass>(worldClassKinds[idx]))) {
+                    if ((worldItemDefs[idx] == kWeaponC4Id || s_worldEntityItemIds[idx] == kWeaponC4Id) &&
+                        ofs.C_CSWeaponBase_m_nDropTick > 0) {
                         worldDropTickReadBytes[idx] = 0;
                         mem.AddScatterReadRequest(
                             handle,
@@ -912,7 +720,92 @@
             executeOptionalScatterRead();
         }
 
-        
+        if (worldScanOk && (newEntityCount > 0 || cachedIdentityRefreshCount > 0 || dynamicRefreshCount > 0)) {
+            struct WorldProof {
+                int slot = 0;
+                uintptr_t entity = 0, node = 0, identity = 0;
+                uint32_t owner = 0;
+                DWORD entityBytes = 0, nodeBytes = 0, identityBytes = 0, ownerBytes = 0;
+            };
+            static thread_local WorldProof proofs[kMaxTrackedWorldEntities + 1];
+            std::array<uintptr_t, kMaxTrackedWorldBlocks> proofBlocks{};
+            std::array<DWORD, kMaxTrackedWorldBlocks> proofBlockBytes{};
+            std::array<bool, kMaxTrackedWorldBlocks> proofBlockQueued{};
+            int proofCount = 0;
+            for (int c = 0; c < worldCandidateCount; ++c) {
+                const int idx = s_worldCandidateIndices[c];
+                const auto kind = static_cast<esp::data::WorldEntityClass>(worldClassKinds[idx]);
+                if (!worldEntityReadComplete[idx] || !worldEntities[idx] || !worldBasicDetailsComplete[idx] ||
+                    !(worldItemDefs[idx] == kWeaponC4Id || esp::data::IsDroppedWorldItem(worldItemDefs[idx], kind) ||
+                      esp::data::IsWorldUtilityClass(kind))) continue;
+                const int b = idx >> 9;
+                if (b >= blockCount || !isLikelyGamePointer(worldBlocks[b])) continue;
+                auto& proof = proofs[proofCount++];
+                proof = {};
+                proof.slot = idx;
+                if (!proofBlockQueued[b]) {
+                    proofBlockQueued[b] = true;
+                    mem.AddScatterReadRequest(handle, entityList + 0x10u + static_cast<uintptr_t>(b) * 8u,
+                        &proofBlocks[b], sizeof(uintptr_t), &proofBlockBytes[b]);
+                }
+                mem.AddScatterReadRequest(handle, worldBlocks[b] + s_activeEntitySlotSize * (idx & kEntitySlotMask),
+                    &proof.entity, sizeof(uintptr_t), &proof.entityBytes);
+                mem.AddScatterReadRequest(handle, worldEntities[idx] + ofs.C_BaseEntity_m_pGameSceneNode,
+                    &proof.node, sizeof(uintptr_t), &proof.nodeBytes);
+                if (worldIdentityReadBytes[idx] == sizeof(uintptr_t) && isLikelyGamePointer(worldIdentities[idx]))
+                    mem.AddScatterReadRequest(handle, worldEntities[idx] + ofs.CEntityInstance_m_pEntity,
+                        &proof.identity, sizeof(uintptr_t), &proof.identityBytes);
+                if ((kind == esp::data::WorldEntityClass::DroppedWeapon || worldItemDefs[idx] == kWeaponC4Id) &&
+                    ofs.C_BaseEntity_m_hOwnerEntity > 0)
+                    mem.AddScatterReadRequest(handle, worldEntities[idx] + ofs.C_BaseEntity_m_hOwnerEntity,
+                        &proof.owner, sizeof(uint32_t), &proof.ownerBytes);
+            }
+            if (proofCount != 0) executeOptionalScatterRead();
+            for (int p = 0; p < proofCount; ++p) {
+                const auto& proof = proofs[p];
+                const int idx = proof.slot, b = idx >> 9;
+                const bool blockComplete = app::memory_address::IsCompleteGamePointerSample(proofBlocks[b], proofBlockBytes[b]);
+                const bool entityComplete = app::memory_address::IsCompleteGamePointerSample(proof.entity, proof.entityBytes);
+                if (blockComplete && proofBlocks[b] == 0) {
+                    worldEntities[idx] = 0;
+                    worldBasicDetailsComplete[idx] = 0;
+                    continue;
+                }
+                if (!blockComplete || proofBlocks[b] != worldBlocks[b] || !entityComplete) {
+                    worldEntityReadComplete[idx] = 0;
+                    worldBasicDetailsComplete[idx] = 0;
+                    continue;
+                }
+                if (proof.entity != worldEntities[idx]) {
+                    worldEntities[idx] = proof.entity;
+                    worldBasicDetailsComplete[idx] = 0;
+                    continue;
+                }
+                if (worldIdentityReadBytes[idx] == sizeof(uintptr_t) && isLikelyGamePointer(worldIdentities[idx]) &&
+                    (proof.identityBytes != sizeof(uintptr_t) || proof.identity != worldIdentities[idx])) {
+                    worldBasicDetailsComplete[idx] = 0;
+                    if (app::memory_address::IsCompleteGamePointerSample(proof.identity, proof.identityBytes))
+                        worldEntities[idx] = 0;
+                    continue;
+                }
+                if (!app::memory_address::IsCompleteGamePointerSample(proof.node, proof.nodeBytes) ||
+                    proof.node != worldSceneNodes[idx]) {
+                    worldBasicDetailsComplete[idx] = 0;
+                    if (app::memory_address::IsCompleteGamePointerSample(proof.node, proof.nodeBytes))
+                        s_cachedWorldSceneNodes[idx] = proof.node;
+                    continue;
+                }
+                if (proof.ownerBytes == sizeof(uint32_t)) {
+                    worldOwnerHandles[idx] = proof.owner;
+                    worldOwnerReadBytes[idx] = proof.ownerBytes;
+                } else if ((static_cast<esp::data::WorldEntityClass>(worldClassKinds[idx]) ==
+                        esp::data::WorldEntityClass::DroppedWeapon || worldItemDefs[idx] == kWeaponC4Id) &&
+                    ofs.C_BaseEntity_m_hOwnerEntity > 0) {
+                    worldBasicDetailsComplete[idx] = 0;
+                }
+            }
+        }
+
         for (int candidateIdx = 0; candidateIdx < worldCandidateCount; ++candidateIdx) {
             const int idx = s_worldCandidateIndices[candidateIdx];
             if (!worldEntityReadComplete[idx])
@@ -929,8 +822,30 @@
             }
             if (worldEntities[idx] &&
                 worldBasicDetailsComplete[idx] &&
-                worldSceneNodes[idx]) {
+                (worldSceneNodes[idx] ||
+                    worldClassKinds[idx] == static_cast<uint8_t>(esp::data::WorldEntityClass::Inferno) ||
+                    worldClassKinds[idx] == static_cast<uint8_t>(esp::data::WorldEntityClass::SmokeProjectile))) {
                 s_cachedWorldSceneNodes[idx] = worldSceneNodes[idx];
+                if (worldClassKinds[idx] != s_worldEntityClassKinds[idx]) {
+                    s_cachedWorldPositions[idx] = {};
+                    s_cachedWorldPositionSampleUs[idx] = 0;
+                    ResetWorldUtilityTrackingSlot(idx);
+                }
+                const auto refreshedClass = static_cast<esp::data::WorldEntityClass>(worldClassKinds[idx]);
+                const bool effectStartChanged =
+                    (refreshedClass == esp::data::WorldEntityClass::SmokeProjectile &&
+                     worldSmokeTickReadBytes[idx] == sizeof(int) && s_worldPrevSmokeTick[idx] >= 4 &&
+                     worldSmokeTick[idx] >= 4 && worldSmokeTick[idx] < 20000000 &&
+                     worldSmokeTick[idx] != s_worldPrevSmokeTick[idx]) ||
+                    (refreshedClass == esp::data::WorldEntityClass::Inferno &&
+                     worldInfernoTickReadBytes[idx] == sizeof(int) && s_worldPrevInfernoTick[idx] >= 4 &&
+                     worldInfernoTick[idx] >= 4 && worldInfernoTick[idx] < 20000000 &&
+                     worldInfernoTick[idx] != s_worldPrevInfernoTick[idx]);
+                if (effectStartChanged) {
+                    s_cachedWorldPositions[idx] = {};
+                    s_cachedWorldPositionSampleUs[idx] = 0;
+                    ResetWorldUtilityTrackingSlot(idx);
+                }
                 s_worldEntityClassKinds[idx] = worldClassKinds[idx];
                 const bool ownerWasRead =
                     esp::data::IsWorldFieldReadComplete(
@@ -951,6 +866,20 @@
                     worldPositions[idx] = worldInfernoOrigin[idx];
                     worldPositionReadBytes[idx] = sizeof(Vector3);
                 }
+                if (worldClassKinds[idx] == static_cast<uint8_t>(esp::data::WorldEntityClass::SmokeProjectile) &&
+                    esp::data::ResolveSmokeOrigin(worldSmokeOrigin[idx], worldSmokeOriginReadBytes[idx],
+                        worldSmokeActive[idx], worldSmokeActiveReadBytes[idx],
+                        worldSmokeEffectSpawned[idx], worldSmokeSpawnedReadBytes[idx], worldPositions[idx], isValidWorldPos))
+                    worldPositionReadBytes[idx] = sizeof(Vector3);
+                if ((esp::data::IsDroppedWorldItem(worldItemDefs[idx],
+                        static_cast<esp::data::WorldEntityClass>(worldClassKinds[idx])) ||
+                     worldClassKinds[idx] == static_cast<uint8_t>(esp::data::WorldEntityClass::Inferno)) &&
+                    (worldPositionReadBytes[idx] != sizeof(Vector3) || !isValidWorldPos(worldPositions[idx])) &&
+                    worldTransformPositionReadBytes[idx] == sizeof(Vector3) &&
+                    isValidWorldPos(worldTransformPositions[idx])) {
+                    worldPositions[idx] = worldTransformPositions[idx];
+                    worldPositionReadBytes[idx] = sizeof(Vector3);
+                }
                 if (esp::data::IsWorldFieldReadComplete(
                         worldPositionReadBytes[idx],
                         sizeof(Vector3)) &&
@@ -966,8 +895,14 @@
                             isValidWorldPos(worldPositions[idx])))
                         ++worldPositionReadMisses;
                     worldPositionReadBytes[idx] = 0;
-                    worldPositions[idx] = esp::data::IsWorldMarkerSourceFresh(
-                        s_cachedWorldPositionSampleUs[idx], nowUs)
+                    const auto effectClass = static_cast<esp::data::WorldEntityClass>(worldClassKinds[idx]);
+                    const bool confirmedEffectAnchor =
+                        (effectClass == esp::data::WorldEntityClass::SmokeProjectile &&
+                         s_worldSmokeLatched[idx] && s_worldUtilityDeadlinesUs[idx][0] > nowUs) ||
+                        (effectClass == esp::data::WorldEntityClass::Inferno &&
+                         s_worldInfernoLatched[idx] && s_worldUtilityDeadlinesUs[idx][1] > nowUs);
+                    worldPositions[idx] = (confirmedEffectAnchor || esp::data::IsWorldMarkerSourceFresh(
+                        s_cachedWorldPositionSampleUs[idx], nowUs))
                             ? s_cachedWorldPositions[idx] : Vector3{};
                 }
             } else if (!worldEntities[idx]) {
@@ -1035,13 +970,8 @@
             const bool featureRelevantEntity =
                 (itemId == kWeaponC4Id && worldDomainBombRescueDue) ||
                 (worldDomainDroppedItemsDue &&
-                 itemId != 0 &&
-                 itemId != kWeaponC4Id &&
-                 WeaponNameFromItemId(itemId) != nullptr &&
-                 !isUtilityWorldItemId(itemId) &&
-                 !IsKnifeItemId(itemId) &&
-                 worldClassKinds[idx] ==
-                     static_cast<uint8_t>(esp::data::WorldEntityClass::DroppedWeapon)) ||
+                 esp::data::IsDroppedWorldItem(itemId,
+                     static_cast<esp::data::WorldEntityClass>(worldClassKinds[idx]))) ||
                 (worldDomainActiveUtilityDue &&
                  (isUtilityWorldItemId(itemId) ||
                   esp::data::IsWorldUtilityClass(
@@ -1084,10 +1014,19 @@
 
         int worldClassifiedCandidateCount = 0;
         int worldIdentityPendingCount = 0;
+        uint64_t worldReadCounts = 0;
         for (int candidateIdx = 0; candidateIdx < worldCandidateCount; ++candidateIdx) {
             const int idx = s_worldCandidateIndices[candidateIdx];
             if (!worldEntities[idx])
                 continue;
+            if (worldEntityReadComplete[idx])
+                worldReadCounts += 1ull;
+            if (worldBasicDetailsComplete[idx])
+                worldReadCounts += 1ull << 16;
+            if (worldIdentityReadBytes[idx] == sizeof(uintptr_t) && isLikelyGamePointer(worldIdentities[idx]))
+                worldReadCounts += 1ull << 32;
+            if (!esp::data::ReadWorldDesignerName(worldDesignerNames[idx], sizeof(worldDesignerNames[idx]), worldDesignerNameReadBytes[idx]).empty())
+                worldReadCounts += 1ull << 48;
             if (worldClassKinds[idx] != static_cast<uint8_t>(esp::data::WorldEntityClass::Unknown)) {
                 ++worldClassifiedCandidateCount;
             } else if (worldSubclassIds[idx] != 0u || worldItemDefs[idx] != 0u) {
@@ -1099,6 +1038,13 @@
         s_worldUtilityCandidateCountStat.store(worldUtilityProcessCount, std::memory_order_relaxed);
         s_worldClassifiedCandidateCountStat.store(worldClassifiedCandidateCount, std::memory_order_relaxed);
         s_worldIdentityPendingCountStat.store(worldIdentityPendingCount, std::memory_order_relaxed);
+        s_worldReadCountsStat.store(worldReadCounts, std::memory_order_relaxed);
+        s_worldReadDemandStat.store(
+            (wantsEspWorld ? 1u : 0u) | (webRadarDemandActive ? 2u : 0u) |
+            (wantsWorldUtilityData ? 4u : 0u) | (worldDomainActiveUtilityDue ? 8u : 0u) |
+            (ofs.CEntityInstance_m_pEntity > 0 && ofs.CEntityIdentity_m_designerName > 0 ? 16u : 0u) |
+            (ofs.C_SmokeGrenadeProjectile_m_vSmokeDetonationPos > 0 ? 32u : 0u) |
+            (ofs.C_Inferno_m_firePositions > 0 ? 64u : 0u), std::memory_order_relaxed);
 
         std::bitset<kMaxTrackedWorldEntities + 1> worldProcessMask;
         for (int i = 0; i < worldProcessCount; ++i)

@@ -3,10 +3,8 @@ if (g::radarEnabled) {
     const bool radarStaticMode = (g::radarMode != 0);
     const float staticFlipX = g::radarStaticFlipX ? -1.0f : 1.0f;
     constexpr float kRadarOverviewTextureSize = 1024.0f;
-    const float hudScale = screenH / 1080.0f;
-    const float cs2MinimapMarginX = 5.0f * hudScale;
-    const float cs2MinimapMarginY = 7.0f * hudScale;
-    const float cs2MinimapSize = 290.0f * hudScale;
+    const auto radarRect = app::display::RadarRect(g::gameViewport, g::radarSettings.hud, g::radarSize);
+    const bool circularRadar = g::radarSettings.hud.shape == 1;
 
     const float calibrationRad = g::radarWorldRotationDeg * (std::numbers::pi_v<float> / 180.0f);
     const float calibrationCos = cosf(calibrationRad);
@@ -16,36 +14,22 @@ if (g::radarEnabled) {
     const float offsetAdjustX = std::clamp(activeMapState.baseOffsetX + g::radarWorldOffsetX, -0.25f, 0.25f);
     const float offsetAdjustY = std::clamp(activeMapState.baseOffsetY + g::radarWorldOffsetY, -0.25f, 0.25f);
 
-    static bool s_legacyAnchoredSizeMigrated = false;
-    const float legacyAnchoredSize = 234.0f * hudScale;
-    const float oversizedAnchoredSize = 324.0f * hudScale;
-    if (!s_legacyAnchoredSizeMigrated &&
-        (std::fabs(g::radarSize - legacyAnchoredSize) <= 1.5f ||
-         std::fabs(g::radarSize - oversizedAnchoredSize) <= 1.5f)) {
-        g::radarSize = cs2MinimapSize;
-        s_legacyAnchoredSizeMigrated = true;
-    }
-
-    const float radarSz = g::radarSize;
-    const float halfRad = radarSz * 0.5f;
-    const float screenClampMargin = 4.0f * hudScale;
-    float radarPosX = cs2MinimapMarginX;
-    float radarPosY = cs2MinimapMarginY;
-
-    if (radarPosX < screenClampMargin) radarPosX = screenClampMargin;
-    if (radarPosY < screenClampMargin) radarPosY = screenClampMargin;
-    if (radarPosX > screenW - radarSz - screenClampMargin) radarPosX = screenW - radarSz - screenClampMargin;
-    if (radarPosY > screenH - radarSz - screenClampMargin) radarPosY = screenH - radarSz - screenClampMargin;
-    const ImVec2 radarPos(radarPosX, radarPosY);
-    const ImVec2 radarEnd(radarPos.x + radarSz, radarPos.y + radarSz);
-    const ImVec2 radarCenter(radarPos.x + halfRad, radarPos.y + halfRad);
+    const float halfRad = radarRect.height * 0.5f;
+    const float radarStretch = radarRect.width / radarRect.height;
+    const ImVec2 radarPos(radarRect.x, radarRect.y);
+    const ImVec2 radarEnd(radarPos.x + radarRect.width, radarPos.y + radarRect.height);
+    const ImVec2 radarCenter(radarPos.x + radarRect.width * 0.5f, radarPos.y + halfRad);
+    drawList->PushClipRect(radarPos, radarEnd, true);
 
     const ImU32 radarDotCol = ColorToImU32(g::radarDotColor);
     const ImU32 radarBombCol = ColorToImU32(g::radarBombColor);
     const ImU32 radarAngleCol = ColorToImU32(g::radarAngleColor);
     const ImU32 radarBorderCol = ColorToImU32(g::radarBorderColor);
     
-    drawList->AddRect(radarPos, radarEnd, radarBorderCol);
+    if (circularRadar)
+        drawList->AddEllipse(radarCenter, ImVec2(radarRect.width * 0.5f, halfRad), radarBorderCol);
+    else
+        drawList->AddRect(radarPos, radarEnd, radarBorderCol);
     if (g::radarShowCrosshair) {
         drawList->AddLine(ImVec2(radarCenter.x, radarPos.y), ImVec2(radarCenter.x, radarEnd.y), IM_COL32(255, 255, 255, 26));
         drawList->AddLine(ImVec2(radarPos.x, radarCenter.y), ImVec2(radarEnd.x, radarCenter.y), IM_COL32(255, 255, 255, 26));
@@ -166,10 +150,9 @@ if (g::radarEnabled) {
             px = radarCenter.x + calRight * scale;
             py = radarCenter.y - calForward * scale;
         }
-        if (px < radarPos.x + 3.0f) px = radarPos.x + 3.0f;
-        if (px > radarEnd.x - 3.0f) px = radarEnd.x - 3.0f;
-        if (py < radarPos.y + 3.0f) py = radarPos.y + 3.0f;
-        if (py > radarEnd.y - 3.0f) py = radarEnd.y - 3.0f;
+        px = radarCenter.x + (px - radarCenter.x) * radarStretch;
+        app::display::ClampRadarPoint(radarRect, circularRadar,
+            circularRadar ? g::radarDotSize + 9.0f : 3.0f, px, py);
 
         if (outX) *outX = px;
         if (outY) *outY = py;
@@ -196,7 +179,7 @@ if (g::radarEnabled) {
         const float localRayLen = 6.0f;
         drawList->AddLine(
             localOrigin,
-            ImVec2(localOrigin.x + localDirRight * localRayLen, localOrigin.y - localDirForward * localRayLen),
+            ImVec2(localOrigin.x + localDirRight * localRayLen * radarStretch, localOrigin.y - localDirForward * localRayLen),
             IM_COL32(255, 255, 255, 220), 1.2f);
     }
 
@@ -205,6 +188,12 @@ if (g::radarEnabled) {
     
     static uint64_t s_radarLastValidAliveUs[64] = {};
     static uintptr_t s_radarLastValidPawn[64] = {};
+    static uint64_t s_radarCacheSceneSerial = 0;
+    if (s_radarCacheSceneSerial != snap.sceneSerial) {
+        s_radarCacheSceneSerial = snap.sceneSerial;
+        memset(s_radarLastValidAliveUs, 0, sizeof(s_radarLastValidAliveUs));
+        memset(s_radarLastValidPawn, 0, sizeof(s_radarLastValidPawn));
+    }
     constexpr uint64_t kRadarPrevFallbackMaxAgeUs = 100000u; 
     const uint64_t radarNowUs = TickNowUs();
     for (int i = 0; i < 64; ++i) {
@@ -230,7 +219,7 @@ if (g::radarEnabled) {
             isValidWorldPos(prevRadar.position) &&
             prevRadar.health > 0;
         const bool radarSlotIdentityMatchesCurrent =
-            currentRadar.pawn == 0 || currentRadar.pawn == prevRadar.pawn;
+            esp::render::IsSameNonZeroPlayerIdentity(currentRadar.pawn, prevRadar.pawn);
         const bool radarCurrentConfirmedDead =
             currentRadar.valid &&
             currentRadar.pawn != 0 &&
@@ -248,12 +237,13 @@ if (g::radarEnabled) {
             ? radarNowUs - s_radarLastValidAliveUs[i]
             : kRadarPrevFallbackMaxAgeUs + 1;
         const bool prevFallbackAllowedRadar =
-            prevRadarUsable &&
-            radarSlotIdentityMatchesCurrent &&
-            radarSlotIdentityMatchesCache &&
-            !radarCurrentConfirmedDead &&
-            !radarPrevIsLocal &&
-            radarLastValidAge <= kRadarPrevFallbackMaxAgeUs;
+            esp::render::ShouldUsePrevTickFallback(
+                prevRadarUsable,
+                radarSlotIdentityMatchesCurrent,
+                radarSlotIdentityMatchesCache,
+                radarCurrentConfirmedDead,
+                radarPrevIsLocal,
+                radarLastValidAge);
         const esp::PlayerData* radarSource = nullptr;
         if (currentRadarUsable)
             radarSource = &currentRadar;
@@ -318,7 +308,7 @@ if (g::radarEnabled) {
             const float rayLen = 6.0f;
             drawList->AddLine(
                 ImVec2(px, py),
-                ImVec2(px + calEnemyRight * rayLen, py - calEnemyForward * rayLen),
+                ImVec2(px + calEnemyRight * rayLen * radarStretch, py - calEnemyForward * rayLen),
                 radarAngleCol, 1.2f);
         }
     }
@@ -376,4 +366,5 @@ if (g::radarEnabled) {
             }
         }
     }
+    drawList->PopClipRect();
 }

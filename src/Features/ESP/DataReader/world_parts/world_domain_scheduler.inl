@@ -1,4 +1,5 @@
-    const uint64_t worldSceneResetAge = nowUs - s_lastSceneResetUs.load(std::memory_order_relaxed);
+    const uint64_t worldSceneResetUs = s_lastSceneResetUs.load(std::memory_order_relaxed);
+    const uint64_t worldSceneResetAge = nowUs >= worldSceneResetUs ? nowUs - worldSceneResetUs : 0;
     const bool worldScanAllowed =
         esp::data::IsWorldScanAllowed(liveWorldContext, worldSceneResetAge);
     const bool bombRescueScanAllowed =
@@ -6,6 +7,7 @@
     bool worldScanCommitted = false;
 
     static uint64_t s_worldCacheResetSerial = 0;
+    static uint64_t s_worldDataCacheEpoch = 0;
     static float s_prevWorldGameTime = 0.0f;
     static uint32_t s_worldWarmupScans = 0;
     static uint64_t s_lastWorldUtilityDetailScanUs = 0;
@@ -35,6 +37,36 @@
     }
     s_prevWorldBombDroppedByRules = bombDroppedByRules;
     s_prevWorldBombPlantedByRules = bombPlantedByRules;
+
+    const uint64_t worldCacheSceneResetSerial = s_sceneResetSerial.load(std::memory_order_relaxed);
+    const bool worldContextReset =
+        (s_worldCacheResetSerial != worldCacheSceneResetSerial) ||
+        (!liveWorldContext && s_prevWorldLiveContext);
+    const bool worldClockReset = currentGameTimeFresh && currentGameTime > 0.0f &&
+        ((s_prevWorldGameTime > 5.0f && currentGameTime + 1.0f < s_prevWorldGameTime) ||
+         (currentGameTime < 1.0f && s_prevWorldGameTime > 60.0f));
+    if (worldContextReset || bombRoundChangedThisTick || worldClockReset) {
+        s_worldCacheResetSerial = worldCacheSceneResetSerial;
+        ++s_worldDataCacheEpoch;
+        s_prevWorldGameTime = 0.0f;
+        s_worldWarmupScans = 0;
+        s_lastWorldUtilityDetailScanUs = 0;
+        s_lastWorldUtilityProbeScanUs = 0;
+        s_worldDiscoveryShard = 0;
+        s_worldIdleScanStreak = 0;
+        s_lastWorldBombRescueScanUs = 0;
+        s_lastWorldDroppedItemsScanUs = 0;
+        s_lastWorldActiveUtilityScanUs = 0;
+        s_lastWorldSlowDiscoveryScanUs = 0;
+        std::memset(s_worldBombCandidateSlots, 0, sizeof(s_worldBombCandidateSlots));
+        s_worldBombCandidateSlotCount = 0;
+        ResetWorldUtilityTrackingState();
+        std::memset(s_worldMarkers, 0, sizeof(s_worldMarkers));
+        s_worldMarkerCount = 0;
+    }
+    if (currentGameTimeFresh && std::isfinite(currentGameTime) && currentGameTime > 0.0f)
+        s_prevWorldGameTime = currentGameTime;
+    s_prevWorldLiveContext = liveWorldContext;
 
     const bool hasKnownBombCandidateSlots = (s_worldBombCandidateSlotCount != 0u);
     
@@ -78,38 +110,6 @@
         bombRescueDiscoveryNeeded &&
         !bombPlantedByRules &&
         wantsBombConsumers;
-
-    const uint64_t worldCacheSceneResetSerial = s_sceneResetSerial.load(std::memory_order_relaxed);
-    const bool worldContextReset =
-        (s_worldCacheResetSerial != worldCacheSceneResetSerial) ||
-        (!liveWorldContext && s_prevWorldLiveContext);
-    if (worldContextReset) {
-        s_worldCacheResetSerial = worldCacheSceneResetSerial;
-        s_prevWorldGameTime = 0.0f;
-        s_worldWarmupScans = 0;
-        s_lastWorldUtilityDetailScanUs = 0;
-        s_lastWorldUtilityProbeScanUs = 0;
-        s_worldDiscoveryShard = 0;
-        s_worldIdleScanStreak = 0;
-        s_lastWorldBombRescueScanUs = 0;
-        s_lastWorldDroppedItemsScanUs = 0;
-        s_lastWorldActiveUtilityScanUs = 0;
-        s_lastWorldSlowDiscoveryScanUs = 0;
-        std::memset(s_worldBombCandidateSlots, 0, sizeof(s_worldBombCandidateSlots));
-        s_worldBombCandidateSlotCount = 0;
-        ResetWorldUtilityTrackingState();
-        std::memset(s_worldMarkers, 0, sizeof(s_worldMarkers));
-        s_worldMarkerCount = 0;
-    }
-    if (bombRoundChangedThisTick && !worldContextReset) {
-        ResetWorldUtilityTrackingState();
-        std::memset(s_worldMarkers, 0, sizeof(s_worldMarkers));
-        s_worldMarkerCount = 0;
-        s_worldWarmupScans = 0;
-        s_lastWorldUtilityDetailScanUs = 0;
-        s_lastWorldUtilityProbeScanUs = 0;
-    }
-    s_prevWorldLiveContext = liveWorldContext;
 
     const bool wantsGeneralWorldScan = wantsDroppedItemMarkers || wantsWorldUtilityData;
     const bool worldIdleDiscovery = esp::data::ShouldUseWorldIdleDiscovery(

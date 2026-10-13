@@ -81,6 +81,41 @@ namespace
                    ReadFresh(address, buffer, size);
         }
 
+        void ReadBatch(std::span<runtime_offsets::resolver_policy::SchemaMemoryRead> requests, Result& result)
+        {
+            control_.Check();
+            std::vector<DWORD> completed(requests.size(), 0);
+            const auto handle = mem.CreateScatterHandle();
+            struct BatchGuard {
+                VMMDLL_SCATTER_HANDLE handle;
+                ~BatchGuard() { mem.CloseScatterHandle(handle); }
+            } guard{handle};
+            const auto validRead = [](const auto& request) {
+                return app::memory_address::IsCanonicalUserPointer(request.address) && request.output &&
+                    request.size != 0 && request.size <= app::memory_address::kMaximumUserAddress - request.address;
+            };
+            if (handle) {
+                for (std::size_t i = 0; i < requests.size(); ++i) {
+                    control_.Check();
+                    auto& request = requests[i];
+                    request.completed = 0;
+                    if (validRead(request))
+                        mem.AddScatterReadRequest(handle, request.address, request.output, request.size, &completed[i]);
+                }
+                control_.Run([&] { return mem.ExecuteReadScatter(handle); });
+            }
+            for (std::size_t i = 0; i < requests.size(); ++i) {
+                auto& request = requests[i];
+                request.completed = completed[i];
+                result.bytesRead += completed[i];
+                if (request.completed != request.size && validRead(request) &&
+                    ReadFresh(request.address, request.output, request.size)) {
+                    request.completed = request.size;
+                    result.bytesRead += request.size;
+                }
+            }
+        }
+
         template <typename T>
         bool ReadValue(std::uintptr_t address, T& value, Result& result)
         {
@@ -453,7 +488,8 @@ namespace
                 return true;
             };
             if (!read(hashAddress, hash.data(), hash.size())) return {};
-            return runtime_offsets::resolver_policy::ReadSchemaBindings(hash, read);
+            return runtime_offsets::resolver_policy::ReadSchemaBindingsBatched(hash,
+                [&](auto requests) { ReadBatch(requests, result); });
         }
 
         bool ResolveSchemaFields(
@@ -521,7 +557,8 @@ namespace
 
             std::vector<std::uintptr_t> retryBindings;
             std::unordered_set<std::string> matchedClasses;
-            const auto scanBinding = [&](std::uintptr_t binding, bool fresh) {
+            const auto scanBinding = [&](std::uintptr_t binding, bool fresh,
+                std::span<const std::uint8_t> sampledHeader, std::string_view sampledName) {
                 const auto read = [&](std::uintptr_t address, void* output, std::size_t size) {
                     const bool ok = fresh ? ReadFresh(address, output, size) : ReadResolverMemory(address, output, size);
                     if (ok) result.bytesRead += size;
@@ -532,7 +569,9 @@ namespace
                 };
                 ++result.classesVisited;
                 std::array<std::uint8_t, 0x38> header = {};
-                if (!read(binding, header.data(), header.size())) {
+                if (sampledHeader.size() == header.size())
+                    std::memcpy(header.data(), sampledHeader.data(), header.size());
+                else if (!read(binding, header.data(), header.size())) {
                     if (!fresh && retryBindings.size() < 128) retryBindings.push_back(binding);
                     return;
                 }
@@ -543,7 +582,7 @@ namespace
                 std::memcpy(&namePointer, header.data() + 0x08, sizeof(namePointer));
                 std::memcpy(&fieldCount, header.data() + 0x24, sizeof(fieldCount));
                 std::memcpy(&fieldsPointer, header.data() + 0x30, sizeof(fieldsPointer));
-                const std::string className = readName(namePointer);
+                const std::string className = sampledName.empty() ? readName(namePointer) : std::string(sampledName);
                 if (className.empty()) {
                     if (!fresh && retryBindings.size() < 128) retryBindings.push_back(binding);
                     return;
@@ -563,6 +602,8 @@ namespace
                     if (!fresh && requiredMissing()) retryBindings.push_back(binding);
                     return;
                 }
+                std::vector<std::pair<std::uintptr_t, std::int32_t>> fields;
+                fields.reserve(static_cast<std::size_t>(fieldCount));
                 runtime_offsets::resolver_policy::ReadSchemaFields(fieldsPointer, fieldCount, read,
                     [&](std::span<const std::uint8_t> field) {
                         std::uintptr_t fieldNamePointer = 0;
@@ -570,23 +611,59 @@ namespace
                         std::memcpy(&fieldNamePointer, field.data(), sizeof(fieldNamePointer));
                         std::memcpy(&offset, field.data() + 0x10, sizeof(offset));
                         if (offset < 0 || offset > 0x100000) return;
-                        const std::string fieldName = readName(fieldNamePointer);
-                        for (const SchemaRequest* request : requestIt->second) {
-                            if (request->fieldName == fieldName)
-                                result.schemas.emplace(request->outputKey, offset);
-                        }
+                        fields.emplace_back(fieldNamePointer, offset);
                     });
+                std::vector<std::uintptr_t> fieldNames;
+                fieldNames.reserve(fields.size());
+                for (const auto& field : fields) fieldNames.push_back(field.first);
+                const auto names = runtime_offsets::resolver_policy::ReadSchemaNamesBatched(fieldNames,
+                    [&](auto batch) { ReadBatch(batch, result); }, read);
+                std::array<std::uint8_t, 0x38> verifiedHeader{};
+                if (!ReadFresh(binding, verifiedHeader.data(), verifiedHeader.size()) ||
+                    !runtime_offsets::resolver_policy::AreSchemaClassHeadersCoherent(header, verifiedHeader)) {
+                    if (!fresh) retryBindings.push_back(binding);
+                    return;
+                }
+                result.bytesRead += verifiedHeader.size();
+                for (std::size_t i = 0; i < names.size(); ++i)
+                    for (const auto* request : requestIt->second)
+                        if (request->fieldName == names[i])
+                            result.schemas.emplace(request->outputKey, fields[i].second);
                 if (!fresh && requiredMissing()) retryBindings.push_back(binding);
             };
-            for (const std::uintptr_t binding : bindings) {
+            constexpr std::size_t kBindingBatchSize = 256;
+            for (std::size_t first = 0; first < bindings.size(); first += kBindingBatchSize) {
                 control_.Check();
                 if (result.schemas.size() >= requests.size()) break;
-                scanBinding(binding, false);
+                const auto count = (std::min)(kBindingBatchSize, bindings.size() - first);
+                std::vector<std::array<std::uint8_t, 0x38>> headers(count);
+                std::vector<runtime_offsets::resolver_policy::SchemaMemoryRead> reads(count);
+                std::vector<std::uintptr_t> namePointers(count, 0);
+                for (std::size_t i = 0; i < count; ++i)
+                    reads[i] = {bindings[first + i], headers[i].data(), headers[i].size(), 0};
+                ReadBatch(reads, result);
+                for (std::size_t i = 0; i < count; ++i)
+                    if (reads[i].completed == reads[i].size)
+                        std::memcpy(&namePointers[i], headers[i].data() + 0x08, sizeof(std::uintptr_t));
+                const auto names = runtime_offsets::resolver_policy::ReadSchemaNamesBatched(namePointers,
+                    [&](auto batch) { ReadBatch(batch, result); },
+                    [&](auto address, auto output, auto size) {
+                        if (!ReadFresh(address, output, size)) return false;
+                        result.bytesRead += size;
+                        return true;
+                    });
+                for (std::size_t i = 0; i < count; ++i) {
+                    if (reads[i].completed != reads[i].size || names[i].empty()) {
+                        if (retryBindings.size() < 128) retryBindings.push_back(bindings[first + i]);
+                        continue;
+                    }
+                    scanBinding(bindings[first + i], false, headers[i], names[i]);
+                }
             }
             if (std::any_of(requests.begin(), requests.end(), [&](const SchemaRequest& request) {
                 return !request.optionalLayoutProbe && !result.schemas.contains(request.outputKey);
             })) {
-                for (const auto binding : retryBindings) scanBinding(binding, true);
+                for (const auto binding : retryBindings) scanBinding(binding, true, {}, {});
             }
             for (const auto& request : requests) {
                 if (!request.optionalLayoutProbe && !result.schemas.contains(request.outputKey)) {

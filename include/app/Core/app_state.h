@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <string>
 #include <vector>
+#include "app/Platform/display_mapping.h"
 
 struct ImFont;
 
@@ -58,6 +59,7 @@ namespace app::state {
 
 
     struct DisplaySettings {
+        app::display::MappingSettings mapping;
         int width = 1920;
         int height = 1080;
         bool vsyncEnabled = true;
@@ -197,6 +199,8 @@ namespace app::state {
         float offscreenColor[4] = { 1.0f, 0.30f, 0.20f, 1.0f };
         float flagColor[4] = { 0.80f, 0.92f, 1.0f, 1.0f };
         float worldColor[4] = { 1.0f, 1.0f, 1.0f, 1.0f };
+        float worldSmokeTimerColor[4] = { 180.0f / 255.0f, 180.0f / 255.0f, 220.0f / 255.0f, 1.0f };
+        float worldInfernoTimerColor[4] = { 1.0f, 120.0f / 255.0f, 40.0f / 255.0f, 1.0f };
         float bombColor[4] = { 1.0f, 0.65f, 0.20f, 1.0f };
         float bombTextSize = 0.0f;
         bool bombText = false;
@@ -214,6 +218,7 @@ namespace app::state {
     };
 
     struct RadarSettings {
+        app::display::HudSettings hud;
         bool enabled = true;
         int mode = 1;
         bool showLocalDot = false;
@@ -267,12 +272,19 @@ namespace app::state {
         int aimMotionStyle = -1;
         int aimReactionMs = 80;
         bool triggerForceCenter = false;
+        bool aimTrajectoryControl = true;
+        float aimMaxAcceleration = 800.0f;
+        float aimMaxJerk = 40000.0f;
+        bool aimRespectInput = true;
+        float fovDegrees = 5.0f;
     };
 
     struct TargetSettings {
         bool enabled = false;
         bool fovEnabled = false;
         bool fovPerWeapon = false;
+        int fovUnit = 0;
+        float fovDegrees = 5.0f;
         float fovRadius = 80.0f;
         float fovColor[4] = { 0.3137255f, 0.6f, 1.0f, 0.9f };
         bool aimbotEnabled = false;

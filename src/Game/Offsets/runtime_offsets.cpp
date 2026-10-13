@@ -176,7 +176,7 @@ namespace
             const uintptr_t base = control.Run([&] { return mem.GetModuleBase(moduleName); });
             std::size_t size = 0;
             std::uint32_t timestamp = 0;
-            ReadModuleImageInfo(base, size, timestamp, &control);
+            if (!ReadModuleImageInfo(base, size, timestamp, &control)) return 0;
             hash = MixFingerprint(hash, static_cast<std::uint64_t>(base));
             hash = MixFingerprint(hash, static_cast<std::uint64_t>(size));
             hash = MixFingerprint(hash, timestamp);
@@ -340,6 +340,7 @@ namespace
         OffsetField{"schemas", "C_Inferno.m_firePositions", &runtime_offsets::Values::C_Inferno_m_firePositions},
         OffsetField{"schemas", "C_Inferno.m_bInPostEffectTime", &runtime_offsets::Values::C_Inferno_m_bInPostEffectTime},
         OffsetField{"schemas", "C_SmokeGrenadeProjectile.m_nSmokeEffectTickBegin", &runtime_offsets::Values::C_SmokeGrenadeProjectile_m_nSmokeEffectTickBegin},
+        OffsetField{"schemas", "C_SmokeGrenadeProjectile.m_vSmokeDetonationPos", &runtime_offsets::Values::C_SmokeGrenadeProjectile_m_vSmokeDetonationPos},
         OffsetField{"schemas", "C_SmokeGrenadeProjectile.m_bDidSmokeEffect", &runtime_offsets::Values::C_SmokeGrenadeProjectile_m_bDidSmokeEffect},
         OffsetField{"schemas", "C_SmokeGrenadeProjectile.m_bSmokeVolumeDataReceived", &runtime_offsets::Values::C_SmokeGrenadeProjectile_m_bSmokeVolumeDataReceived},
         OffsetField{"schemas", "C_SmokeGrenadeProjectile.m_bSmokeEffectSpawned", &runtime_offsets::Values::C_SmokeGrenadeProjectile_m_bSmokeEffectSpawned},
@@ -2407,6 +2408,10 @@ bool runtime_offsets::ResolveFromAttachedProcess(
             currentReport.startupPending = true;
             return cacheFailure(currentReport, "Runtime resolver requires an attached CS2 process and loaded modules.");
         }
+        if (moduleFingerprint == 0) {
+            currentReport.startupPending = true;
+            return cacheFailure(currentReport, "Runtime module headers are not ready for a complete fingerprint.");
+        }
 
         const bool sameTarget =
             g_runtimeResolveCache.pid == pid &&
@@ -2499,6 +2504,11 @@ bool runtime_offsets::ResolveFromAttachedProcess(
                 "Runtime candidate failed live validation: " + sanityMessage);
         }
 
+        stage = "module consistency";
+        if (mem.GetAttachedPid() != pid || BuildModuleFingerprint(control) != moduleFingerprint) {
+            currentReport.startupPending = true;
+            return cacheFailure(currentReport, "Attached process or module fingerprint changed during offset resolution.");
+        }
         control.Check();
         SetRuntimeValues(candidate);
         currentReport.applied = true;

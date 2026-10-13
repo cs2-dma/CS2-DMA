@@ -439,7 +439,7 @@ namespace
     bool TraceSpreadSeedDetailed(
         const Vector3& eyePosition,
         const Vector3& aimAngles,
-        const esp::PlayerData& player,
+        const esp::TargetPlayerData& player,
         const target::ballistics::WeaponSpread& weapon,
         uint32_t spreadSeed,
         int requiredHitgroup,
@@ -784,7 +784,7 @@ target::ballistics::GenerateCapsuleMultipoints(
 bool target::ballistics::TracePlayerCapsules(
     const Vector3& origin,
     const Vector3& direction,
-    const esp::PlayerData& player,
+    const esp::TargetPlayerData& player,
     float maximumDistance,
     int requiredHitgroup,
     CapsuleHit* output) noexcept
@@ -828,17 +828,19 @@ bool target::ballistics::TracePlayerCapsules(
     return result.hit;
 }
 
-float target::ballistics::CalculateHitchance(
+namespace target::ballistics {
+static float EvaluateHitchance(
     const Vector3& eyePosition,
     const Vector3& aimAngles,
-    const esp::PlayerData& player,
+    const esp::TargetPlayerData& player,
     const WeaponSpread& weapon,
-    int requiredHitgroup) noexcept
+    int requiredHitgroup, int requiredHits, int* testedSamples) noexcept
 {
+    if (testedSamples) *testedSamples = 0;
     if (!player.hasHitboxes || !IsFiniteVec(eyePosition) ||
         !IsFiniteVec(aimAngles) || !std::isfinite(weapon.inaccuracy) ||
         !std::isfinite(weapon.spread) || weapon.inaccuracy < 0.0f ||
-        weapon.spread < 0.0f || weapon.range <= 0.0f) {
+        weapon.spread < 0.0f || !std::isfinite(weapon.range) || weapon.range <= 0.0f) {
         return 0.0f;
     }
     Vector3 forward = {};
@@ -846,6 +848,7 @@ float target::ballistics::CalculateHitchance(
     Vector3 up = {};
     AnglesToDirections(aimAngles, forward, right, up);
     if (weapon.inaccuracy + weapon.spread < 0.000001f) {
+        if (testedSamples) *testedSamples = 1;
         return TracePlayerCapsules(
             eyePosition,
             forward,
@@ -869,9 +872,30 @@ float target::ballistics::CalculateHitchance(
                 requiredHitgroup)) {
             ++hits;
         }
+        if (testedSamples) *testedSamples = seed + 1;
+        if (requiredHits >= 0 && (hits >= requiredHits ||
+            hits + kHitchanceSamples - seed - 1 < requiredHits)) break;
     }
     return static_cast<float>(hits) /
         static_cast<float>(kHitchanceSamples);
+}
+
+float CalculateHitchance(const Vector3& eyePosition, const Vector3& aimAngles,
+    const esp::TargetPlayerData& player, const WeaponSpread& weapon, int requiredHitgroup) noexcept
+{
+    return EvaluateHitchance(eyePosition, aimAngles, player, weapon, requiredHitgroup, -1, nullptr);
+}
+
+bool MeetsHitchance(const Vector3& eyePosition, const Vector3& aimAngles,
+    const esp::TargetPlayerData& player, const WeaponSpread& weapon, float requiredFraction,
+    int requiredHitgroup, int* testedSamples) noexcept
+{
+    if (testedSamples) *testedSamples = 0;
+    if (!std::isfinite(requiredFraction) || requiredFraction <= 0.0f || requiredFraction > 1.0f) return false;
+    const int requiredHits = std::max(1, static_cast<int>(std::ceil(requiredFraction * kHitchanceSamples - 0.00001f)));
+    return EvaluateHitchance(eyePosition, aimAngles, player, weapon, requiredHitgroup,
+        requiredHits, testedSamples) + 0.0000001f >= static_cast<float>(requiredHits) / kHitchanceSamples;
+}
 }
 
 uint32_t target::ballistics::CalculateSpreadSeed(
@@ -932,7 +956,7 @@ bool target::ballistics::ResolveSpreadDirection(
 bool target::ballistics::TraceSpreadSeed(
     const Vector3& eyePosition,
     const Vector3& aimAngles,
-    const esp::PlayerData& player,
+    const esp::TargetPlayerData& player,
     const WeaponSpread& weapon,
     uint32_t spreadSeed,
     int requiredHitgroup) noexcept
@@ -963,7 +987,7 @@ target::ballistics::SeedTickSelection
 target::ballistics::SelectSpreadSeedTick(
     const Vector3& eyePosition,
     const Vector3& aimAngles,
-    const esp::PlayerData& player,
+    const esp::TargetPlayerData& player,
     const WeaponSpread& weapon,
     int earliestDeliveryTick,
     int renderTickCount,
@@ -1021,7 +1045,7 @@ target::ballistics::SeedWindowResult
 target::ballistics::TraceSpreadSeedWindow(
     const Vector3& eyePosition,
     const Vector3& aimAngles,
-    const esp::PlayerData& player,
+    const esp::TargetPlayerData& player,
     const WeaponSpread& weapon,
     int firstRenderTick,
     int renderTickCount,
@@ -1041,7 +1065,7 @@ target::ballistics::TraceSpreadSeedWindow(
 target::ballistics::MultipointTickSelection
 target::ballistics::SelectMultipointSpreadTick(
     const Vector3& eyePosition,
-    const esp::PlayerData& player,
+    const esp::TargetPlayerData& player,
     const WeaponSpread& weapon,
     const CapsuleMultipoints& multipoints,
     int earliestDeliveryTick,

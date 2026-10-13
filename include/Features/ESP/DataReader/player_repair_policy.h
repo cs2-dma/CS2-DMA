@@ -4,6 +4,72 @@
 
 namespace esp::data
 {
+    enum class CoreRecoveryAction : uint8_t { None, Probe, Repair };
+
+    struct CoreRecoveryState {
+        uintptr_t pawn = 0;
+        uint32_t handle = 0;
+        uint64_t sinceUs = 0;
+        uint64_t lastSampleUs = 0;
+        uint32_t failures = 0;
+        CoreRecoveryAction stage = CoreRecoveryAction::None;
+    };
+
+    inline CoreRecoveryAction ObserveCoreRecovery(
+        CoreRecoveryState& state,
+        uintptr_t pawn,
+        uint32_t handle,
+        bool coreValid,
+        bool liveScene,
+        uint64_t nowUs)
+    {
+        if (!pawn || coreValid || state.pawn != pawn || state.handle != handle ||
+            nowUs < state.lastSampleUs) {
+            state = {};
+            state.pawn = pawn;
+            state.handle = handle;
+        }
+        if (!pawn || coreValid)
+            return CoreRecoveryAction::None;
+        if (state.failures == 0)
+            state.sinceUs = nowUs;
+        if (state.failures == 0 || nowUs != state.lastSampleUs) {
+            if (state.failures < 0xFFFFFFFFu)
+                ++state.failures;
+        }
+        state.lastSampleUs = nowUs;
+        if (!liveScene || state.failures < 8u)
+            return CoreRecoveryAction::None;
+        const uint64_t ageUs = nowUs - state.sinceUs;
+        if (ageUs >= 2500000u && state.stage != CoreRecoveryAction::Repair) {
+            state.stage = CoreRecoveryAction::Repair;
+            return CoreRecoveryAction::Repair;
+        }
+        if (ageUs >= 750000u && state.stage == CoreRecoveryAction::None) {
+            state.stage = CoreRecoveryAction::Probe;
+            return CoreRecoveryAction::Probe;
+        }
+        return CoreRecoveryAction::None;
+    }
+
+    inline bool IsScenePositionRepairCoherent(
+        bool readsComplete,
+        uintptr_t sceneNode,
+        uintptr_t confirmedSceneNode,
+        uint32_t expectedPawnHandle,
+        uint32_t currentPawnHandle,
+        bool controllerBacklinkMatches,
+        bool positionValid,
+        int health,
+        uint8_t lifeState)
+    {
+        return readsComplete && sceneNode != 0 && sceneNode == confirmedSceneNode &&
+               expectedPawnHandle != 0 && expectedPawnHandle != 0xFFFFFFFFu &&
+               expectedPawnHandle == currentPawnHandle && controllerBacklinkMatches &&
+               health >= 0 && health <= 500 && lifeState <= 2 &&
+               (health == 0 || lifeState != 0 || positionValid);
+    }
+
     inline constexpr uint64_t kCoreRepairRetryAfterResetUs = 8000u;
     inline constexpr uint64_t kCoreRepairRetryNormalUs = 16000u;
     inline constexpr uint64_t kCoreRepairRetrySustainedUs = 50000u;

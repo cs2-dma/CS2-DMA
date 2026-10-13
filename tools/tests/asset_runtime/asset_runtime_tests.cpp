@@ -3,7 +3,9 @@
 #include <string>
 #include "Features/WebRadar/embedded_assets.h"
 #include "../../../src/Features/ESP/Render/weapon_icon_atlas.cpp"
+#include "../../../src/app/Bootstrap/crash_handler.cpp"
 #include <bcrypt.h>
+#include <imgui/backends/imgui_impl_dx11.h>
 
 std::string HashPixels(const std::vector<BYTE>& pixels)
 {
@@ -24,6 +26,23 @@ int main()
     const auto check = [&](bool condition, const char* name) {
         if (!condition) { std::cerr << name << '\n'; ++failures; }
     };
+    const auto crashFixture = std::filesystem::temp_directory_path() /
+        ("kevq-crash-paths-" + std::to_string(GetCurrentProcessId()));
+    check(PrepareCrashDirectory(1,crashFixture.c_str()), "Crash fallback directory");
+    check(!PrepareCrashDirectory(2,crashFixture.c_str()), "Crash invalid directory index");
+    std::wstring longBase = crashFixture.wstring();
+    for (int depth = 0; depth < 8; ++depth)
+        longBase += L"\\Unicode-папка-01234567890123456789";
+    check(PrepareCrashDirectory(0,longBase.c_str()), "Long Unicode crash directory");
+    wchar_t firstPath[kCrashPathCapacity] = {};
+    wchar_t secondPath[kCrashPathCapacity] = {};
+    check(BuildDumpPath(firstPath,kCrashPathCapacity,0), "Long crash dump path");
+    check(BuildDumpPath(secondPath,kCrashPathCapacity,0), "Unique crash dump path");
+    check(std::wstring(firstPath) != std::wstring(secondPath), "Dump names cannot overwrite each other");
+    check(wcslen(firstPath) > MAX_PATH, "Long path fixture exceeds MAX_PATH");
+    app::platform::UniqueWinHandle crashFile(CreateFileW(firstPath,GENERIC_WRITE,0,nullptr,
+        CREATE_NEW,FILE_ATTRIBUTE_NORMAL,nullptr));
+    check(static_cast<bool>(crashFile), "Long crash path is writable");
     const auto resource = FindResourceW(nullptr, L"WEAPON_ICON_ATLAS_PNG", RT_RCDATA);
     const auto size = SizeofResource(nullptr, resource);
     const auto* data = LockResource(LoadResource(nullptr, resource));
@@ -86,6 +105,24 @@ int main()
         check(!icons::IsReady(), "Shutdown");
         check(icons::Initialize(device.Get()), "Reinitialize");
         icons::Shutdown();
+    }
+    if (device && context) {
+        ImGui::CreateContext();
+        ImGui::GetIO().IniFilename = nullptr;
+        check(ImGui_ImplDX11_Init(device.Get(),context.Get()), "DX11 backend initialization");
+        check(ImGui_ImplDX11_CreateDeviceObjects(), "DX11 backend resources");
+        ImGui_ImplDX11_Shutdown();
+        context->ClearState();
+        context.Reset();
+        device.Reset();
+        check(SUCCEEDED(D3D11CreateDevice(nullptr,D3D_DRIVER_TYPE_WARP,nullptr,0,nullptr,0,
+            D3D11_SDK_VERSION,&device,nullptr,&context)), "Replacement WARP device");
+        if (device && context) {
+            check(ImGui_ImplDX11_Init(device.Get(),context.Get()), "DX11 backend recovery");
+            check(ImGui_ImplDX11_CreateDeviceObjects(), "Rebuilt backend resources");
+            ImGui_ImplDX11_Shutdown();
+        }
+        ImGui::DestroyContext();
     }
     if (SUCCEEDED(apartment)) CoUninitialize();
     std::cout << "Asset runtime: " << failures << " failures\n";

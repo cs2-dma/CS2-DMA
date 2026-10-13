@@ -3,15 +3,13 @@
         };
         auto isTrackedDroppedWorldEntitySlot = [&](int idx) {
             const uint16_t itemId = s_worldEntityItemIds[idx];
-            return itemId != 0 &&
-                   itemId != kWeaponC4Id &&
-                   WeaponNameFromItemId(itemId) != nullptr &&
-                   !isUtilityWorldItemId(itemId) &&
-                   !IsKnifeItemId(itemId) &&
-                   s_worldEntityClassKinds[idx] ==
-                       static_cast<uint8_t>(esp::data::WorldEntityClass::DroppedWeapon);
+            return esp::data::IsDroppedWorldItem(itemId,
+                static_cast<esp::data::WorldEntityClass>(s_worldEntityClassKinds[idx]));
         };
         auto isTrackedUtilityWorldEntitySlot = [&](int idx) {
+            if (static_cast<esp::data::WorldEntityClass>(s_worldEntityClassKinds[idx]) ==
+                esp::data::WorldEntityClass::DroppedWeapon)
+                return false;
             const uint16_t itemId = s_worldEntityItemIds[idx];
             const uint32_t subclassId = s_worldEntitySubclassIds[idx];
             return isUtilityWorldItemId(itemId) ||

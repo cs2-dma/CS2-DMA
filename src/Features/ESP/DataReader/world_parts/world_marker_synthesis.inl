@@ -80,13 +80,19 @@
             if (sourceReplaced)
                 continue;
             const bool processedThisScan = validSourceSlot && worldProcessMask.test(sourceSlot);
+            const bool ownerEvidenceAvailable = markerDomain == esp::data::WorldMarkerDomain::ActiveUtility ||
+                (validSourceSlot && esp::data::IsWorldOwnerEvidenceFresh(
+                    static_cast<esp::data::WorldOwnerEvidence>(s_cachedWorldOwnerEvidence[sourceSlot]),
+                    s_cachedWorldOwnerSampleUs[sourceSlot], nowUs));
+            const bool currentDetailsComplete = validSourceSlot &&
+                worldBasicDetailsComplete[sourceSlot] != 0 && ownerEvidenceAvailable;
             const bool retainIncompleteSlot = validSourceSlot &&
                 esp::data::ShouldHoldWorldMarkerOnReadGap(
                     marker.sourceEntity, s_worldCandidateMask[sourceSlot] != 0,
                     worldEntityReadComplete[sourceSlot] != 0,
-                    worldEntities[sourceSlot], worldBasicDetailsComplete[sourceSlot] != 0,
+                    worldEntities[sourceSlot], currentDetailsComplete,
                     marker.sourceSampleUs, nowUs);
-            if (!processedThisScan && (retainIncompleteSlot || esp::data::ShouldPreserveWorldMarker(
+            if (retainIncompleteSlot || (!processedThisScan && esp::data::ShouldPreserveWorldMarker(
                     markerDomain,
                     worldDomainBombRescueDue,
                     worldDomainDroppedItemsDue,
@@ -106,21 +112,6 @@
             }
         }
 
-        const bool gameTimeWrapped = (currentGameTime > 0.0f && s_prevWorldGameTime > 5.0f && (currentGameTime + 1.0f) < s_prevWorldGameTime);
-        if (gameTimeWrapped || (currentGameTime > 0.0f && currentGameTime < 1.0f && s_prevWorldGameTime > 60.0f)) {
-            ResetWorldUtilityTrackingState();
-            std::memset(scannedMarkers, 0, sizeof(scannedMarkers));
-            scannedMarkerCount = 0;
-            scannedDroppedWeaponCount = 0;
-            scannedDroppedBombCount = 0;
-            scannedUtilityEffectCount = 0;
-            scannedProjectileCount = 0;
-            s_worldWarmupScans = 0;
-            s_lastWorldUtilityDetailScanUs = 0;
-            s_lastWorldUtilityProbeScanUs = 0;
-        }
-        if (currentGameTime > 0.0f)
-            s_prevWorldGameTime = currentGameTime;
         if (s_worldWarmupScans < 2u)
             ++s_worldWarmupScans;
         const bool warmupWorldScan = (s_worldWarmupScans < 2u);

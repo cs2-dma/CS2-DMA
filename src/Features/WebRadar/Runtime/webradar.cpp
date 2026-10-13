@@ -15,6 +15,7 @@
 #include <bcrypt.h>
 
 #include <algorithm>
+#include <atomic>
 #include <array>
 #include <cctype>
 #include <charconv>
@@ -1148,6 +1149,7 @@ void WEBRadar::UpdateSnapshot(const esp::WebRadarSnapshot& snapshot)
     {
         std::lock_guard<std::mutex> lock(mutex_);
         latestSnapshot_ = snapshot;
+        snapshotReceivedMs_ = MonotonicNowMs();
         hasSnapshot_ = true;
         ++snapshotVersion_;
     }
@@ -1277,7 +1279,7 @@ bool WEBRadar::RegisterWebSocketClient(uintptr_t socketHandleValue, int protocol
     {
         std::lock_guard<std::mutex> lock(mutex_);
         if (client->protocolVersion < 2)
-            legacyPayloadDemandUntilMs_ = UnixNowMs() + 30000;
+            legacyPayloadDemandUntilMs_ = MonotonicNowMs() + 30000;
         currentVersion = latestPayloadVersion_;
     }
     if (client->protocolVersion < 2)
@@ -1302,7 +1304,7 @@ void WEBRadar::WebSocketClientLoop(WebSocketClient* client, uint64_t lastSeenVer
 
     constexpr uint64_t kIdlePingIntervalMs = 25000;
     constexpr uint64_t kIdleDropMs = 75000;
-    const uint64_t startMs = UnixNowMs();
+    const uint64_t startMs = MonotonicNowMs();
     uint64_t lastPingMs = startMs;
     uint64_t lastActivityMs = startMs;
 
@@ -1333,13 +1335,13 @@ void WEBRadar::WebSocketClientLoop(WebSocketClient* client, uint64_t lastSeenVer
         bool peerClose = false;
         const int drained = DrainWebSocketIncoming(socketHandle, &peerClose);
         if (drained > 0)
-            lastActivityMs = UnixNowMs();
+            lastActivityMs = MonotonicNowMs();
         if (peerClose) {
             client->active.store(false, std::memory_order_relaxed);
             break;
         }
 
-        const uint64_t nowMs = UnixNowMs();
+        const uint64_t nowMs = MonotonicNowMs();
         if (nowMs - lastActivityMs > kIdleDropMs) {
             client->active.store(false, std::memory_order_relaxed);
             break;
@@ -1467,20 +1469,20 @@ void WEBRadar::RecordBytesOut(size_t bytes)
     if (bytes == 0)
         return;
 
-    const uint64_t nowMs = UnixNowMs();
+    const uint64_t nowMs = MonotonicNowMs();
     std::lock_guard<std::mutex> lock(mutex_);
     stats_.totalBytesOut += static_cast<uint64_t>(bytes);
 
-    if (bytesOutWindowUnixMs_ == 0)
-        bytesOutWindowUnixMs_ = nowMs;
+    if (bytesOutWindowMs_ == 0)
+        bytesOutWindowMs_ = nowMs;
     bytesOutWindowBytes_ += static_cast<uint64_t>(bytes);
 
-    const uint64_t elapsedMs = nowMs > bytesOutWindowUnixMs_ ? (nowMs - bytesOutWindowUnixMs_) : 0;
+    const uint64_t elapsedMs = nowMs > bytesOutWindowMs_ ? (nowMs - bytesOutWindowMs_) : 0;
     if (elapsedMs >= 250) {
         const double sampleBytesPerSec =
             static_cast<double>(bytesOutWindowBytes_) * 1000.0 / static_cast<double>(elapsedMs);
         stats_.bytesOutPerSec = Ema(stats_.bytesOutPerSec, sampleBytesPerSec, 0.25);
-        bytesOutWindowUnixMs_ = nowMs;
+        bytesOutWindowMs_ = nowMs;
         bytesOutWindowBytes_ = 0;
     }
 }
@@ -1535,6 +1537,12 @@ uint64_t WEBRadar::UnixNowMs()
 {
     const auto now = std::chrono::system_clock::now();
     return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count());
+}
+
+uint64_t WEBRadar::MonotonicNowMs()
+{
+    return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now().time_since_epoch()).count());
 }
 
 std::string WEBRadar::BuildPlayerSteamId(int slot)

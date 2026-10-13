@@ -5,6 +5,7 @@
 #include "app/Input/input_device.h"
 #include "app/Localization/localization.h"
 #include "app/Platform/file_replace.h"
+#include "app/Platform/display_mapping.h"
 #include "app/UI/MenuShell/menu_utils.h"
 #include "app/UI/MenuShell/tab_page.h"
 #include "app/UI/MenuShell/ui_widgets.h"
@@ -862,8 +863,8 @@ namespace
             if (!Project(eye + direction * 8000.0f, matrix, screenWidth, screenHeight, &aimScreen, false))
                 return;
             constexpr float margin = 16.0f;
-            aimScreen.x = std::clamp(aimScreen.x, margin, screenWidth - margin);
-            aimScreen.y = std::clamp(aimScreen.y, margin, screenHeight - margin);
+            aimScreen.x = app::display::PlaceOverlayLabel(aimScreen.x, 0.0f, screenWidth, margin);
+            aimScreen.y = app::display::PlaceOverlayLabel(aimScreen.y, 0.0f, screenHeight, margin);
             const ImVec2 center(screenWidth * 0.5f, screenHeight * 0.5f);
             const ImU32 lineColor = ToColor(g::grenadeHelperAimColor);
             drawList->AddLine(center, aimScreen, lineColor, 1.0f);
@@ -888,8 +889,9 @@ namespace
             const float height = labelSize.y + (aim.throwType.empty() ? 0.0f : throwSize.y + 2.0f);
             float x = side > 0.0f ? end.x + 4.0f : end.x - width - 4.0f;
             float y = end.y - height * 0.5f;
-            x = std::clamp(x, 2.0f, screenWidth - width - 2.0f);
-            y = std::clamp(y, 2.0f, screenHeight - height - 2.0f);
+            x = app::display::PlaceOverlayLabel(x, width, screenWidth);
+            y = app::display::PlaceOverlayLabel(y, height, screenHeight);
+            drawList->PushClipRect(ImVec2(0, 0), ImVec2(screenWidth, screenHeight), true);
             const ImU32 textColor = ToColor(g::grenadeHelperTextColor);
             drawList->AddText(font, fontSize, ImVec2(x + 1.0f, y + 1.0f), IM_COL32(0, 0, 0, 185), label.c_str());
             drawList->AddText(font, fontSize, ImVec2(x, y), textColor, label.c_str());
@@ -898,6 +900,7 @@ namespace
                 drawList->AddText(font, fontSize, ImVec2(x + 1.0f, y + 1.0f), IM_COL32(0, 0, 0, 185), localizedThrowType);
                 drawList->AddText(font, fontSize, ImVec2(x, y), ToColor(g::grenadeHelperTextColor, 0.72f), localizedThrowType);
             }
+            drawList->PopClipRect();
         }
 
         void HandleHotkeys()

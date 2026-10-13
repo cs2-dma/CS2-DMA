@@ -4,6 +4,16 @@
 
 namespace esp::data
 {
+    inline void UpdateWeaponPresentation(uint16_t observedId, int observedAmmo, bool dead,
+        uint64_t nowUs, uint16_t& publishedId, int& publishedAmmo, uint64_t& updatedAtUs) noexcept
+    {
+        if (dead) { publishedId = 0; publishedAmmo = -1; updatedAtUs = 0; }
+        else if (observedId != 0) {
+            publishedId = observedId; publishedAmmo = observedAmmo; updatedAtUs = nowUs;
+        } else if (updatedAtUs == 0 || nowUs < updatedAtUs || nowUs - updatedAtUs > 250000u) {
+            publishedId = 0; publishedAmmo = -1; updatedAtUs = 0;
+        } else publishedAmmo = -1;
+    }
     constexpr bool SameCommittedWeapon(uint32_t handle, uintptr_t entity,
         uint32_t cachedHandle, uintptr_t cachedEntity) noexcept
     {
@@ -23,9 +33,10 @@ namespace esp::data
 
     inline constexpr bool ShouldExposePlayerRoster(
         bool hierarchyStable,
-        bool recoveryActive) noexcept
+        bool recoveryActive,
+        bool liveHierarchyWarming) noexcept
     {
-        return hierarchyStable || recoveryActive;
+        return hierarchyStable || recoveryActive || liveHierarchyWarming;
     }
 
     struct AliveCoreHoldInput {

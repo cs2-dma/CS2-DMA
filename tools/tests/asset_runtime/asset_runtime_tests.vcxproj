@@ -12,6 +12,7 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="asset_runtime_tests.cpp" />
+    <ClCompile Include="..\..\..\src\vendor\imgui\backends\imgui_impl_dx11.cpp" />
     <ClCompile Include="..\..\..\src\Features\WebRadar\Runtime\embedded_assets.cpp" />
     <ClCompile Include="..\..\..\src\Features\ESP\weapon_catalog.cpp" />
     <ClCompile Include="..\..\..\src\vendor\imgui\imgui.cpp" />

@@ -10,6 +10,8 @@
             uint32_t worldSubclassIds[kMaxTrackedWorldEntities + 1];
             uint16_t worldItemDefs[kMaxTrackedWorldEntities + 1];
             int worldSmokeTick[kMaxTrackedWorldEntities + 1];
+            Vector3 worldSmokeOrigin[kMaxTrackedWorldEntities + 1];
+            DWORD worldSmokeOriginReadBytes[kMaxTrackedWorldEntities + 1];
             uint8_t worldSmokeActive[kMaxTrackedWorldEntities + 1];
             uint8_t worldSmokeVolumeDataReceived[kMaxTrackedWorldEntities + 1];
             uint8_t worldSmokeEffectSpawned[kMaxTrackedWorldEntities + 1];
@@ -54,6 +56,7 @@
             DWORD worldVelocityReadBytes[kMaxTrackedWorldEntities + 1];
             uint8_t worldEntityReadComplete[kMaxTrackedWorldEntities + 1];
             uint8_t worldBasicDetailsComplete[kMaxTrackedWorldEntities + 1];
+            uint8_t worldDetailsReadQueued[kMaxTrackedWorldEntities + 1];
             uint8_t worldSceneNodeChanged[kMaxTrackedWorldEntities + 1];
             uint8_t worldSceneNodeRefreshRequested[kMaxTrackedWorldEntities + 1];
             uint8_t worldC4DynamicComplete[kMaxTrackedWorldEntities + 1];
@@ -71,6 +74,8 @@
         auto& worldSubclassIds = s_worldReadScratch.worldSubclassIds;
         auto& worldItemDefs = s_worldReadScratch.worldItemDefs;
         auto& worldSmokeTick = s_worldReadScratch.worldSmokeTick;
+        auto& worldSmokeOrigin = s_worldReadScratch.worldSmokeOrigin;
+        auto& worldSmokeOriginReadBytes = s_worldReadScratch.worldSmokeOriginReadBytes;
         auto& worldSmokeActive = s_worldReadScratch.worldSmokeActive;
         auto& worldSmokeVolumeDataReceived = s_worldReadScratch.worldSmokeVolumeDataReceived;
         auto& worldSmokeEffectSpawned = s_worldReadScratch.worldSmokeEffectSpawned;
@@ -115,6 +120,7 @@
         auto& worldVelocityReadBytes = s_worldReadScratch.worldVelocityReadBytes;
         auto& worldEntityReadComplete = s_worldReadScratch.worldEntityReadComplete;
         auto& worldBasicDetailsComplete = s_worldReadScratch.worldBasicDetailsComplete;
+        auto& worldDetailsReadQueued = s_worldReadScratch.worldDetailsReadQueued;
         auto& worldSceneNodeChanged = s_worldReadScratch.worldSceneNodeChanged;
         auto& worldSceneNodeRefreshRequested = s_worldReadScratch.worldSceneNodeRefreshRequested;
         auto& worldC4DynamicComplete = s_worldReadScratch.worldC4DynamicComplete;
@@ -186,12 +192,7 @@
             const bool isBombItem = itemId == kWeaponC4Id;
             const bool isUtilityItem = isUtilityWorldItemId(itemId);
             const bool isDroppedItem =
-                itemId != 0u &&
-                !isBombItem &&
-                !isUtilityItem &&
-                !IsKnifeItemId(itemId) &&
-                WeaponNameFromItemId(itemId) != nullptr &&
-                entityClass == esp::data::WorldEntityClass::DroppedWeapon;
+                esp::data::IsDroppedWorldItem(itemId, entityClass);
             const bool knownUtilitySubclass =
                 hasTrackedSubclass(s_worldSmokeSubclassIds, subclassId) ||
                 hasTrackedSubclass(s_worldDecoySubclassIds, subclassId) ||
@@ -278,6 +279,8 @@
             worldSubclassIds[idx] = 0;
             worldItemDefs[idx] = 0;
             worldSmokeTick[idx] = 0;
+            worldSmokeOrigin[idx] = {};
+            worldSmokeOriginReadBytes[idx] = 0;
             worldSmokeActive[idx] = 0;
             worldSmokeVolumeDataReceived[idx] = 0;
             worldSmokeEffectSpawned[idx] = 0;
@@ -319,6 +322,7 @@
             worldVelocityReadBytes[idx] = 0;
             worldEntityReadComplete[idx] = 0;
             worldBasicDetailsComplete[idx] = 0;
+            worldDetailsReadQueued[idx] = 0;
             worldSceneNodeChanged[idx] = 0;
             worldSceneNodeRefreshRequested[idx] = 0;
             worldC4DynamicComplete[idx] = 0;
@@ -327,7 +331,7 @@
         static uintptr_t s_cachedWorldBlocks[kMaxTrackedWorldBlocks] = {};
         static int s_cachedWorldBlockCount = 0;
         static uint64_t s_worldBlockCacheResetSerial = 0;
-        const uint64_t worldBlockSceneResetSerial = s_sceneResetSerial.load(std::memory_order_relaxed);
+        const uint64_t worldBlockSceneResetSerial = s_worldDataCacheEpoch;
         if (s_worldBlockCacheResetSerial != worldBlockSceneResetSerial) {
             s_worldBlockCacheResetSerial = worldBlockSceneResetSerial;
             memset(s_cachedWorldBlocks, 0, sizeof(s_cachedWorldBlocks));

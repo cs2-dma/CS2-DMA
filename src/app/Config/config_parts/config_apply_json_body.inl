@@ -147,12 +147,16 @@
         LoadColor(root, "ESP", "OffscreenColor", g::espOffscreenColor);
         LoadColor(root, "ESP", "FlagColor", g::espFlagColor);
         LoadColor(root, "ESP", "WorldColor", g::espWorldColor);
+        LoadColor(root, "ESP", "WorldSmokeTimerColor", g::espWorldSmokeTimerColor);
+        LoadColor(root, "ESP", "WorldInfernoTimerColor", g::espWorldInfernoTimerColor);
         LoadColor(root, "ESP", "ItemColor", g::espItemColor);
         LoadColor(root, "ESP", "BombColor", g::espBombColor);
 
         LoadBool(root, "Target", "Enabled", g::targetEnabled);
         LoadBool(root, "Target", "FovEnabled", g::targetFovEnabled);
         LoadBool(root, "Target", "FovPerWeapon", g::targetFovPerWeapon);
+        LoadInt(root, "Target", "FovUnit", g::targetSettings.fovUnit);
+        LoadFloat(root, "Target", "FovDegrees", g::targetSettings.fovDegrees);
         LoadFloat(root, "Target", "FovRadius", g::targetFovRadius);
         LoadColor(root, "Target", "FovColor", g::targetFovColor);
         LoadBool(root, "Target", "AimbotEnabled", g::targetAimbotEnabled);
@@ -193,6 +197,21 @@
                         continue;
                     auto& profile = g::targetWeaponProfiles[index];
                     profile.aimMotionStyle = -1;
+                    if (const auto value = source.find("AimTrajectoryControl");
+                        value != source.end() && value->is_boolean())
+                        profile.aimTrajectoryControl = value->get<bool>();
+                    if (const auto value = source.find("AimMaxAcceleration");
+                        value != source.end() && value->is_number())
+                        profile.aimMaxAcceleration = value->get<float>();
+                    if (const auto value = source.find("AimMaxJerk");
+                        value != source.end() && value->is_number())
+                        profile.aimMaxJerk = value->get<float>();
+                    if (const auto value = source.find("AimRespectInput");
+                        value != source.end() && value->is_boolean())
+                        profile.aimRespectInput = value->get<bool>();
+                    if (const auto value = source.find("FovDegrees");
+                        value != source.end() && value->is_number())
+                        profile.fovDegrees = value->get<float>();
                     if (const auto value = source.find("AimMotionStyle");
                         value != source.end() && value->is_number_integer())
                         profile.aimMotionStyle = value->get<int>();
@@ -302,6 +321,15 @@
         LoadBool(root, "Radar", "ShowCrosshair", g::radarShowCrosshair);
         LoadBool(root, "Radar", "ShowBomb", g::radarShowBomb);
         LoadFloat(root, "Radar", "Size", g::radarSize);
+        LoadBool(root, "Radar", "HudManual", g::radarSettings.hud.manual);
+        LoadInt(root, "Radar", "HudShape", g::radarSettings.hud.shape);
+        LoadFloat(root, "Radar", "HudX", g::radarSettings.hud.x);
+        LoadFloat(root, "Radar", "HudY", g::radarSettings.hud.y);
+        LoadFloat(root, "Radar", "HudWidth", g::radarSettings.hud.width);
+        LoadFloat(root, "Radar", "HudHeight", g::radarSettings.hud.height);
+        LoadFloat(root, "Radar", "HudScale", g::radarSettings.hud.scale);
+        LoadFloat(root, "Radar", "HudSafeX", g::radarSettings.hud.safeX);
+        LoadFloat(root, "Radar", "HudSafeY", g::radarSettings.hud.safeY);
         LoadFloat(root, "Radar", "DotSize", g::radarDotSize);
         LoadFloat(root, "Radar", "WorldRotationDeg", g::radarWorldRotationDeg);
         LoadFloat(root, "Radar", "WorldScale", g::radarWorldScale);
@@ -346,6 +374,14 @@
 
         LoadBool(root, "Screen", "VSync", g::vsyncEnabled);
         LoadInt(root, "Screen", "FPSLimit", g::fpsLimit);
+        LoadInt(root, "Screen", "MappingGameWidth", g::displaySettings.mapping.gameWidth);
+        LoadInt(root, "Screen", "MappingGameHeight", g::displaySettings.mapping.gameHeight);
+        LoadBool(root, "Screen", "MappingAutoAspect", g::displaySettings.mapping.autoAspect);
+        LoadInt(root, "Screen", "MappingScaling", g::displaySettings.mapping.scaling);
+        LoadFloat(root, "Screen", "MappingX", g::displaySettings.mapping.x);
+        LoadFloat(root, "Screen", "MappingY", g::displaySettings.mapping.y);
+        LoadFloat(root, "Screen", "MappingWidth", g::displaySettings.mapping.width);
+        LoadFloat(root, "Screen", "MappingHeight", g::displaySettings.mapping.height);
 
         LoadBool(root, "UI", "EspPreviewOpen", g::espPreviewOpen);
         LoadBool(root, "UI", "RadarCalibrationOpen", g::radarCalibrationOpen);

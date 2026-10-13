@@ -22,6 +22,8 @@ namespace target::settings_policy
             for (std::size_t i = 0; i < sizeof(value); ++i) hash = (hash ^ bytes[i]) * 1099511628211ull;
         };
         add(settings.fovPerWeapon);
+        add(settings.fovUnit);
+        add(settings.fovPerWeapon ? profile.fovDegrees : settings.fovDegrees);
         add(settings.fovPerWeapon ? profile.fovRadius : settings.fovRadius);
         if (trigger) {
             add(settings.triggerAimAssist); add(settings.triggerAimBone);
@@ -38,6 +40,8 @@ namespace target::settings_policy
             add(profile.aimSoftAssist); add(profile.aimAssistStrength);
             add(profile.aimAssistMaxSpeed); add(profile.aimAssistDeadzone);
             add(profile.aimRecoilStrength);
+            add(profile.aimTrajectoryControl); add(profile.aimMaxAcceleration); add(profile.aimMaxJerk);
+            add(profile.aimRespectInput);
             add(profile.aimWindGravity); add(profile.aimWindFluctuation);
             add(profile.aimWindMaxStep); add(profile.aimWindDistance);
             add(profile.aimDamageCheck); add(profile.aimMinimumDamage); add(profile.aimAutowall);

@@ -82,6 +82,14 @@ const KNOWN_ICONS = new Set([
   "xm1014"
 ]);
 
+const GRENADE_ICONS = new Set([
+  "flashbang", "hegrenade", "smokegrenade", "molotov", "decoy", "incgrenade"
+]);
+const ICON_ALIASES = Object.freeze({
+  gauge: "sawedoff", healthshot: "health", flash: "flashbang", he: "hegrenade",
+  smoke: "smokegrenade", incendiary: "incgrenade", incendiarygrenade: "incgrenade"
+});
+
 const DEFAULT_SETTINGS = {
   dotSize: 1.0,
   bombSize: 0.7,
@@ -849,6 +857,7 @@ const WEAPON_ID_TO_ICON = {
   38: "scar20",
   39: "sg556",
   40: "ssg08",
+  41: "knifegg",
   42: "knife",
   43: "flashbang",
   44: "hegrenade",
@@ -857,11 +866,32 @@ const WEAPON_ID_TO_ICON = {
   47: "decoy",
   48: "incgrenade",
   49: "c4",
-  59: "knife",
+  57: "health",
+  59: "knife_t",
   60: "m4a1_silencer",
   61: "usp_silencer",
   63: "cz75a",
-  64: "revolver"
+  64: "revolver",
+  500: "bayonet",
+  503: "knife_css",
+  505: "knife_flip",
+  506: "knife_gut",
+  507: "knife_karambit",
+  508: "knife_m9_bayonet",
+  509: "knife_tactical",
+  512: "knife_falchion",
+  514: "knife_survival_bowie",
+  515: "knife_butterfly",
+  516: "knife_push",
+  517: "knife_cord",
+  518: "knife_canis",
+  519: "knife_ursus",
+  520: "knife_gypsy_jackknife",
+  521: "knife_outdoor",
+  522: "knife_stiletto",
+  523: "knife_widowmaker",
+  525: "knife_skeleton",
+  526: "knife_kukri"
 };
 
 const WORLD_MARKER_TYPE_TO_NAME = {
@@ -873,8 +903,7 @@ const WORLD_MARKER_TYPE_TO_NAME = {
 
 function weaponNameFromId(id) {
   const weaponId = Number(id || 0);
-  if (weaponId >= 500 && weaponId <= 525) return "knife";
-  return WEAPON_ID_TO_ICON[weaponId] || "";
+  return WEAPON_ID_TO_ICON[weaponId] || (weaponId >= 500 && weaponId <= 526 ? "knife" : "");
 }
 
 function compactVec3(value) {
@@ -910,6 +939,8 @@ function normalizePayloadV2(payload) {
 
   return {
     m_seq: seq,
+    m_session: typeof payload.sid === "string" ? payload.sid : "",
+    m_source_state: payload.source_state || "live",
     m_ts: ts,
     m_server_time: ts,
     m_capture_time: ts,
@@ -995,18 +1026,39 @@ function sanitizePayload(payload) {
   return payload;
 }
 
+function isSnapshotNewer(payload, previous) {
+  if (!previous) return true;
+  const nextSession = payload.m_session || "";
+  const previousSession = previous.m_session || "";
+  if (nextSession !== previousSession && (nextSession || previousSession)) return true;
+  const nextSeq = Number(payload.m_seq || 0);
+  const previousSeq = Number(previous.m_seq || 0);
+  const nextTime = getSnapshotSampleTime(payload);
+  const previousTime = getSnapshotSampleTime(previous);
+  if (!Number.isFinite(nextTime) || nextTime <= 0) return false;
+  if (previous.m_source_state && previous.m_source_state !== "live" &&
+      payload.m_source_state === "live") return nextSeq > previousSeq;
+  if (payload.m_source_state && payload.m_source_state !== "live" &&
+      nextTime > previousTime) return true;
+  if (!nextSession && !previousSession && nextTime > previousTime &&
+      nextSeq + 32 < previousSeq) return true;
+  return nextSeq > previousSeq && nextTime >= previousTime;
+}
+
 function ingestSnapshot(payload, arrivalNow) {
   const sampleTime = getSnapshotSampleTime(payload);
   if (!Number.isFinite(sampleTime) || sampleTime <= 0) return false;
 
   let snapshots = S.snapshots;
   let prev = snapshots.length ? snapshots[snapshots.length - 1] : null;
+  if (prev && !isSnapshotNewer(payload, prev.payload)) return false;
   if (prev) {
     const prevSeq = Number(prev.payload?.m_seq || 0);
     const nextSeq = Number(payload.m_seq || 0);
     const timelineRestarted =
-      sampleTime + 200 < prev.sampleTime ||
-      (prevSeq > 0 && nextSeq > 0 && nextSeq + 32 < prevSeq);
+      payload.m_session !== prev.payload?.m_session ||
+      (!payload.m_session && (sampleTime + 200 < prev.sampleTime ||
+        (prevSeq > 0 && nextSeq > 0 && nextSeq + 32 < prevSeq)));
     if (timelineRestarted) {
       resetSnapshotTimeline();
       snapshots = S.snapshots;
@@ -1098,7 +1150,8 @@ function resolveModelName(player) {
 }
 
 function resolveIconName(name, fallback) {
-  const candidate = String(name || "").trim().toLowerCase();
+  const raw = String(name || "").trim().toLowerCase().replace(/^weapon_/, "");
+  const candidate = ICON_ALIASES[raw] || raw;
   if (KNOWN_ICONS.has(candidate)) return candidate;
   return fallback;
 }
@@ -1107,10 +1160,10 @@ const WEAPON_LABELS = {
   ak47: "AK-47",
   aug: "AUG",
   awp: "AWP",
-  bizon: "Bizon",
+  bizon: "PP-Bizon",
   c4: "C4",
   cz75a: "CZ75-Auto",
-  deagle: "Deagle",
+  deagle: "Desert Eagle",
   decoy: "Decoy",
   elite: "Dual Berettas",
   famas: "FAMAS",
@@ -1119,9 +1172,10 @@ const WEAPON_LABELS = {
   g3sg1: "G3SG1",
   galilar: "Galil AR",
   gauge: "Sawed-Off",
-  glock: "Glock",
-  hegrenade: "Grenade",
-  incgrenade: "Fire",
+  glock: "Glock-18",
+  health: "Healthshot",
+  hegrenade: "HE Grenade",
+  incgrenade: "Incendiary",
   knife: "Knife",
   knifegg: "Gold Knife",
   knife_t: "Knife",
@@ -1150,7 +1204,7 @@ const WEAPON_LABELS = {
   m4a1_silencer: "M4A1-S",
   mac10: "MAC-10",
   mag7: "MAG-7",
-  molotov: "Fire",
+  molotov: "Molotov",
   mp5sd: "MP5-SD",
   mp7: "MP7",
   mp9: "MP9",
@@ -1173,7 +1227,7 @@ const WEAPON_LABELS = {
 };
 
 function formatWeaponName(name) {
-  const candidate = String(name || "").trim().toLowerCase();
+  const candidate = resolveIconName(name, "");
   if (!candidate) return "";
   if (WEAPON_LABELS[candidate]) return WEAPON_LABELS[candidate];
   return candidate
@@ -1189,22 +1243,19 @@ function normalizeDisplayText(value, fallback = "") {
   return text || fallback;
 }
 
-function truncateDisplayText(value, maxChars) {
-  const text = normalizeDisplayText(value);
-  const chars = Array.from(text);
-  if (chars.length <= maxChars) return text;
-  return chars.slice(0, Math.max(1, maxChars - 3)).join("").trimEnd() + "...";
-}
-
 function setMaskedIcon(element, iconName, color, preferWeaponAsset = false) {
-  const path = "./assets/icons/" + iconName + (preferWeaponAsset ? ".png" : ".svg");
+  const raster = preferWeaponAsset || GRENADE_ICONS.has(iconName) || iconName === "c4";
+  const path = "./assets/icons/" + iconName + (raster ? ".png" : ".svg");
   element.style.backgroundColor = color || "var(--radar-secondary)";
   element.style.webkitMask = "url('" + path + "') no-repeat center / contain";
   element.style.mask = "url('" + path + "') no-repeat center / contain";
 }
 
-function isCompactUtilityIcon(iconName) {
-  return iconName === "molotov" || iconName === "incgrenade" || iconName === "smokegrenade";
+function weaponUsesAmmo(weaponId, resolvedWeaponName) {
+  const wid = Number(weaponId || 0);
+  return Number.isInteger(wid) && !!WEAPON_ID_TO_ICON[wid] &&
+    wid !== 41 && wid !== 42 && wid !== 49 && wid !== 57 && wid !== 59 && wid < 500 &&
+    !GRENADE_ICONS.has(resolvedWeaponName) && resolvedWeaponName !== "knife" && resolvedWeaponName !== "c4";
 }
 
 function createPlayerCard(isRightSide) {
@@ -1257,7 +1308,7 @@ function updatePlayerCard(card, player, localTeam) {
   card.root.classList.toggle("is-dead", !!player.m_is_dead);
 
   const displayName = normalizeDisplayText(player.m_name, tr("Player"));
-  card.name.textContent = truncateDisplayText(displayName, 22);
+  card.name.textContent = displayName;
   card.name.title = displayName;
   card.money.textContent = "$" + Math.max(0, Number(player.m_money || 0));
   card.healthValue.textContent = String(Math.max(0, Number(player.m_health || 0)));
@@ -1273,44 +1324,30 @@ function updatePlayerCard(card, player, localTeam) {
   setMaskedIcon(card.healthIcon, "health", "var(--radar-primary)");
   setMaskedIcon(card.armorIcon, "kevlar", "var(--radar-secondary)");
 
-  const weaponName = resolveIconName(player.m_weapon, "knife");
+  const weaponName = resolveIconName(player.m_weapon, weaponNameFromId(player.m_weapon_id));
+  card.weaponIcon.hidden = !weaponName;
   if (card.weaponKey !== weaponName) {
     card.weaponKey = weaponName;
     setMaskedIcon(card.weaponIcon, weaponName, "var(--radar-primary)", true);
-    // FIX: weapon-icon slot is 28x18 (rifles/pistols), but grenade SVGs are
-    // square — stretching them horizontally distorts smoke/molotov/he/decoy
-    // icons. Toggle a "square" modifier on the icon span when the active
-    // weapon is a grenade so CSS can render it 18x18 without distortion.
-    const isGrenadeIcon =
-      weaponName === "smokegrenade" ||
-      weaponName === "molotov" ||
-      weaponName === "incgrenade" ||
-      weaponName === "hegrenade" ||
-      weaponName === "flashbang" ||
-      weaponName === "decoy" ||
-      weaponName === "c4";
+    const isGrenadeIcon = GRENADE_ICONS.has(weaponName) || weaponName === "c4" || weaponName === "health";
     card.weaponIcon.classList.toggle("player-card__weapon-icon--square", isGrenadeIcon);
   }
-  function weaponUsesAmmo(weaponId, resolvedWeaponName) {
-    const wid = Number(weaponId || 0);
-    if (!Number.isFinite(wid) || wid <= 0) return false;
-    if (wid === 41 || wid === 42 || wid === 49 || wid === 59) return false;
-    if (wid >= 43 && wid <= 48) return false;
-    if (wid >= 500 && wid <= 526) return false;
-    if (resolvedWeaponName === "knife" || resolvedWeaponName === "c4") return false;
-    return true;
-  }
   const ammo = Number(player.m_ammo_clip);
-  const weaponLabel = formatWeaponName(weaponName);
+  const weaponLabel = weaponName ? formatWeaponName(weaponName) : "";
   const showAmmo = weaponUsesAmmo(player.m_weapon_id, weaponName);
   card.weaponName.textContent = weaponLabel + (showAmmo && Number.isFinite(ammo) && ammo >= 0 ? " (" + ammo + ")" : "");
+  card.weaponName.title = card.weaponName.textContent;
+  card.weaponIcon.title = weaponLabel;
 
-  const grenades = Array.isArray(player.m_grenades) ? player.m_grenades : [];
+  const grenades = Array.isArray(player.m_grenades)
+    ? player.m_grenades.map(name => resolveIconName(name, "")).filter(name => GRENADE_ICONS.has(name)).slice(0, 4)
+    : [];
   const utilKey = [
     Number(!!player.m_has_defuser),
     Number(!!player.m_has_bomb),
     Number(!!player.m_is_dead),
-    grenades.join(",")
+    grenades.join(","),
+    S.language || "en"
   ].join(":");
   if (card.utilKey !== utilKey) {
     card.utilKey = utilKey;
@@ -1321,6 +1358,7 @@ function updatePlayerCard(card, player, localTeam) {
       const utilIcon = document.createElement("span");
       utilIcon.className = "player-card__util-icon";
       setMaskedIcon(utilIcon, "defuser", "var(--radar-green)");
+      utilIcon.title = tr("Defuse kit");
       fragment.appendChild(utilIcon);
     }
 
@@ -1328,14 +1366,11 @@ function updatePlayerCard(card, player, localTeam) {
     const nadeColor = "#c8ddef";
     for (let i = 0; i < 4; i += 1) {
       if (i < grenades.length) {
-        const nade = grenades[i];
-        const resolvedNade = KNOWN_ICONS.has(nade) ? nade : "hegrenade";
+        const resolvedNade = grenades[i];
         const icon = document.createElement("span");
         icon.className = "player-card__util-icon";
-        if (isCompactUtilityIcon(resolvedNade)) {
-          icon.classList.add("player-card__util-icon--compact");
-        }
         setMaskedIcon(icon, resolvedNade, nadeColor);
+        icon.title = formatWeaponName(resolvedNade);
         fragment.appendChild(icon);
       } else {
         const dot = document.createElement("span");
@@ -1349,6 +1384,7 @@ function updatePlayerCard(card, player, localTeam) {
       const utilIcon = document.createElement("span");
       utilIcon.className = "player-card__util-icon";
       setMaskedIcon(utilIcon, "c4", "var(--radar-primary)");
+      utilIcon.title = formatWeaponName("c4");
       fragment.appendChild(utilIcon);
     }
 
@@ -1366,6 +1402,7 @@ function buildRosterSignature(players) {
     player.m_armor,
     player.m_money,
     player.m_weapon,
+    player.m_weapon_id,
     player.m_ammo_clip,
     Array.isArray(player.m_grenades) ? player.m_grenades.join(",") : "",
     Number(!!player.m_has_defuser),
@@ -2183,10 +2220,10 @@ function drawBombMarker(ctx, bombMarker) {
 }
 
 const GRENADE_COLORS = {
-  smoke:     { fill: "rgba(140, 180, 220, 0.55)", stroke: "rgba(180, 210, 240, 0.85)", label: "Smoke" },
+  smoke:     { fill: "rgba(140, 180, 220, 0.55)", stroke: "rgba(180, 210, 240, 0.85)", label: WEAPON_LABELS.smokegrenade },
   inferno:   { fill: "rgba(255, 120, 40, 0.45)",  stroke: "rgba(255, 160, 60, 0.85)",  label: "Fire" },
-  decoy:     { fill: "rgba(200, 200, 80, 0.45)",  stroke: "rgba(220, 220, 100, 0.85)", label: "Decoy" },
-  explosive: { fill: "rgba(255, 80, 80, 0.45)",   stroke: "rgba(255, 120, 100, 0.85)", label: "Grenade" },
+  decoy:     { fill: "rgba(200, 200, 80, 0.45)",  stroke: "rgba(220, 220, 100, 0.85)", label: WEAPON_LABELS.decoy },
+  explosive: { fill: "rgba(255, 80, 80, 0.45)",   stroke: "rgba(255, 120, 100, 0.85)", label: WEAPON_LABELS.hegrenade },
 };
 
 function drawWorldGrenades(ctx, payload, mapData, overlayWidth, overlayHeight) {
@@ -2692,6 +2729,7 @@ function flushPendingPayload() {
   const payload = sanitizePayload(S.pendingPayload);
   S.pendingPayload = null;
   if (!payload || !payload.m_map || payload.m_map === "invalid") return;
+  if (!isSnapshotNewer(payload, S.payload)) return;
   requestLanguage(payload.m_language);
 
   const arrivalNow = performance.now();
@@ -2717,7 +2755,9 @@ function flushPendingPayload() {
     S.mapDataCache.set(payload.m_map, {x: overview.x, y: overview.y, scale: overview.scale, name: payload.m_map});
   }
   const hasMapData = S.mapDataCache.has(payload.m_map);
-  updateConnection("live");
+  const sourceLive = !payload.m_source_state || payload.m_source_state === "live";
+  updateConnection(sourceLive ? "live" : "connecting");
+  if (sourceLive) S.lastPayloadAt = arrivalNow;
   S.currentTransport = S.eventSource ? "sse" : (S.socket ? "websocket" : "poll");
   updateMapAssets(payload.m_map);
   const mapChanged = !!(S.payload && S.payload.m_map && S.payload.m_map !== payload.m_map);
@@ -2725,7 +2765,7 @@ function flushPendingPayload() {
     resetSnapshotTimeline();
   }
   if (hasLiveEntities) {
-    ingestSnapshot(payload, arrivalNow);
+    if (!ingestSnapshot(payload, arrivalNow)) return;
     S.lastEntityPayloadAt = arrivalNow;
   } else {
     resetSnapshotTimeline();
@@ -2753,7 +2793,13 @@ function schedulePayloadRender() {
 }
 
 function queuePayload(payload) {
-  S.lastPayloadAt = performance.now();
+  const pending = S.pendingPayload;
+  if (pending && payload && pending.v === 2 && payload.v === 2 &&
+      (pending.sid || "") === (payload.sid || "") &&
+      Number.isSafeInteger(pending.seq) && Number.isSafeInteger(payload.seq)) {
+    const stateChanged = (payload.source_state || "live") !== (pending.source_state || "live");
+    if (!stateChanged && (payload.seq <= pending.seq || payload.ts < pending.ts)) return;
+  }
   S.pendingPayload = payload;
   schedulePayloadRender();
 }

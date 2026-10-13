@@ -66,9 +66,9 @@ int main()
         Require(fixture.vmm != nullptr, "initialize physical file backend");
         ULONG64 version = 0;
         Require(VMMDLL_ConfigGet(fixture.vmm, VMMDLL_OPT_CONFIG_VMM_VERSION_MINOR, &version) &&
-            version == 18, "loaded MemProcFS minor version");
+            version == 19, "loaded MemProcFS minor version");
         Require(VMMDLL_ConfigGet(fixture.vmm, VMMDLL_OPT_CONFIG_VMM_VERSION_REVISION, &version) &&
-            version == 10, "loaded MemProcFS revision");
+            version == 0, "loaded MemProcFS revision");
 
         const DWORD physicalPid = static_cast<DWORD>(-1);
         fixture.scatter = VMMDLL_Scatter_Initialize(fixture.vmm, physicalPid, VMMDLL_FLAG_NOCACHE);

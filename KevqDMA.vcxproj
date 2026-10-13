@@ -375,6 +375,7 @@
     <ClInclude Include="include\app\Bootstrap\version_update.h" />
     <ClInclude Include="include\app\Bootstrap\startup_update.h" />
     <ClInclude Include="include\app\Bootstrap\startup_offsets.h" />
+    <ClInclude Include="include\app\Bootstrap\startup_process.h" />
     <ClInclude Include="include\app\Bootstrap\release_policy.h" />
     <ClInclude Include="include\app\UI\MenuShell\version_notice.h" />
     <ClInclude Include="include\app\Config\config.h" />
@@ -383,6 +384,9 @@
     <ClInclude Include="include\app\Config\project_paths.h" />
     <ClInclude Include="include\app\Config\user_state.h" />
     <ClInclude Include="include\app\Core\app_state.h" />
+    <ClInclude Include="include\app\Platform\display_mapping.h" />
+    <ClInclude Include="include\app\UI\viewport_draw_scope.h" />
+    <ClInclude Include="include\app\UI\screen_mapping_controls.h" />
     <ClInclude Include="include\app\Core\build_info.h" />
     <ClInclude Include="include\app\Core\fallback_log.h" />
     <ClInclude Include="include\app\Core\globals.h" />
@@ -395,6 +399,7 @@
     <ClInclude Include="include\app\Localization\localization_catalog.h" />
     <ClInclude Include="include\app\Platform\console_text.h" />
     <ClInclude Include="include\app\Platform\file_replace.h" />
+    <ClInclude Include="include\app\Platform\graphics_recovery.h" />
     <ClInclude Include="include\app\Platform\overlay.h" />
     <ClInclude Include="include\app\Platform\win_handle.h" />
     <ClInclude Include="include\app\UI\MenuShell\menu_controller.h" />
@@ -425,6 +430,7 @@
     <ClInclude Include="include\Features\ESP\DataReader\player_flag_policy.h" />
     <ClInclude Include="include\Features\ESP\DataReader\player_hierarchy_policy.h" />
     <ClInclude Include="include\Features\ESP\DataReader\player_repair_policy.h" />
+    <ClInclude Include="include\Features\ESP\DataReader\observer_policy.h" />
     <ClInclude Include="include\Features\ESP\DataReader\player_slot_policy.h" />
     <ClInclude Include="include\Features\ESP\DataReader\population_watchdog_policy.h" />
     <ClInclude Include="include\Features\ESP\DataReader\scene_transition_policy.h" />
@@ -460,6 +466,7 @@
     <ClInclude Include="include\Features\Target\target_convars.h" />
     <ClInclude Include="include\Features\Target\target.h" />
     <ClInclude Include="include\Features\Target\target_policy.h" />
+    <ClInclude Include="include\Features\Target\motion_control.h" />
     <ClInclude Include="include\Features\Target\target_settings_policy.h" />
     <ClInclude Include="include\Features\Target\wind_mouse.h" />
     <ClInclude Include="include\Features\Target\UI\target_tab.h" />
@@ -522,6 +529,7 @@
     <ClInclude Include="src\Features\ESP\DataReader\world_parts\world_process_entities.inl" />
     <ClInclude Include="src\Features\ESP\DataReader\world_parts\world_process_utility.inl" />
     <ClInclude Include="src\Features\ESP\DataReader\world_parts\world_read_context.inl" />
+    <ClInclude Include="src\Features\ESP\DataReader\world_parts\world_read_identity.inl" />
     <ClInclude Include="src\Features\ESP\DataReader\world_parts\world_utility_probe.inl" />
     <ClInclude Include="src\Features\ESP\Helpers\basic_helpers.inl" />
     <ClInclude Include="src\Features\ESP\Helpers\draw_corner_box.inl" />
@@ -569,16 +577,17 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="src\vendor\DMALibrary\Memory\ScatterReadTracker.h" />
+    <ClInclude Include="src\vendor\DMALibrary\Memory\ProcessProbePolicy.h" />
     <None Include="src\vendor\DMALibrary\vendor-lock.json" />
-    <None Include="tools\vendor\check_dma_vendor.ps1" />
+    <None Include="tools\dependencies\verify_dma.ps1" />
   </ItemGroup>
   <Target Name="VerifyDmaVendor" BeforeTargets="PrepareForBuild">
-    <Exec Command="powershell.exe -NoProfile -ExecutionPolicy Bypass -File &quot;$(ProjectDir)tools\vendor\check_dma_vendor.ps1&quot;" />
+    <Exec Command="powershell.exe -NoProfile -ExecutionPolicy Bypass -File &quot;$(ProjectDir)tools\dependencies\verify_dma.ps1&quot;" />
   </Target>
   <Target Name="VerifyEmbeddedAssets" AfterTargets="Build">
-    <Exec Command="powershell.exe -NoProfile -ExecutionPolicy Bypass -File &quot;$(ProjectDir)tools\tests\verify_embedded_resources.ps1&quot; -Binary &quot;$(TargetPath)&quot;" />
+    <Exec Command="powershell.exe -NoProfile -ExecutionPolicy Bypass -File &quot;$(ProjectDir)tools\quality\verify_resources.ps1&quot; -Binary &quot;$(TargetPath)&quot;" />
   </Target>
   <Target Name="DeployDmaRuntime" AfterTargets="Build" DependsOnTargets="VerifyDmaVendor">
-    <Exec Command="powershell.exe -NoProfile -ExecutionPolicy Bypass -File &quot;$(ProjectDir)tools\vendor\check_dma_vendor.ps1&quot; -Mode Deploy -RuntimeDirectory &quot;$(TargetDir).&quot;" />
+    <Exec Command="powershell.exe -NoProfile -ExecutionPolicy Bypass -File &quot;$(ProjectDir)tools\dependencies\verify_dma.ps1&quot; -Mode Deploy -RuntimeDirectory &quot;$(TargetDir).&quot;" />
   </Target>
 </Project>

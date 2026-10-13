@@ -170,16 +170,20 @@ namespace target::ballistics
     bool TracePlayerCapsules(
         const Vector3& origin,
         const Vector3& direction,
-        const esp::PlayerData& player,
+        const esp::TargetPlayerData& player,
         float maximumDistance,
         int requiredHitgroup,
         CapsuleHit* result = nullptr) noexcept;
     float CalculateHitchance(
         const Vector3& eyePosition,
         const Vector3& aimAngles,
-        const esp::PlayerData& player,
+        const esp::TargetPlayerData& player,
         const WeaponSpread& weapon,
         int requiredHitgroup = 0) noexcept;
+    bool MeetsHitchance(
+        const Vector3& eyePosition, const Vector3& aimAngles, const esp::TargetPlayerData& player,
+        const WeaponSpread& weapon, float requiredFraction, int requiredHitgroup = 0,
+        int* testedSamples = nullptr) noexcept;
     uint32_t CalculateSpreadSeed(
         const Vector3& aimAngles,
         int renderTick) noexcept;
@@ -191,14 +195,14 @@ namespace target::ballistics
     bool TraceSpreadSeed(
         const Vector3& eyePosition,
         const Vector3& aimAngles,
-        const esp::PlayerData& player,
+        const esp::TargetPlayerData& player,
         const WeaponSpread& weapon,
         uint32_t spreadSeed,
         int requiredHitgroup = 0) noexcept;
     SeedTickSelection SelectSpreadSeedTick(
         const Vector3& eyePosition,
         const Vector3& aimAngles,
-        const esp::PlayerData& player,
+        const esp::TargetPlayerData& player,
         const WeaponSpread& weapon,
         int earliestDeliveryTick,
         int renderTickCount,
@@ -206,14 +210,14 @@ namespace target::ballistics
     SeedWindowResult TraceSpreadSeedWindow(
         const Vector3& eyePosition,
         const Vector3& aimAngles,
-        const esp::PlayerData& player,
+        const esp::TargetPlayerData& player,
         const WeaponSpread& weapon,
         int firstRenderTick,
         int renderTickCount,
         int requiredHitgroup = 0) noexcept;
     MultipointTickSelection SelectMultipointSpreadTick(
         const Vector3& eyePosition,
-        const esp::PlayerData& player,
+        const esp::TargetPlayerData& player,
         const WeaponSpread& weapon,
         const CapsuleMultipoints& multipoints,
         int earliestDeliveryTick,

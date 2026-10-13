@@ -73,6 +73,15 @@ namespace runtime_offsets::resolver_policy
         return app::remote_string::ReadName(address, capacity, read).text;
     }
 
+    inline bool AreSchemaClassHeadersCoherent(std::span<const std::uint8_t> before,
+        std::span<const std::uint8_t> after) noexcept
+    {
+        return before.size() >= 0x38 && after.size() >= 0x38 &&
+            std::memcmp(before.data() + 0x08, after.data() + 0x08, sizeof(std::uintptr_t)) == 0 &&
+            std::memcmp(before.data() + 0x24, after.data() + 0x24, sizeof(std::int16_t)) == 0 &&
+            std::memcmp(before.data() + 0x30, after.data() + 0x30, sizeof(std::uintptr_t)) == 0;
+    }
+
     struct PatternByte {
         std::uint8_t value = 0;
         bool wildcard = false;
@@ -109,6 +118,111 @@ namespace runtime_offsets::resolver_policy
     }
 
     inline constexpr std::size_t kSchemaHashBytes = 0x60 + 256 * 0x18;
+
+    struct SchemaMemoryRead {
+        std::uintptr_t address = 0;
+        void* output = nullptr;
+        std::size_t size = 0;
+        std::size_t completed = 0;
+    };
+
+    template <typename BatchReader>
+    std::vector<std::uintptr_t> ReadSchemaBindingsBatched(
+        std::span<const std::uint8_t> hash, BatchReader&& readBatch)
+    {
+        if (hash.size() < kSchemaHashBytes) return {};
+        constexpr std::size_t maximumNodes = 8192;
+        constexpr std::size_t batchSize = 256;
+        std::vector<std::uintptr_t> bindings;
+        std::unordered_set<std::uintptr_t> seenNodes, seenData;
+        std::vector<std::uintptr_t> pending;
+        std::size_t reads = 0;
+        const auto pointerAt = [&](std::size_t offset) {
+            std::uintptr_t value = 0;
+            std::memcpy(&value, hash.data() + offset, sizeof(value));
+            return value;
+        };
+        const auto enqueue = [&](std::uintptr_t node) {
+            if (app::memory_address::IsLikelyGamePointer(node) &&
+                seenNodes.size() < maximumNodes && seenNodes.insert(node).second)
+                pending.push_back(node);
+        };
+        const auto drain = [&](std::size_t nextOffset) {
+            std::size_t cursor = 0;
+            while (cursor < pending.size() && reads < maximumNodes) {
+                const auto count = (std::min)({batchSize, pending.size() - cursor, maximumNodes - reads});
+                std::array<std::array<std::uint8_t, 0x18>, batchSize> nodes{};
+                std::array<SchemaMemoryRead, batchSize> requests{};
+                for (std::size_t i = 0; i < count; ++i)
+                    requests[i] = {pending[cursor + i], nodes[i].data(), nodes[i].size(), 0};
+                readBatch(std::span(requests.data(), count));
+                reads += count;
+                cursor += count;
+                for (std::size_t i = 0; i < count; ++i) {
+                    if (requests[i].completed != requests[i].size) continue;
+                    const auto decoded = DecodeSchemaHashNode(nodes[i], nextOffset);
+                    if (!decoded) continue;
+                    if (app::memory_address::IsLikelyGamePointer(decoded->data) &&
+                        seenData.insert(decoded->data).second)
+                        bindings.push_back(decoded->data);
+                    enqueue(decoded->next);
+                }
+            }
+        };
+        for (const std::size_t headOffset : {std::size_t{0x08}, std::size_t{0x10}})
+            for (std::size_t i = 0; i < 256; ++i)
+                enqueue(pointerAt(0x60 + i * 0x18 + headOffset));
+        drain(0x08);
+        seenNodes.clear();
+        pending.clear();
+        enqueue(pointerAt(0x20));
+        drain(0x00);
+        return bindings;
+    }
+
+    template <typename BatchReader, typename Reader>
+    std::vector<std::string> ReadSchemaNamesBatched(
+        std::span<const std::uintptr_t> addresses, BatchReader&& readBatch, Reader&& read)
+    {
+        constexpr std::size_t batchSize = 256;
+        constexpr std::size_t capacity = 128;
+        std::vector<std::string> names(addresses.size());
+        for (std::size_t begin = 0; begin < addresses.size(); begin += batchSize) {
+            const auto count = (std::min)(batchSize, addresses.size() - begin);
+            std::array<std::array<char, capacity>, batchSize> buffers{};
+            std::array<SchemaMemoryRead, batchSize> requests{};
+            std::array<std::size_t, batchSize> indices{};
+            std::size_t queued = 0;
+            for (std::size_t i = 0; i < count; ++i) {
+                const auto address = addresses[begin + i];
+                if (!app::memory_address::IsCanonicalUserPointer(address) ||
+                    address > app::memory_address::kMaximumUserAddress - capacity)
+                    continue;
+                const auto size = (std::min)(capacity, std::size_t{4096} - (address & 4095u));
+                indices[queued] = i;
+                requests[queued++] = {address, buffers[i].data(), size, 0};
+            }
+            if (queued != 0) readBatch(std::span(requests.data(), queued));
+            for (std::size_t r = 0; r < queued; ++r) {
+                const auto i = indices[r];
+                const auto available = (std::min)(requests[r].size, requests[r].completed);
+                bool complete = false;
+                bool valid = true;
+                for (std::size_t j = 0; j < available; ++j) {
+                    const auto ch = static_cast<unsigned char>(buffers[i][j]);
+                    if (ch == 0) {
+                        names[begin + i].assign(buffers[i].data(), j);
+                        complete = true;
+                        break;
+                    }
+                    if (ch < 0x20 || ch == 0x7F) { valid = false; break; }
+                }
+                if (valid && !complete)
+                    names[begin + i] = ReadSchemaName(addresses[begin + i], capacity, read);
+            }
+        }
+        return names;
+    }
 
     template <typename Reader>
     std::vector<std::uintptr_t> ReadSchemaBindings(std::span<const std::uint8_t> hash, Reader&& read)

@@ -185,6 +185,7 @@ namespace runtime_offsets
         std::ptrdiff_t C_Inferno_m_firePositions = 0;
         std::ptrdiff_t C_Inferno_m_bInPostEffectTime = 0;
         std::ptrdiff_t C_SmokeGrenadeProjectile_m_nSmokeEffectTickBegin = 0;
+        std::ptrdiff_t C_SmokeGrenadeProjectile_m_vSmokeDetonationPos = 0;
         std::ptrdiff_t C_SmokeGrenadeProjectile_m_bDidSmokeEffect = 0;
         std::ptrdiff_t C_SmokeGrenadeProjectile_m_bSmokeVolumeDataReceived = 0;
         std::ptrdiff_t C_SmokeGrenadeProjectile_m_bSmokeEffectSpawned = 0;

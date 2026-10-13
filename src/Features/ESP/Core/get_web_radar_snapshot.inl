@@ -8,6 +8,15 @@ bool esp::GetWebRadarSnapshot(WebRadarSnapshot* outSnapshot)
         return false;
 
     const uint64_t localNowUs = TickNowUs();
+    WebRadarSnapshot& snapshot = *outSnapshot;
+    static const WebRadarSnapshot emptySnapshot;
+    snapshot = emptySnapshot;
+    snapshot.localPos = {NAN, NAN, NAN};
+    snapshot.captureTickMs = localNowUs / 1000u;
+    if (!state::IsSceneSnapshotFresh(snap.sceneSerial,
+        s_sceneResetSerial.load(std::memory_order_relaxed), snap.captureTimeUs, localNowUs))
+        return true;
+
     const bool currentScene = snap.sceneSerial == s_sceneResetSerial.load(std::memory_order_relaxed);
     uint64_t localSampleUs = snap.localPosUpdatedAtUs;
     bool localFresh = currentScene && state::ShouldApplyCameraLocalPosition(
@@ -37,8 +46,6 @@ bool esp::GetWebRadarSnapshot(WebRadarSnapshot* outSnapshot)
     if (!hasEffectiveLocalPos)
         effectiveLocalPos = { NAN, NAN, NAN };
 
-    WebRadarSnapshot& snapshot = *outSnapshot;
-    snapshot = {};
     for (size_t i = 0; i < snapshot.players.size(); ++i)
         snapshot.players[i] = snap.webRadarPlayers[i];
 
@@ -95,7 +102,6 @@ bool esp::GetWebRadarSnapshot(WebRadarSnapshot* outSnapshot)
     snapshot.minimapMaxs = snap.minimapMaxs;
     snapshot.localTeam = snap.localTeam;
     snapshot.hasMinimapBounds = snap.hasMinimapBounds;
-    snapshot.captureTickMs = TickNowMs();
 
     snapshot.bomb.planted = snap.bombState.planted;
     snapshot.bomb.ticking = snap.bombState.ticking;
@@ -125,7 +131,7 @@ bool esp::GetWebRadarSnapshot(WebRadarSnapshot* outSnapshot)
             snap.worldMarkerCount, 0, static_cast<int>(std::size(snap.worldMarkers)));
         for (int i = 0; i < sourceMarkerCount && snapshot.worldMarkerCount < WebRadarSnapshot::kMaxWorldMarkers; ++i) {
             const auto& wm = snap.worldMarkers[i];
-            if (!wm.valid)
+            if (!wm.valid || !isValidWorldPos(wm.position))
                 continue;
             if (wm.expiresUs > 0 && wm.expiresUs <= nowUs)
                 continue;

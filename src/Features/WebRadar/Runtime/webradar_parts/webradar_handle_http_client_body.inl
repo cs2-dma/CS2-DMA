@@ -83,7 +83,7 @@
         {
             std::lock_guard<std::mutex> lock(mutex_);
             if (protocolVersion < 2)
-                legacyPayloadDemandUntilMs_ = UnixNowMs() + 5000;
+                legacyPayloadDemandUntilMs_ = MonotonicNowMs() + 5000;
             body = protocolVersion >= 2 ? latestPayloadJsonV2_ : latestPayloadJson_;
             ++stats_.servedRequests;
             ++stats_.livePollRequests;
@@ -103,7 +103,7 @@
         {
             std::lock_guard<std::mutex> lock(mutex_);
             if (protocolVersion < 2)
-                legacyPayloadDemandUntilMs_ = UnixNowMs() + 30000;
+                legacyPayloadDemandUntilMs_ = MonotonicNowMs() + 30000;
             body = protocolVersion >= 2 ? latestPayloadJsonV2_ : latestPayloadJson_;
             ++stats_.servedRequests;
             stats_.lastRequestUnixMs = UnixNowMs();

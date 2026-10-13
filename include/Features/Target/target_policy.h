@@ -63,6 +63,35 @@ namespace target::policy
         bool valid = false;
     };
 
+    struct FovEllipse
+    {
+        float radiusX = 0.0f, radiusY = 0.0f;
+        bool valid = false;
+    };
+
+    inline FovEllipse ResolveAngularFov(float width, float height, float scaleX,
+        float scaleY, float degrees) noexcept
+    {
+        if (!std::isfinite(width) || !std::isfinite(height) || width <= 4.0f || height <= 4.0f ||
+            !std::isfinite(scaleX) || !std::isfinite(scaleY) || scaleX <= 0.0f || scaleY <= 0.0f ||
+            !std::isfinite(degrees) || degrees < 0.25f || degrees > 30.0f) return {};
+        const float tangent = std::tan(degrees * 0.01745329252f);
+        return {width * 0.5f * scaleX * tangent, height * 0.5f * scaleY * tangent, true};
+    }
+
+    inline float SmoothingResponseMs(float smoothing) noexcept
+    {
+        if (!std::isfinite(smoothing) || smoothing <= 1.0f) return 0.0f;
+        return -1000.0f / (128.0f * std::log1p(-1.0f / smoothing));
+    }
+
+    inline float SmoothingFromResponseMs(float milliseconds) noexcept
+    {
+        if (!std::isfinite(milliseconds) || milliseconds <= 0.0f) return 1.0f;
+        return std::clamp(1.0f / -std::expm1(-1000.0f / (128.0f * milliseconds)),
+            kMinimumSmoothing, kMaximumSmoothing);
+    }
+
     struct MouseMove
     {
         int x = 0;

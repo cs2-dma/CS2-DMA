@@ -6,14 +6,19 @@ on:
   workflow_dispatch:
 permissions:
   contents: read
+concurrency:
+  group: quality-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
   checks:
     runs-on: windows-2025
+    timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
         with:
           node-version: '24'
+          package-manager-cache: false
       - uses: microsoft/setup-msbuild@v2
       - name: Prepare CJK test font
         shell: pwsh
@@ -24,27 +29,46 @@ jobs:
       - name: Project and resource consistency
         shell: pwsh
         run: |
-          ./tools/tests/audit_project.ps1
-          node tools/tests/audit_localization.js
+          ./tools/quality/audit_project.ps1
+          node --check src/Features/WebRadar/Assets/viewer.js
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
-          node tools/tests/map_assets_test.js
+          node --check src/Features/WebRadar/Assets/remote/server.js
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
-          node tools/tests/webradar_continuity_test.js
+          node tools/quality/audit_localization.js
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
-          node tools/tests/remote_server_test.js
+          node tools/tests/assets/map_assets_test.js
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          node tools/tests/web/webradar_continuity_test.js
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          node tools/tests/web/remote_server_test.js
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+      - name: Remote server loopback integration
+        shell: pwsh
+        run: |
+          $fixture = Join-Path $env:RUNNER_TEMP 'kevqdma-remote-runtime'
+          $source = Get-Content src/Features/WebRadar/Runtime/web_remote.cpp -Raw
+          $dependencies = [regex]::Match($source, '"dependencies":(\{[^}]+\})')
+          if (-not $dependencies.Success) { throw 'Remote dependency manifest is missing' }
+          $packages = ($dependencies.Groups[1].Value | ConvertFrom-Json).PSObject.Properties | ForEach-Object { "$($_.Name)@$($_.Value)" }
+          npm install --prefix $fixture --ignore-scripts --no-audit --no-fund --package-lock=false --save=false @packages
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          $env:NODE_PATH = Join-Path $fixture 'node_modules'
+          $env:KEVQ_REMOTE_HEARTBEAT_SOAK = '1'
+          node tools/tests/web/remote_server_integration_test.js
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
       - name: Build Release with private symbols
         run: msbuild KevqDMA.vcxproj /m /p:Configuration=Release /p:Platform=x64 /p:PlatformToolset=v143 /v:minimal
       - name: Build and run C++ regressions
         shell: pwsh
         run: |
-          ./tools/tests/verify_embedded_resources.ps1
-          ./tools/tests/run_regressions.ps1 -PlatformToolset v143
+          ./tools/quality/verify_resources.ps1
+          ./tools/tests/run.ps1 -PlatformToolset v143
   asan:
     runs-on: windows-2025
+    timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       - uses: microsoft/setup-msbuild@v2
       - name: AddressSanitizer regressions
         shell: pwsh
-        run: ./tools/tests/run_regressions.ps1 -PlatformToolset v143 -Sanitizer
+        run: ./tools/tests/run.ps1 -PlatformToolset v143 -Sanitizer

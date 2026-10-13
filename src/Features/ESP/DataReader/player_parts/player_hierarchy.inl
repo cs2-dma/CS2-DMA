@@ -464,6 +464,7 @@
                 pawns[i] = 0;
             }
 
+            uintptr_t pawnReadEntries[64] = {};
             bool queuedMergedPawnReads = false;
             for (int slotIdx = 0; slotIdx < playerRefreshSlotCount; ++slotIdx) {
                 const int i = playerRefreshSlots[slotIdx];
@@ -475,10 +476,13 @@
             }
             for (int slotIdx = 0; slotIdx < playerRefreshSlotCount; ++slotIdx) {
                 const int i = playerRefreshSlots[slotIdx];
-                if (!prevCachedPawnEntries[i] || !isValidPawnHandle(pawnHandles[i]))
+                pawnReadEntries[i] = esp::data::SelectHierarchyPawnReadEntry(
+                    pawnHandles[i], prevCachedPawnHandles[i], prevCachedPawnEntries[i],
+                    listEntry, kEntityHandleMask);
+                if (!pawnReadEntries[i])
                     continue;
                 const uint32_t slot = pawnHandles[i] & kEntitySlotMask;
-                mem.AddScatterReadRequest(handle, prevCachedPawnEntries[i] + s_activeEntitySlotSize * slot, &pawns[i], sizeof(uintptr_t));
+                mem.AddScatterReadRequest(handle, pawnReadEntries[i] + s_activeEntitySlotSize * slot, &pawns[i], sizeof(uintptr_t));
                 queuedMergedPawnReads = true;
             }
             if (queuedMergedPawnReads && !mem.ExecuteReadScatter(handle))
@@ -523,7 +527,7 @@
                 bool entriesChanged = false;
                 for (int slotIdx = 0; slotIdx < playerRefreshSlotCount; ++slotIdx) {
                     const int i = playerRefreshSlots[slotIdx];
-                    if (pawnEntries[i] != prevCachedPawnEntries[i]) {
+                    if (pawnEntries[i] != pawnReadEntries[i]) {
                         entriesChanged = true;
                         break;
                     }
@@ -532,7 +536,8 @@
                     bool queuedFreshPawnReads = false;
                     for (int slotIdx = 0; slotIdx < playerRefreshSlotCount; ++slotIdx) {
                         const int i = playerRefreshSlots[slotIdx];
-                        if (!pawnEntries[i] || !isValidPawnHandle(pawnHandles[i]))
+                        if (!pawnEntries[i] || !isValidPawnHandle(pawnHandles[i]) ||
+                            pawnEntries[i] == pawnReadEntries[i])
                             continue;
                         const uint32_t slot = pawnHandles[i] & kEntitySlotMask;
                         mem.AddScatterReadRequest(handle, pawnEntries[i] + s_activeEntitySlotSize * slot, &pawns[i], sizeof(uintptr_t));

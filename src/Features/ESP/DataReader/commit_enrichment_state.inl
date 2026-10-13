@@ -1518,7 +1518,8 @@
                 vitalSampleFresh, pawns[i], healths[i], lifeStates[i]);
             const bool cachedSamePawn =
                 s_webRadarPlayers[i].valid &&
-                s_webRadarPlayers[i].pawn == pawns[i];
+                s_webRadarPlayers[i].pawn == pawns[i] &&
+                s_webRadarPlayers[i].pawnHandle == pawnHandles[i];
             if (!haveWebRadarPos && cachedSamePawn && isValidWorldPos(s_webRadarPlayers[i].position)) {
                 webRadarPos = s_webRadarPlayers[i].position;
                 haveWebRadarPos = true;
@@ -1532,6 +1533,8 @@
                     cached.hasBones = false;
                     cached.bonesUpdatedAtUs = 0;
                     cached.coreUpdatedAtUs = playerCoreBatchCaptureUs;
+                    esp::data::UpdateWeaponPresentation(0, -1, true, radarNowUs,
+                        cached.weaponId, cached.ammoClip, cached.weaponPresentationUpdatedUs);
                 }
                 if (canHoldRadarCore(cached)) {
                     cached.staleFrames = std::min(255, cached.staleFrames + 1);
@@ -1552,7 +1555,7 @@
                 continue;
             }
             esp::PlayerData& wp = s_webRadarPlayers[i];
-            if (wp.pawn != pawns[i])
+            if (wp.pawn != pawns[i] || wp.pawnHandle != pawnHandles[i])
                 wp = {};
             wp.valid = true;
             wp.pawn = pawns[i];
@@ -1577,8 +1580,8 @@
             uint16_t committedWeaponId = 0;
             int committedAmmoClip = ammoClips[i];
             resolveCommittedWeaponState(i, liveWeaponId, committedWeaponId, committedAmmoClip);
-            wp.ammoClip = committedAmmoClip;
-            wp.weaponId = committedWeaponId;
+            esp::data::UpdateWeaponPresentation(committedWeaponId, committedAmmoClip, isDead,
+                radarNowUs, wp.weaponId, wp.ammoClip, wp.weaponPresentationUpdatedUs);
             wp.hasBomb = !isDead && (i == resolvedBombCarrierSlot);
             wp.hasBones = false;
             wp.bonesUpdatedAtUs = 0;

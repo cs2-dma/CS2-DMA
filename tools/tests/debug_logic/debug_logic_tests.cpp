@@ -2,7 +2,10 @@
 #include <WS2tcpip.h>
 
 #include "app/Platform/file_replace.h"
+#include "app/Platform/graphics_recovery.h"
+#include "app/Platform/display_mapping.h"
 #include "app/Bootstrap/startup_offsets.h"
+#include "app/Bootstrap/startup_process.h"
 #include "app/Config/config_parse_utils.h"
 #include "app/Localization/localization_catalog.h"
 #include "app/Input/input_device_policy.h"
@@ -29,6 +32,7 @@
 #include "Features/ESP/DataReader/visibility_policy.h"
 #include "Features/ESP/DataReader/world_domain_policy.h"
 #include "Features/ESP/DataReader/world_marker_policy.h"
+#include "Features/ESP/DataReader/observer_policy.h"
 #include "Features/ESP/DataReader/zero_population_policy.h"
 #include "Features/ESP/Recovery/dma_cache_profile.h"
 #include "Features/ESP/Recovery/dma_recovery_policy.h"
@@ -44,7 +48,14 @@
 #include "Features/ESP/Worker/worker_policy.h"
 #include "app/Core/memory_address.h"
 #include "DMALibrary/Memory/ScatterReadTracker.h"
+#include "DMALibrary/Memory/ProcessProbePolicy.h"
 #include "Features/ESP/weapon_catalog.h"
+#include "../../../src/Features/ESP/esp_local_state.h"
+#pragma warning(push)
+#pragma warning(disable: 4996)
+#include "Features/ESP/Diagnostics/narrow_debug.h"
+#pragma warning(pop)
+#include "Game/Offsets/runtime_offsets.h"
 #include "Features/Target/target_policy.h"
 #include "Features/Target/target_ballistics.h"
 #include "Features/Target/convar_snapshot_worker.h"
@@ -144,7 +155,7 @@ namespace
         CHECK(DroppedWeaponCategoryFromItemId(9) == DroppedWeaponCategory::Snipers);
         CHECK(DroppedWeaponCategoryFromItemId(4) == DroppedWeaponCategory::Pistols);
         CHECK(IsDroppedWeaponItemId(57));
-        CHECK(!IsDroppedWeaponItemId(45));
+        CHECK(IsDroppedWeaponItemId(45));
         CHECK(!IsDroppedWeaponItemId(49));
         for (const auto& atlasRegion : resources::weapon_icons::kRegions) {
             CHECK(WeaponNameFromItemId(atlasRegion.itemId) != nullptr);
@@ -394,6 +405,15 @@ namespace
     void TestKeyboardReadPolicy()
     {
         using namespace app::input::keyboard_policy;
+        CHECK(!IsSampleFresh(0, 1000));
+        CHECK(!IsSampleFresh(1001, 1000));
+        CHECK(IsSampleFresh(1000, 1250));
+        CHECK(!IsSampleFresh(1000, 1251));
+        CHECK(!NeedsPoll(false, 0, 0, 1000));
+        CHECK(!NeedsPoll(true, 0, 1000, 1099));
+        CHECK(NeedsPoll(true, 0, 1000, 1100));
+        CHECK(NeedsPoll(true, 1, 1000, 1000));
+        CHECK(NeedsPoll(true, 0, 0, 1000));
         CHECK(NeedsResolution(false, 0, 0, 1000));
         CHECK(!NeedsResolution(true, 0, 0, 1000));
         CHECK(!NeedsResolution(true, 1, 1000, 2000));
@@ -444,6 +464,150 @@ namespace
         CHECK(ScanReadablePattern(base, 8192, pattern,
             [](uintptr_t, void*, size_t) { return false; }, [] { return false; }, &missing) == 0);
         CHECK(missing == 2);
+    }
+
+    void TestStartupProcessScheduling()
+    {
+        using namespace std::chrono;
+        using bootstrap::ProcessWaitSchedule;
+        using bootstrap::ShouldReinitializeProcessDiscovery;
+        const auto initial = steady_clock::time_point{} + seconds(100);
+        ProcessWaitSchedule schedule;
+        CHECK(schedule.PollDue(initial));
+        CHECK(schedule.NextWake(initial, false, false) == initial);
+        schedule.nextProcessPoll = initial + milliseconds(100);
+        schedule.nextProcessCatalogRefresh = initial + milliseconds(250);
+        CHECK(!schedule.PollDue(initial));
+        CHECK(schedule.NextWake(initial, false, false) == initial + milliseconds(100));
+        schedule.nextProcessPoll = initial + milliseconds(300);
+        CHECK(schedule.NextWake(initial + milliseconds(200), false, false) ==
+            initial + milliseconds(250));
+        CHECK(schedule.PollDue(initial + milliseconds(250)));
+        schedule.nextModuleResolve = initial + milliseconds(50);
+        CHECK(schedule.NextWake(initial, true, true) == initial + milliseconds(50));
+        schedule.nextAttachAttempt = initial + milliseconds(75);
+        CHECK(schedule.NextWake(initial, false, true) == initial + milliseconds(75));
+        schedule.nextModuleResolve = initial - seconds(10);
+        CHECK(schedule.NextWake(initial, false, false) == initial + milliseconds(100));
+        CHECK(schedule.NextWake(initial, false, true) == initial + milliseconds(75));
+        CHECK(schedule.NextWake(initial, true, true) == initial);
+        schedule.nextModuleResolve = initial + seconds(1);
+        schedule.nextAttachAttempt = initial - seconds(1);
+        CHECK(schedule.NextWake(initial, true, true) == initial + milliseconds(100));
+        CHECK(schedule.NextWake(initial, false, true) == initial);
+
+        CHECK(schedule.CanReinitialize(initial));
+        schedule.lastDmaReinitialize = initial;
+        CHECK(!schedule.CanReinitialize(initial + seconds(9)));
+        CHECK(schedule.CanReinitialize(initial + seconds(10)));
+        CHECK(schedule.CanReinitialize(initial - seconds(1)));
+        for (uint32_t failures = 0; failures < bootstrap::kProcessCatalogFailureLimit; ++failures)
+            CHECK(!ShouldReinitializeProcessDiscovery(true, false, 0, failures, false, false));
+        CHECK(ShouldReinitializeProcessDiscovery(true, false, 0, 8, false, false));
+        CHECK(ShouldReinitializeProcessDiscovery(true, false, 0, 0, true, false));
+        CHECK(ShouldReinitializeProcessDiscovery(false, false, 0, 0, false, false));
+        CHECK(ShouldReinitializeProcessDiscovery(true, true, 42, 0, false, true));
+        CHECK(!ShouldReinitializeProcessDiscovery(true, true, 42, 8, true, false));
+        CHECK(!ShouldReinitializeProcessDiscovery(true, false, 42, 8, true, false));
+
+        schedule = {};
+        unsigned processPolls = 0;
+        unsigned catalogRefreshes = 0;
+        for (auto time = initial; time < initial + seconds(10);) {
+            if (schedule.PollDue(time)) {
+                ++processPolls;
+                if (time >= schedule.nextProcessCatalogRefresh) {
+                    ++catalogRefreshes;
+                    schedule.nextProcessCatalogRefresh = time + bootstrap::kProcessCatalogRefreshInterval;
+                }
+                schedule.nextProcessPoll = time + bootstrap::kProcessPollInterval;
+                CHECK(!ShouldReinitializeProcessDiscovery(true, false, 0, 0, false, false));
+            }
+            const auto wake = schedule.NextWake(time, false, false);
+            CHECK(wake > time && wake - time <= milliseconds(100));
+            time = wake;
+        }
+        CHECK(catalogRefreshes == 40);
+        CHECK(processPolls == 120);
+
+        esp::recovery::ProcessIdentityTracker identity;
+        schedule = {};
+        auto time = initial;
+        const auto initialUs = static_cast<uint64_t>(duration_cast<microseconds>(time.time_since_epoch()).count());
+        CHECK(esp::recovery::ObserveProcessIdentity(identity, 0, 42, initialUs) ==
+            esp::recovery::ProcessIdentityDecision::PendingConfirmation);
+        schedule.nextProcessPoll = time + bootstrap::kProcessPollInterval;
+        schedule.nextProcessCatalogRefresh = time + bootstrap::kProcessCatalogRefreshInterval;
+        time = schedule.NextWake(time, false, false);
+        CHECK(time - initial == milliseconds(100));
+        CHECK(esp::recovery::ObserveProcessIdentity(identity, 0, 42,
+            static_cast<uint64_t>(duration_cast<microseconds>(time.time_since_epoch()).count())) ==
+            esp::recovery::ProcessIdentityDecision::ConfirmedNewProcess);
+        CHECK(esp::recovery::ObserveProcessIdentity(identity, 42, 77, initialUs + 150000) ==
+            esp::recovery::ProcessIdentityDecision::PendingConfirmation);
+        CHECK(esp::recovery::ObserveProcessIdentity(identity, 42, 42, initialUs + 175000) ==
+            esp::recovery::ProcessIdentityDecision::Stable);
+        CHECK(esp::recovery::ObserveProcessIdentity(identity, 42, 77, initialUs + 200000) ==
+            esp::recovery::ProcessIdentityDecision::PendingConfirmation);
+        CHECK(esp::recovery::ObserveProcessIdentity(identity, 42, 77, initialUs + 300000) ==
+            esp::recovery::ProcessIdentityDecision::ConfirmedReplacement);
+    }
+
+    void TestStartupAddressSpaceProbe()
+    {
+        CHECK(!dma::IsActiveProcessCandidate(0, 0));
+        CHECK(dma::IsActiveProcessCandidate(42, 0));
+        CHECK(!dma::IsActiveProcessCandidate(42, 1));
+        CHECK(!dma::IsActiveProcessCandidate(42, UINT32_MAX));
+        std::map<std::string, uint64_t> bases;
+        std::set<uint64_t> readable;
+        std::vector<std::string> lookedUp;
+        std::vector<uint64_t> probed;
+        const auto lookup = [&](std::string_view name) {
+            lookedUp.emplace_back(name);
+            const auto found = bases.find(std::string(name));
+            return found == bases.end() ? uint64_t{0} : found->second;
+        };
+        const auto read = [&](uint64_t base) {
+            CHECK(base != 0);
+            probed.push_back(base);
+            return readable.contains(base);
+        };
+        const auto cs2 = [&] {
+            lookedUp.clear();
+            probed.clear();
+            return dma::HasReadableProcessAddressSpace(true, "cs2.exe", "cs2", lookup, read);
+        };
+        CHECK(!cs2() && probed.empty());
+        bases["cs2.exe"] = 0x10000;
+        readable.insert(0x10000);
+        CHECK(cs2());
+        CHECK(probed == std::vector<uint64_t>{0x10000});
+        bases["client.dll"] = 0x20000;
+        CHECK(!cs2());
+        CHECK(probed == std::vector<uint64_t>{0x20000});
+        CHECK(std::find(lookedUp.begin(), lookedUp.end(), "cs2.exe") == lookedUp.end());
+        bases["engine2.dll"] = 0x30000;
+        readable.insert(0x30000);
+        CHECK(cs2());
+        CHECK(probed == (std::vector<uint64_t>{0x20000, 0x30000}));
+        readable.insert(0x20000);
+        CHECK(cs2());
+        CHECK(probed == std::vector<uint64_t>{0x20000});
+        readable.erase(0x20000);
+        readable.erase(0x30000);
+        CHECK(!cs2());
+        bases.clear();
+        bases["cs2"] = 0x10000;
+        CHECK(cs2());
+        CHECK(probed == std::vector<uint64_t>{0x10000});
+        lookedUp.clear();
+        probed.clear();
+        bases["other.exe"] = 0x40000;
+        readable.insert(0x40000);
+        CHECK(dma::HasReadableProcessAddressSpace(false, "other.exe", "other", lookup, read));
+        CHECK(lookedUp == std::vector<std::string>{"other.exe"});
+        CHECK(probed == std::vector<uint64_t>{0x40000});
     }
 
     void TestStartupOffsets()
@@ -904,7 +1068,30 @@ namespace
             return true;
         };
         const std::vector<std::uintptr_t> expectedBindings{0x30000, 0x30200, 0x30100};
+        {
+            std::array<uint8_t, 0x38> before{}, after{};
+            CHECK(AreSchemaClassHeadersCoherent(before, after));
+            for (const size_t offset : {size_t{0x08}, size_t{0x24}, size_t{0x30}}) {
+                after.fill(0);
+                after[offset] = 1;
+                CHECK(!AreSchemaClassHeadersCoherent(before, after));
+            }
+            after.fill(0);
+            after[0x20] = 1;
+            CHECK(AreSchemaClassHeadersCoherent(before, after));
+            CHECK(!AreSchemaClassHeadersCoherent(std::span(before.data(), 16), after));
+        }
         CHECK(ReadSchemaBindings(hash, readNode) == expectedBindings);
+        const auto readNodesBatch = [&](auto requests) {
+            for (auto& request : requests)
+                request.completed = readNode(request.address, request.output, request.size) ? request.size : 0;
+        };
+        auto batchedBindings = ReadSchemaBindingsBatched(hash, readNodesBatch);
+        std::sort(batchedBindings.begin(), batchedBindings.end());
+        auto sortedBindings = expectedBindings;
+        std::sort(sortedBindings.begin(), sortedBindings.end());
+        CHECK(batchedBindings == sortedBindings);
+        CHECK(ReadSchemaBindingsBatched(std::span<const std::uint8_t>(hash.data(), 32), readNodesBatch).empty());
         const std::int32_t undersizedCount = 1;
         std::memcpy(hash.data() + 0x0C, &undersizedCount, sizeof(undersizedCount));
         CHECK(ReadSchemaBindings(hash, readNode) == expectedBindings);
@@ -922,6 +1109,62 @@ namespace
         };
         CHECK(ReadSchemaBindings(hash, endlessChain).size() == 8192);
         CHECK(chainReads == 8192);
+        chainReads = 0;
+        CHECK(ReadSchemaBindingsBatched(hash, [&](auto requests) {
+            for (auto& request : requests)
+                request.completed = endlessChain(request.address, request.output, request.size) ? request.size : 0;
+        }).size() == 8192);
+        CHECK(chainReads == 8192);
+        {
+            std::array<std::uint8_t, kSchemaHashBytes> manyHash{};
+            std::size_t batches = 0;
+            for (std::size_t i = 0; i < 256; ++i)
+                putPointer(manyHash, 0x60 + i * 0x18 + 0x08, 0x20000 + i * 0x100);
+            const auto values = ReadSchemaBindingsBatched(manyHash, [&](auto requests) {
+                ++batches;
+                for (auto& request : requests) {
+                    std::array<std::uint8_t, 0x18> node{};
+                    putPointer(node, 0x10, request.address + 0x100000);
+                    std::memcpy(request.output, node.data(), node.size());
+                    request.completed = request.size;
+                }
+            });
+            CHECK(values.size() == 256 && batches == 1);
+        }
+        {
+            std::vector<std::uintptr_t> addresses(1000);
+            for (std::size_t i = 0; i < addresses.size(); ++i) addresses[i] = 0x10003 + i * 256;
+            addresses[0] = 0x10FFE;
+            addresses[1] = 0;
+            std::size_t batches = 0, fallbackReads = 0;
+            const auto names = ReadSchemaNamesBatched(addresses, [&](auto requests) {
+                ++batches;
+                for (auto& request : requests) {
+                    std::memset(request.output, 0, request.size);
+                    if (request.address == 0x10FFE) {
+                        std::memcpy(request.output, "m_", request.size);
+                    } else {
+                        std::memcpy(request.output, "m_Item", 6);
+                    }
+                    request.completed = request.size;
+                }
+            }, [&](std::uintptr_t address, void* output, std::size_t size) {
+                ++fallbackReads;
+                std::memset(output, 0, size);
+                if (address == 0x10FFE) std::memcpy(output, "m_", size);
+                else if (address == 0x11000) std::memcpy(output, "Item", 4);
+                else return false;
+                return true;
+            });
+            CHECK(batches == 4 && fallbackReads == 2);
+            CHECK(names[0] == "m_Item" && names[1].empty() && names.back() == "m_Item");
+            const std::array<std::uintptr_t, 1> partialName{0x10003};
+            const auto partial = ReadSchemaNamesBatched(partialName, [](auto requests) {
+                std::memcpy(requests[0].output, "m_", 2);
+                requests[0].completed = 2;
+            }, [](auto, auto, auto) { return false; });
+            CHECK(partial[0].empty());
+        }
         for (const bool partial : {false, true}) {
             std::array<std::uint8_t, 96> records{};
             records[0] = 1; records[32] = 2; records[64] = 3;
@@ -1772,10 +2015,14 @@ namespace
         using esp::data::SelectZeroPawnGraceUs;
         using esp::data::ShouldExposePlayerRoster;
 
-        CHECK(!ShouldExposePlayerRoster(false, false));
-        CHECK(ShouldExposePlayerRoster(true, false));
-        CHECK(ShouldExposePlayerRoster(false, true));
-        CHECK(ShouldExposePlayerRoster(true, true));
+        for (int stable = 0; stable <= 1; ++stable) {
+            for (int recovery = 0; recovery <= 1; ++recovery) {
+                for (int warming = 0; warming <= 1; ++warming) {
+                    CHECK(ShouldExposePlayerRoster(stable != 0, recovery != 0, warming != 0) ==
+                        (stable != 0 || recovery != 0 || warming != 0));
+                }
+            }
+        }
 
         CHECK(!IsRecentStructuralReset(0, 100));
         CHECK(!IsRecentStructuralReset(100, 100));
@@ -2192,6 +2439,15 @@ namespace
             esp::data::kHierarchySteadyDiscoveryBudget);
         CHECK(SelectHierarchyDiscoveryBudget(true, false) == 64);
         CHECK(SelectHierarchyDiscoveryBudget(false, true) == 64);
+        CHECK(esp::data::SelectHierarchyPawnReadEntry(65u, 0u, 0u, 0x100000u, 0x7FFFu) == 0x100000u);
+        CHECK(esp::data::SelectHierarchyPawnReadEntry(513u, 0u, 0u, 0x100000u, 0x7FFFu) == 0u);
+        CHECK(esp::data::SelectHierarchyPawnReadEntry(513u, 514u, 0x200000u, 0x100000u, 0x7FFFu) == 0x200000u);
+        CHECK(esp::data::SelectHierarchyPawnReadEntry(65u, 513u, 0x200000u, 0x100000u, 0x7FFFu) == 0x100000u);
+        CHECK(esp::data::SelectHierarchyPawnReadEntry(513u, 65u, 0x100000u, 0x100000u, 0x7FFFu) == 0u);
+        CHECK(esp::data::SelectHierarchyPawnReadEntry(0xFFFFFFFFu, 65u, 0x100000u, 0x100000u, 0x7FFFu) == 0u);
+        CHECK(esp::data::SelectHierarchyPawnReadEntry(0x8041u, 65u, 0x100000u, 0x100000u, 0x7FFFu) == 0x100000u);
+        CHECK(esp::data::SelectHierarchyPawnReadEntry(0x8000u, 65u, 0x100000u, 0x100000u, 0x7FFFu) == 0u);
+        CHECK(esp::data::SelectHierarchyPawnReadEntry(65u, 0u, 0u, 0u, 0x7FFFu) == 0u);
         const ResolvedPlayerIdentityCandidate canonicalIdentity{
             .slot = 0,
             .controller = 0x1000u,
@@ -2685,7 +2941,59 @@ namespace
         CHECK(!ShouldReportPartialCoreIncident(true, 60u, 60u, true));
         CHECK(!ShouldReportPartialCoreIncident(false, 59u, 60u, true));
         CHECK(!ShouldReportPartialCoreIncident(false, 60u, 60u, false));
+
+        using esp::data::CoreRecoveryAction;
+        using esp::data::CoreRecoveryState;
+        using esp::data::ObserveCoreRecovery;
+        CoreRecoveryState recovery[64] = {};
+        int probes = 0;
+        int repairs = 0;
+        for (uint64_t timeUs = 1000; timeUs < 6000000; timeUs += 4000) {
+            for (int slot = 0; slot < 10; ++slot) {
+                const auto action = ObserveCoreRecovery(recovery[slot], 0x10000u + slot,
+                    0x100u + slot, slot != 4 && slot != 9, true, timeUs);
+                probes += action == CoreRecoveryAction::Probe;
+                repairs += action == CoreRecoveryAction::Repair;
+                if (action == CoreRecoveryAction::Repair)
+                    CHECK(timeUs < esp::data::kPlayerCommitCoreStaleHoldUs);
+            }
+        }
+        CHECK(probes == 2);
+        CHECK(repairs == 2);
+        CHECK(recovery[0].failures == 0);
+        CHECK(ObserveCoreRecovery(recovery[4], 0x10004u, 0x104u, true, true, 7000000u) ==
+            CoreRecoveryAction::None);
+        CHECK(recovery[4].failures == 0);
+        CHECK(recovery[4].stage == CoreRecoveryAction::None);
+        CHECK(ObserveCoreRecovery(recovery[9], 0x10009u, 0x20109u, false, true, 7000000u) ==
+            CoreRecoveryAction::None);
+        CHECK(recovery[9].failures == 1);
+        CHECK(recovery[9].sinceUs == 7000000u);
+        CHECK(ObserveCoreRecovery(recovery[9], 0x10009u, 0x20109u, false, true, 1u) ==
+            CoreRecoveryAction::None);
+        CHECK(recovery[9].sinceUs == 1u);
+        for (int sample = 0; sample < 20; ++sample)
+            CHECK(ObserveCoreRecovery(recovery[9], 0x10009u, 0x20109u, false, false,
+                1000000u + sample * 1000000u) == CoreRecoveryAction::None);
+        CHECK(ObserveCoreRecovery(recovery[9], 0, 0, false, true, 22000000u) ==
+            CoreRecoveryAction::None);
+        CHECK(recovery[9].failures == 0);
+
+        using esp::data::IsScenePositionRepairCoherent;
+        CHECK(IsScenePositionRepairCoherent(true, 0x10000, 0x10000, 10, 10, true, true, 100, 0));
+        CHECK(!IsScenePositionRepairCoherent(false, 0x10000, 0x10000, 10, 10, true, true, 100, 0));
+        CHECK(!IsScenePositionRepairCoherent(true, 0x10000, 0x20000, 10, 10, true, true, 100, 0));
+        CHECK(!IsScenePositionRepairCoherent(true, 0, 0, 10, 10, true, true, 100, 0));
+        CHECK(!IsScenePositionRepairCoherent(true, 0x10000, 0x10000, 10, 0x800A, true, true, 100, 0));
+        CHECK(!IsScenePositionRepairCoherent(true, 0x10000, 0x10000, 10, 10, false, true, 100, 0));
+        CHECK(!IsScenePositionRepairCoherent(true, 0x10000, 0x10000, 10, 10, true, false, 100, 0));
+        CHECK(!IsScenePositionRepairCoherent(true, 0x10000, 0x10000, 10, 10, true, true, 100, 255));
+        CHECK(!IsScenePositionRepairCoherent(true, 0x10000, 0x10000, 10, 10, true, true, 501, 0));
+        CHECK(IsScenePositionRepairCoherent(true, 0x10000, 0x10000, 10, 10, true, false, 0, 0));
+        CHECK(IsScenePositionRepairCoherent(true, 0x10000, 0x10000, 10, 10, true, false, 100, 2));
     }
+
+    #include "player_repair_replay.inl"
 
     void TestVisibilityPolicy()
     {
@@ -3488,9 +3796,42 @@ namespace
             kSmokeFallbackUs, deadlineUs) == 0u);
         CHECK(UpdateUtilityMarkerDeadline(true, false, std::nanf(""), 11500000u,
             kSmokeFallbackUs, deadlineUs) == 0u);
-        // Only a valid game-tick measurement may move an established bound later.
+        CHECK(UpdateUtilityMarkerDeadline(true, false, 2.0f, 12000000u,
+            kSmokeFallbackUs, deadlineUs, UtilityTimerSource::GameTick) == 0u);
+        deadlineUs = 0;
         CHECK(UpdateUtilityMarkerDeadline(true, false, 2.0f, 12000000u,
             kSmokeFallbackUs, deadlineUs, UtilityTimerSource::GameTick) == 14000000u);
+        deadlineUs = 0;
+        CHECK(UpdateUtilityMarkerDeadline(true, false, 10.0f, UINT64_MAX - 100,
+            kSmokeFallbackUs, deadlineUs) == UINT64_MAX);
+        CHECK(CalculateUtilityRemainingFromTick(6400, 7, std::nanf(""), 102) == -1);
+        CHECK(CalculateUtilityRemainingFromTick(6400, std::nanf(""), 1.0f / 64, 102) == -1);
+        CHECK(CalculateUtilityRemainingFromTick(6400, 7, 1.0f / 64, std::nanf("")) == -1);
+        for (uintptr_t offset = 0; offset < 4096; ++offset) {
+            const uintptr_t address = 0x10000 + offset;
+            const auto plan = PlanWorldVectorReads<Vector3, 64>(address);
+            size_t covered = 0;
+            for (const auto chunk : plan) {
+                if (!chunk.count) continue;
+                CHECK(chunk.first == covered && chunk.count <= 64 - covered);
+                const uintptr_t first = address + chunk.first * sizeof(Vector3);
+                const uintptr_t last = first + chunk.count * sizeof(Vector3) - 1;
+                CHECK(chunk.count == 1 || (first >> 12) == (last >> 12));
+                covered += chunk.count;
+            }
+            CHECK(covered == 64);
+        }
+        CHECK((PlanWorldVectorReads<Vector3, 64>(0)[0].count == 0));
+        CHECK((PlanWorldVectorReads<Vector3, 64>(UINTPTR_MAX)[0].count == 0));
+        Vector3 sampledPoints[64]{};
+        sampledPoints[0] = {100, 100, 10};
+        sampledPoints[5] = {500, 500, 10};
+        Vector3 sampledOrigin{};
+        CHECK(ResolveInfernoSampledOrigin(sampledPoints, uint64_t{1} << 5, 6, true, sampledOrigin,
+            [](const Vector3& value) { return value.x > 0; }));
+        CHECK(sampledOrigin.x == 500);
+        CHECK(!ResolveInfernoSampledOrigin(sampledPoints, uint64_t{1} << 5, 5, true, sampledOrigin,
+            [](const Vector3& value) { return value.x > 0; }));
 
         CHECK(ShouldHoldWorldMarkerOnReadGap(0x1000u, true, false,
             0u, false, 1000000u, 1350000u));
@@ -3632,6 +3973,10 @@ namespace
             true,
             true));
         CHECK(esp::data::kFirstWorldEntitySlot == 64);
+        CHECK(!ShouldRetainWorldEntity(false, false, true, false, true, true,
+            WorldEntityClass::DroppedWeapon, true, true));
+        CHECK(ShouldRetainWorldEntity(false, true, true, false, true, true,
+            WorldEntityClass::DroppedWeapon, true, true));
         CHECK(ShouldReadWorldItemDefinition(true, false, false));
         CHECK(ShouldReadWorldItemDefinition(false, true, false));
         CHECK(ShouldReadWorldItemDefinition(false, false, true));
@@ -5677,6 +6022,63 @@ namespace
         CHECK(!route.Read({}, {true, false}, 2002).available);
         CHECK(!route.Read({}, {true, false}, 2300).down);
         CHECK(route.Read({}, {true, true}, 2301).down);
+        route = {};
+        CHECK(route.Read({true, true}, {true, true}, 300000).down);
+        CHECK(!route.Read({}, {true, true}, 300100).available);
+        CHECK(route.Read({}, {true, true}, 300250).down);
+        CHECK(route.Read({}, {true, true}, 600000).down);
+        CHECK(!route.Read({}, {true, false}, 600001).down);
+        CHECK(route.Read({}, {true, true}, 600002).down);
+        route = {};
+        CHECK(route.Read({true, true}, {true, true}, 1000).down);
+        CHECK(!route.Read({true, false}, {true, true}, 1001).down);
+        CHECK(!route.Read({}, {true, true}, 1250).available);
+        CHECK(!route.Read({}, {true, true}, 1251).available);
+        CHECK(!route.Read({}, {true, true}, 600000).available);
+        CHECK(!route.Read({}, {true, false}, 600001).down);
+        CHECK(route.Read({}, {true, true}, 600002).down);
+        {
+            app::input::MouseActivationRouter handoff;
+            target::policy::ActivationState state;
+            const auto update = [&](app::input::KeyState hardware, app::input::KeyState primary, uint64_t now) {
+                const auto key = handoff.Read(hardware, primary, now);
+                return target::policy::UpdateActivation(state, true, 6, 1, key.down, key.available, false);
+            };
+            CHECK(update({true, true}, {true, true}, 1000));
+            CHECK(!update({}, {true, true}, 1100));
+            CHECK(update({}, {true, true}, 1250));
+            CHECK(update({}, {true, false}, 1251));
+            CHECK(!update({}, {true, true}, 1252));
+        }
+        {
+            app::input::KeyCaptureState capture;
+            app::input::ControlKeySnapshot keys = {};
+            keys[2][1] = {true, true};
+            keys[1][2] = {true, true};
+            keys[0][2] = {true, false};
+            capture.Begin(keys);
+            CHECK(capture.Observe(keys) == 0);
+            keys[2][1].down = false;
+            keys[0][2].down = true;
+            CHECK(capture.Observe(keys) == 2);
+            keys[0][2] = {};
+            CHECK(capture.Observe(keys) == 0);
+            keys[0][2] = {true, true};
+            CHECK(capture.Observe(keys) == 0);
+            keys[0][2].down = false;
+            CHECK(capture.Observe(keys) == 0);
+            keys[0][2].down = true;
+            CHECK(capture.Observe(keys) == 2);
+            for (int source = 0; source < 3; ++source) {
+                keys = {};
+                capture.Begin(keys);
+                keys[source][0x75] = {true, true};
+                CHECK(capture.Observe(keys) == 0x75);
+                CHECK(capture.Observe(keys) == 0);
+                keys[source][VK_ESCAPE] = {true, true};
+                CHECK(capture.Observe(keys) == VK_ESCAPE);
+            }
+        }
         // A delayed down sample must never mask physical UP. Test two full
         // Toggle cycles with primary input stuck down throughout.
         target::policy::ActivationState activation;
@@ -5807,6 +6209,14 @@ namespace
         CHECK(!app::input::IsNetworkInputFresh(1000, 1501));
         CHECK(!app::input::IsNetworkInputFresh(1000, 999));
         CHECK(!app::input::IsNetworkInputFresh(0, 1));
+        CHECK(app::input::IsNetworkEventInputAvailable(1000, 7000, 7400, 7500));
+        CHECK(app::input::IsNetworkEventInputAvailable(1000, 3500, 7000, 7500));
+        CHECK(!app::input::IsNetworkEventInputAvailable(1000, 3499, 7000, 7500));
+        CHECK(!app::input::IsNetworkEventInputAvailable(1000, 7000, 6999, 7500));
+        CHECK(!app::input::IsNetworkEventInputAvailable(0, 7000, 7400, 7500));
+        CHECK(!app::input::IsNetworkEventInputAvailable(7501, 7000, 7400, 7500));
+        CHECK(!app::input::IsNetworkEventInputAvailable(1000, 7501, 7400, 7500));
+        CHECK(!app::input::IsNetworkEventInputAvailable(1000, 7000, 7501, 7500));
         CHECK(app::input::SelectKeyboardActivationKeyState({true, false}, {true, true}).down);
         CHECK(app::input::SelectKeyboardActivationKeyState({true, true}, {true, false}).down);
         CHECK(!app::input::SelectKeyboardActivationKeyState({true, false}, {true, false}).down);
@@ -6779,9 +7189,10 @@ namespace
         monitorButtons.store(0x10);
         waitForInput(0x06, true, true);
         monitorSilent.store(true);
-        waitForInput(0x06, false, false);
+        std::this_thread::sleep_for(std::chrono::milliseconds(750));
+        waitForInput(0x06, true, true);
         CHECK(app::input::GetDeviceStatus().state == ConnectionState::Connected);
-        CHECK(!app::input::IsHardwareKeyDown(0x06));
+        CHECK(app::input::IsHardwareKeyDown(0x06));
         monitorButtons.store(0); monitorSilent.store(false);
         waitForInput(0x06, true, false);
         CHECK(app::input::RequestDisconnect());
@@ -7226,9 +7637,123 @@ void TestEspPresentation()
 }
 
 #include "audit_regressions.inl"
+#include "observer_inferno_regressions.inl"
+#include "world_read_regressions.inl"
+#include "world_pipeline_replay.inl"
+#include "snapshot_consumer_replay.inl"
 
 int main(int argc, char** argv)
 {
+    if (argc == 2 && std::strcmp(argv[1], "--world-only") == 0) {
+        TestWorldIdentityReplay();
+        TestWorldPipelineReplay();
+        TestWorldRealtimeContinuity();
+        TestWorldPartialAndReuseContinuity();
+        TestWorldRoundAndFireContinuity();
+        TestWorldStabilityGuards();
+        TestWorldFaultStress();
+        std::cout << "World replay failures=" << g_failedChecks << '\n';
+        return g_failedChecks == 0 ? 0 : 1;
+    }
+    TestSnapshotConsumers();
+    {
+        uint16_t weapon = 0; int ammo = -1; uint64_t stamp = 0;
+        esp::data::UpdateWeaponPresentation(7, 30, false, 1000000, weapon, ammo, stamp);
+        CHECK(weapon == 7 && ammo == 30 && stamp == 1000000);
+        esp::data::UpdateWeaponPresentation(0, -1, false, 1100000, weapon, ammo, stamp);
+        CHECK(weapon == 7 && ammo == -1 && stamp == 1000000);
+        esp::data::UpdateWeaponPresentation(0, -1, false, 1250001, weapon, ammo, stamp);
+        CHECK(weapon == 0 && ammo == -1 && stamp == 0);
+        esp::data::UpdateWeaponPresentation(7, 30, false, 1300000, weapon, ammo, stamp);
+        esp::data::UpdateWeaponPresentation(7, 30, true, 1300001, weapon, ammo, stamp);
+        CHECK(weapon == 0 && ammo == -1 && stamp == 0);
+        esp::data::UpdateWeaponPresentation(7, 30, false, 1300000, weapon, ammo, stamp);
+        esp::data::UpdateWeaponPresentation(0, -1, false, 1200000, weapon, ammo, stamp);
+        CHECK(weapon == 0 && stamp == 0);
+    }
+    {
+        app::platform::GraphicsRecovery recovery;
+        CHECK(!recovery.Pending() && !recovery.Ready(0));
+        recovery.Request();
+        CHECK(recovery.Ready(0));
+        recovery.Failed(1000);
+        CHECK(!recovery.Ready(1099) && recovery.Ready(1100));
+        recovery.Request();
+        CHECK(!recovery.Ready(1099));
+        recovery.Failed(1100);
+        CHECK(!recovery.Ready(1299) && recovery.Ready(1300));
+        for (int attempt = 0; attempt < 10; ++attempt)
+            recovery.Failed(2000);
+        CHECK(!recovery.Ready(3999) && recovery.Ready(4000));
+        recovery.Recovered();
+        CHECK(!recovery.Pending());
+        recovery.Request();
+        recovery.Failed(5000);
+        CHECK(recovery.Ready(5100));
+    }
+    TestWorldIdentityReplay();
+    TestWorldPipelineReplay();
+    TestWorldRealtimeContinuity();
+    TestWorldPartialAndReuseContinuity();
+    TestWorldRoundAndFireContinuity();
+    TestWorldStabilityGuards();
+    TestWorldFaultStress();
+    TestObserverAndInfernoReads();
+    {
+        using namespace app::display;
+        const auto close = [](float a, float b) { return std::fabs(a - b) < 0.01f; };
+        CHECK(PlaceOverlayLabel(500, 300, 100) == 0);
+        CHECK(PlaceOverlayLabel(-500, 30, 100) == 2);
+        CHECK(PlaceOverlayLabel(500, 30, 100) == 68);
+        CHECK(PlaceOverlayLabel(500, 0, 16, 16) == 8);
+        CHECK(PlaceOverlayLabel(NAN, 30, 100) == 2);
+        CHECK(PlaceOverlayLabel(10, 10, NAN) == 0);
+        MappingSettings s;
+        const auto native = Resolve(s, 1920, 1080);
+        CHECK(native.x == 0 && native.y == 0 && native.width == 1920 && native.height == 1080);
+        const auto baseline = RadarRect(native, {}, 290);
+        CHECK(close(baseline.x, 5) && close(baseline.y, 7) && close(baseline.width, 290) && close(baseline.height, 290));
+        s.gameWidth = 1280; s.gameHeight = 960;
+        const auto stretched = Resolve(s, 1920, 1080);
+        const auto stretchedRadar = RadarRect(stretched, {}, 290);
+        CHECK(close(stretchedRadar.width, 386.6667f) && close(stretchedRadar.height, 290));
+        CHECK(close(stretchedRadar.x, 6.6667f));
+        s.scaling = 1;
+        const auto bars = Resolve(s, 1920, 1080);
+        CHECK(close(bars.x, 240) && close(bars.width, 1440) && close(bars.height, 1080));
+        CHECK(close(RadarRect(bars, {}, 290).width, 290));
+        CHECK(close(bars.x + bars.width * 0.5f, 960));
+        s.gameWidth = 3440; s.gameHeight = 1440;
+        const auto wide = Resolve(s, 1920, 1080);
+        CHECK(close(wide.width, 1920) && wide.y > 0 && wide.x == 0);
+        s.autoAspect = true;
+        const auto automatic = Resolve(s, 1920, 1080, 4.0f/3.0f);
+        CHECK(automatic.detectedAspect && close(automatic.x, 240));
+        CHECK(!Resolve(s, 1920, 1080, 0).detectedAspect);
+        float matrix[4][4] = {};
+        matrix[0][1] = -0.75f; matrix[1][2] = 1;
+        CHECK(close(CameraAspect(matrix), 4.0f/3.0f));
+        matrix[0][1] = -1.5f; matrix[1][2] = 2;
+        CHECK(close(CameraAspect(matrix), 4.0f/3.0f));
+        matrix[1][2] = std::numeric_limits<float>::quiet_NaN();
+        CHECK(CameraAspect(matrix) == 0);
+        s.scaling = 2; s.x = 0.1f; s.y = 0.2f; s.width = 0.8f; s.height = 0.7f;
+        const auto custom = Resolve(s, 1920, 1080);
+        CHECK(close(custom.x, 192) && close(custom.y, 216) && close(custom.width, 1536) && close(custom.height, 756));
+        s.x = 8; s.width = -3; s.height = std::numeric_limits<float>::infinity();
+        const auto invalid = Resolve(s, 1920, 1080);
+        CHECK(invalid.width > 0 && invalid.height > 0 && invalid.x + invalid.width <= 1920.01f);
+        HudSettings hud; hud.manual = true; hud.x = 8000; hud.y = 8000; hud.width = 8000;
+        const auto manual = RadarRect(bars, hud, 290);
+        CHECK(manual.x >= 0 && manual.x + manual.width <= bars.width);
+        CHECK(manual.y + manual.height <= bars.height);
+        float x = 10000, y = -10000;
+        ClampRadarPoint(stretchedRadar, true, 10, x, y);
+        const float nx = (x - stretchedRadar.x - stretchedRadar.width/2) / (stretchedRadar.width/2-10);
+        const float ny = (y - stretchedRadar.y - stretchedRadar.height/2) / (stretchedRadar.height/2-10);
+        CHECK(close(nx*nx + ny*ny, 1));
+        CHECK(close(RadarRect(Resolve({}, 3840, 2160), {}, 290).width, 580));
+    }
     TestEspPresentation();
     if (argc==2 && std::string_view(argv[1])=="--esp-presentation") {
         if (g_failedChecks) return 1;
@@ -7239,6 +7764,9 @@ int main(int argc, char** argv)
         TestKeyboardReadPolicy();
         TestStartupOffsets();
         TestStartupOffsetRecovery();
+        TestStartupProcessScheduling();
+        TestStartupAddressSpaceProbe();
+        TestProcessIdentityPolicy();
         TestSchemaScopeStartup();
         TestMemoryValidation();
         TestRuntimeResolverPolicy();
@@ -7254,6 +7782,8 @@ int main(int argc, char** argv)
     TestKeyboardReadPolicy();
     TestStartupOffsets();
     TestStartupOffsetRecovery();
+    TestStartupProcessScheduling();
+    TestStartupAddressSpaceProbe();
     TestSchemaScopeStartup();
     TestDmaReadCompletionContracts();
     TestTrim();
@@ -7280,6 +7810,7 @@ int main(int argc, char** argv)
     TestPlayerFlagPolicy();
     TestPlayerHierarchyPolicy();
     TestPlayerRepairPolicy();
+    TestPlayerRepairReplay();
     TestVisibilityPolicy();
     TestBoneReadPolicy();
     TestPopulationWatchdogPolicy();

@@ -39,7 +39,7 @@ namespace
 
     std::string s_activeSettings;
     std::string s_keyCaptureId;
-    std::array<uint8_t, 256> s_keySnapshot = {};
+    app::input::KeyCaptureState s_keyCapture;
     int s_weaponProfileCategory = 1;
     bool s_followWeaponProfile = false;
     bool s_weaponProfileAvailable = false;
@@ -237,8 +237,10 @@ namespace
 
         ui::widgets::EndControlRow(row);
         ImGui::PopID();
-        if (settingsClicked)
+        if (settingsClicked) {
+            ui::tabs::TargetTab::CancelKeyCapture();
             s_activeSettings = selected ? "" : id;
+        }
         return settingsClicked;
     }
 
@@ -257,31 +259,28 @@ namespace
             false,
             225);
         ImGui::SetCursorScreenPos(ImVec2(row.max.x - 162.0f, row.min.y + 7.0f));
-        const bool capturing = s_keyCaptureId == id;
+        bool capturing = s_keyCaptureId == id;
         const std::string current = capturing
             ? KEVQ_TR("Press a key...")
             : key_names::ToDisplayName(*key);
-        if (ImGui::Button(current.c_str(), ImVec2(150.0f, 28.0f))) {
+        const std::string buttonLabel = current + "###capture";
+        if (ImGui::Button(buttonLabel.c_str(), ImVec2(150.0f, 28.0f))) {
             s_keyCaptureId = id;
-            g::targetKeyCaptureUntilMs.store(GetTickCount64() + 500, std::memory_order_release);
-            for (int vk = 0; vk < 256; ++vk) {
-                s_keySnapshot[vk] =
-                    app::input::IsControlKeyDown(vk) ? 1u : 0u;
-            }
+            g::targetKeyCaptureUntilMs.store(GetTickCount64() + 15000, std::memory_order_release);
+            s_keyCapture.Begin(app::input::ReadControlKeySnapshot());
+            capturing = true;
         }
+#if defined(KEVQ_UI_SMOKE_TESTS)
+        s_testTooltipRows.push_back({id, ImVec4(ImGui::GetItemRectMin().x, ImGui::GetItemRectMin().y,
+            ImGui::GetItemRectMax().x, ImGui::GetItemRectMax().y), false});
+#endif
         if (capturing) {
-            g::targetKeyCaptureUntilMs.store(GetTickCount64() + 500, std::memory_order_release);
-            for (int vk = 1; vk <= 0xFE; ++vk) {
-                const bool down = app::input::IsControlKeyDown(vk);
-                const bool wasDown = s_keySnapshot[vk] != 0;
-                s_keySnapshot[vk] = down ? 1u : 0u;
-                if (!down || wasDown)
-                    continue;
+            const int vk = s_keyCapture.Observe(app::input::ReadControlKeySnapshot());
+            if (vk != 0) {
                 if (vk != VK_ESCAPE)
                     *key = vk;
                 s_keyCaptureId.clear();
                 g::targetKeyCaptureUntilMs.store(0, std::memory_order_release);
-                break;
             }
         }
         ui::widgets::EndControlRow(row);
@@ -415,6 +414,12 @@ namespace
         const bool aimPressed = inputReady && aimKey.available && aimKey.down;
 
         ImGui::Separator();
+        ImGui::TextDisabled("Move #%llu | queue %.2f ms | feedback P50/P95/P99 %.2f/%.2f/%.2f ms | samples %llu",
+            static_cast<unsigned long long>(runtime.outputFeedback.token), runtime.outputFeedback.queueAgeUs / 1000.0,
+            runtime.outputFeedback.latencyP50Us / 1000.0, runtime.outputFeedback.latencyP95Us / 1000.0,
+            runtime.outputFeedback.latencyP99Us / 1000.0, static_cast<unsigned long long>(runtime.outputFeedback.latencySamples));
+        ImGui::TextDisabled("Manual intent estimated=%u | assistance gain %.2f",
+            runtime.aimMove.inputIntentEstimated, runtime.aimMove.assistanceGain);
         ImGui::Dummy(ImVec2(0.0f, 3.0f));
         const ImVec4 readyColor(0.28f, 0.85f, 0.42f, 1.0f);
         const ImVec4 waitingColor(0.95f, 0.72f, 0.25f, 1.0f);
@@ -484,12 +489,17 @@ namespace
             const auto sampleAgeMs = input.physicalInputUpdatedAtMs != 0 &&
                 nowMs >= input.physicalInputUpdatedAtMs
                 ? static_cast<long long>(nowMs - input.physicalInputUpdatedAtMs) : -1LL;
+            const auto linkAgeMs = input.physicalInputValidatedAtMs != 0 &&
+                nowMs >= input.physicalInputValidatedAtMs
+                ? static_cast<long long>(nowMs - input.physicalInputValidatedAtMs) : -1LL;
+            const auto pollAgeMs = input.inputMonitorPollAtMs != 0 && nowMs >= input.inputMonitorPollAtMs
+                ? static_cast<long long>(nowMs - input.inputMonitorPollAtMs) : -1LL;
             std::snprintf(text, sizeof(text),
                 "build=%s version=%s device=%s state=%u error=%u system=%u endpoint=%s\n"
-                "primary ready=%u pid=%u failures=%u samples=%llu resolving=%u attempts=%llu unreadable_pages=%llu\n"
-                "aim key=%d raw=%u/%u device=%u/%u primary=%u/%u active=%u\n"
-                "trigger key=%d raw=%u/%u device=%u/%u primary=%u/%u active=%u\n"
-                "monitor port=%u packets=%llu rejected=%llu bytes=%u error=%u age_ms=%lld serial_rx_bytes=%llu\n"
+                "primary ready=%u pid=%u failures=%u samples=%llu resolving=%u attempts=%llu unreadable_pages=%llu fresh=%u age_ms=%lld\n"
+                "aim key=%d raw=%u/%u device=%u/%u primary=%u/%u active=%u mode=%s\n"
+                "trigger key=%d raw=%u/%u device=%u/%u primary=%u/%u active=%u mode=%s\n"
+                "monitor port=%u packets=%llu rejected=%llu bytes=%u error=%u age_ms=%lld serial_rx_bytes=%llu events=%u link_age_ms=%lld poll_age_ms=%lld\n"
                 "moves queued=%llu batches=%llu phase=%u menu=%u target=%d fire=%s pause=%s\n"
                 "motion pending=%u in_flight=%u probe=%u replaced=%llu cancelled=%llu expired=%llu queue_age_us=%llu\n"
                 "aim_motion=%s view_age_us=%lld ttl_us=%llu trigger_motion=%s view_age_us=%lld ttl_us=%llu\n"
@@ -499,7 +509,9 @@ namespace
                 "aim_point=%.2f/%.2f/%.2f hitbox=%d lead_z=%.2f eye_z=%.2f shots=%d raw_punch=%.4f/%.4f\n"
                 "trigger_recoil weapon=%u available=%u sample_age_us=%lld step_deg=%.4f/%.4f scale=%.3f source=predictable_base_angle\n"
                 "trigger_point=%.2f/%.2f/%.2f hitbox=%d lead_z=%.2f eye_z=%.2f shots=%d raw_punch=%.4f/%.4f\n"
-                "feedback pending=%u age_us=%lld expected_deg=%.4f/%.4f observed_deg=%.4f/%.4f timeouts=%llu\n"
+                "feedback pending=%u age_us=%lld expected_deg=%.4f/%.4f observed_deg=%.4f/%.4f timeouts=%llu rebases=%llu\n"
+                "delivery token=%llu queue_us=%llu completed_us=%llu latency_samples=%llu p50_us=%llu p95_us=%llu p99_us=%llu\n"
+                "manual_intent estimated=%u gain=%.3f fov_px=%.2f/%.2f\n"
                 "target_work last_us=%llu peak_us=%llu samples=%llu over_budget=%llu budget_us=7812 window_us=%llu\n",
                 app::build_info::DisplayStamp().c_str(), app::build_info::VersionTag().c_str(),
                 app::input::DeviceKindLabel(input.selected), static_cast<unsigned>(input.state),
@@ -508,16 +520,20 @@ namespace
                 static_cast<unsigned long long>(primaryKeyboard.publishGeneration),
                 primaryKeyboard.resolving, static_cast<unsigned long long>(primaryKeyboard.resolveAttempts),
                 static_cast<unsigned long long>(primaryKeyboard.unreadablePages),
+                primaryKeyboard.sampleFresh, static_cast<long long>(primaryKeyboard.sampleAgeMs),
                 g::targetAimKey, aimKey.available, aimKey.down, aimDevice.available,
                 aimDevice.down, aimPrimary.available, aimPrimary.down, runtime.aimKeyDown,
+                target::policy::SanitizeActivationMode(g::targetAimActivationMode) == 1 ? "Toggle" : "Hold",
                 g::targetTriggerKey, triggerKey.available, triggerKey.down, triggerDevice.available,
                 triggerDevice.down, triggerPrimary.available, triggerPrimary.down, runtime.triggerKeyDown,
+                target::policy::SanitizeActivationMode(g::targetTriggerActivationMode) == 1 ? "Toggle" : "Hold",
                 static_cast<unsigned>(input.inputMonitorPort),
                 static_cast<unsigned long long>(input.inputMonitorPackets),
                 static_cast<unsigned long long>(input.inputMonitorRejectedPackets),
                 input.inputMonitorLastPacketBytes, input.inputMonitorError,
                 sampleAgeMs,
                 static_cast<unsigned long long>(input.inputMonitorReceivedBytes),
+                app::input::IsNetworkDeviceKind(input.selected), linkAgeMs, pollAgeMs,
                 static_cast<unsigned long long>(input.moveRequests),
                 static_cast<unsigned long long>(input.moveCompletions),
                 static_cast<unsigned>(runtime.phase), g::menuOpen.load(std::memory_order_relaxed),
@@ -557,6 +573,16 @@ namespace
                 runtime.outputFeedback.expectedPitch, runtime.outputFeedback.expectedYaw,
                 runtime.outputFeedback.observedPitch, runtime.outputFeedback.observedYaw,
                 static_cast<unsigned long long>(runtime.outputFeedback.timeouts),
+                static_cast<unsigned long long>(runtime.outputFeedback.rebases),
+                static_cast<unsigned long long>(runtime.outputFeedback.token),
+                static_cast<unsigned long long>(runtime.outputFeedback.queueAgeUs),
+                static_cast<unsigned long long>(runtime.outputFeedback.sentAtUs),
+                static_cast<unsigned long long>(runtime.outputFeedback.latencySamples),
+                static_cast<unsigned long long>(runtime.outputFeedback.latencyP50Us),
+                static_cast<unsigned long long>(runtime.outputFeedback.latencyP95Us),
+                static_cast<unsigned long long>(runtime.outputFeedback.latencyP99Us),
+                runtime.aimMove.inputIntentEstimated, runtime.aimMove.assistanceGain,
+                runtime.fovRadiusX, runtime.fovRadiusY,
                 static_cast<unsigned long long>(runtime.workUs),
                 static_cast<unsigned long long>(runtime.recentPeakWorkUs),
                 static_cast<unsigned long long>(runtime.workSamples),
@@ -805,7 +831,10 @@ namespace ui::tabs::testing {
     void OpenTargetTuning(bool open) { s_testTuningOpen = open; }
     void OpenTargetPage(int page) { s_testSettingsPage = page; }
     void FollowTargetWeapon(bool follow) { s_followWeaponProfile = follow; }
-    void OpenTargetSettings(const char* id) { s_activeSettings = id; }
+    void OpenTargetSettings(const char* id) {
+        if (s_activeSettings != id) TargetTab::CancelKeyCapture();
+        s_activeSettings = id;
+    }
     bool TargetTooltipRow(const char* id, ImVec4& rectangle, bool& disabled)
     {
         for (const auto& row : s_testTooltipRows) {
@@ -823,6 +852,12 @@ namespace ui::tabs::testing {
 const char* ui::tabs::TargetTab::Label() const
 {
     return "Target";
+}
+
+void ui::tabs::TargetTab::CancelKeyCapture() noexcept
+{
+    s_keyCaptureId.clear();
+    g::targetKeyCaptureUntilMs.store(0, std::memory_order_release);
 }
 
 void ui::tabs::TargetTab::Render(MenuState& state, IStatusSink& statusSink)
@@ -904,17 +939,23 @@ void ui::tabs::TargetTab::Render(MenuState& state, IStatusSink& statusSink)
     ImGui::EndChild();
 
     RenderSettingsWindow("target_fov", "FOV", [] {
+        static constexpr const char* units[] = {"Pixels", "Angle"};
+        RenderChoiceRow("fov_unit", "FOV unit", g::targetSettings.fovUnit, units, 2);
         ui::widgets::ToggleRow("fov_per_weapon", "Weapon-specific FOV", &g::targetFovPerWeapon);
         SetControlRowTooltip("fov_per_weapon", "Radius always limits aim selection. The FOV circle switch only changes drawing; Target lock cannot extend the radius.");
         if (g::targetFovPerWeapon) {
             RenderWeaponProfileRow("fov_weapon_profile");
             ImGui::BeginDisabled(s_followWeaponProfile && !s_weaponProfileAvailable);
-            ui::widgets::SliderFloatRow("profile_fov_radius", "FOV Radius",
-                &g::targetWeaponProfiles[s_weaponProfileCategory].fovRadius,
+            auto& profile = g::targetWeaponProfiles[s_weaponProfileCategory];
+            if (g::targetSettings.fovUnit == 1)
+                ui::widgets::SliderFloatRow("profile_fov_angle", "Angular radius", &profile.fovDegrees, 0.25f, 30.0f, "%.2f deg");
+            else ui::widgets::SliderFloatRow("profile_fov_radius", "FOV Radius", &profile.fovRadius,
                 target::policy::kMinimumFovRadius, target::policy::kMaximumFovRadius, "%.0f px");
             ImGui::EndDisabled();
         } else {
-            ui::widgets::SliderFloatRow("global_fov_radius", "FOV Radius", &g::targetFovRadius,
+            if (g::targetSettings.fovUnit == 1)
+                ui::widgets::SliderFloatRow("global_fov_angle", "Angular radius", &g::targetSettings.fovDegrees, 0.25f, 30.0f, "%.2f deg");
+            else ui::widgets::SliderFloatRow("global_fov_radius", "FOV Radius", &g::targetFovRadius,
                 target::policy::kMinimumFovRadius, target::policy::kMaximumFovRadius, "%.0f px");
         }
         ui::widgets::ColorRow(
@@ -949,8 +990,10 @@ void ui::tabs::TargetTab::Render(MenuState& state, IStatusSink& statusSink)
                         profile.aimMotionStyle = style;
                         profile.aimWindMouse = style == 2;
                     }
-                    ui::widgets::SliderFloatRow("aim_smoothing", "Smoothing", &profile.aimSmoothing,
-                        target::policy::kMinimumSmoothing, target::policy::kMaximumSmoothing, "%.1f");
+                    float responseMs = target::policy::SmoothingResponseMs(profile.aimSmoothing);
+                    if (ui::widgets::SliderFloatRow("aim_response", "Response time", &responseMs, 0.0f,
+                        target::policy::SmoothingResponseMs(target::policy::kMaximumSmoothing), "%.0f ms"))
+                        profile.aimSmoothing = target::policy::SmoothingFromResponseMs(responseMs);
                     ui::widgets::ToggleRow("aim_adaptive", "Adaptive smoothing", &profile.aimAdaptiveSmoothing);
                     if (style == 2 && TuningHeader("Wind tuning")) {
                         ui::widgets::SliderFloatRow("wind_gravity", "Wind gravity", &profile.aimWindGravity, 4.0f, 40.0f, "%.1f");
@@ -975,6 +1018,7 @@ void ui::tabs::TargetTab::Render(MenuState& state, IStatusSink& statusSink)
                     if (profile.aimSoftAssist) {
                         ui::widgets::SliderFloatRow("aim_assist_strength", "Assistance strength", &profile.aimAssistStrength, 0.0f, 100.0f, "%.0f%%");
                         if (TuningHeader("Assistance tuning")) {
+                            ui::widgets::ToggleRow("aim_input_intent", "Respect manual input", &profile.aimRespectInput);
                             ui::widgets::SliderFloatRow("aim_assist_speed", "Assistance speed", &profile.aimAssistMaxSpeed, 1.0f, 180.0f, "%.0f deg/s");
                             if (target::policy::SanitizeAimBone(g::targetAimBone) >= 4)
                                 ui::widgets::SliderFloatRow("aim_assist_deadzone", "Resting radius", &profile.aimAssistDeadzone, 0.0f, 1.0f, "%.2f deg");
@@ -982,6 +1026,13 @@ void ui::tabs::TargetTab::Render(MenuState& state, IStatusSink& statusSink)
                     }
                 });
             } else if (s_aimPage == 1) {
+                RenderProfileControls([&] {
+                    ui::widgets::ToggleRow("aim_trajectory", "Trajectory limits", &profile.aimTrajectoryControl);
+                    if (profile.aimTrajectoryControl && TuningHeader("Trajectory tuning")) {
+                        ui::widgets::SliderFloatRow("aim_acceleration", "Acceleration limit", &profile.aimMaxAcceleration, 50.0f, 5000.0f, "%.0f deg/s2");
+                        ui::widgets::SliderFloatRow("aim_jerk", "Jerk limit", &profile.aimMaxJerk, 1000.0f, 200000.0f, "%.0f deg/s3");
+                    }
+                });
                 ui::widgets::ToggleRow("aim_recoil_control", "Recoil Control", &g::targetAimRecoilControl);
                 if (g::targetAimRecoilControl) {
                     RenderProfileControls([&] {
@@ -1040,8 +1091,10 @@ void ui::tabs::TargetTab::Render(MenuState& state, IStatusSink& statusSink)
                 });
             } else if (s_triggerPage == 1 && g::targetTriggerAimAssist) {
                 RenderProfileControls([&] {
-                    ui::widgets::SliderFloatRow("trigger_aim_smoothing", "Smoothing", &profile.triggerSmoothing,
-                        target::policy::kMinimumSmoothing, target::policy::kMaximumSmoothing, "%.1f");
+                    float responseMs = target::policy::SmoothingResponseMs(profile.triggerSmoothing);
+                    if (ui::widgets::SliderFloatRow("trigger_response", "Response time", &responseMs, 0.0f,
+                        target::policy::SmoothingResponseMs(target::policy::kMaximumSmoothing), "%.0f ms"))
+                        profile.triggerSmoothing = target::policy::SmoothingFromResponseMs(responseMs);
                     ui::widgets::ToggleRow("trigger_adaptive", "Adaptive smoothing", &profile.triggerAdaptiveSmoothing);
                 });
                 int style = g::targetTriggerAimHumanization ? 1 : 0;
